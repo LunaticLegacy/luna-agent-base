@@ -23,6 +23,7 @@ class AgentRoundResult:
     assistant_message: Optional[str] = None
     raw_response: Any = None
     additional_prompt: Optional[str] = None
+    cognitive_graph_snapshot: Optional[Dict[str, Any]] = None
 
 
 @dataclass

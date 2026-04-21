@@ -6,6 +6,15 @@ from typing import Any, Dict, List, Optional
 
 from modules.llm_fetcher import LLMContext, LLMFetcher
 
+from .cognitive import (
+    CognitiveGraph,
+    CognitiveNode,
+    CognitiveEdge,
+    CognitiveNodeType,
+    CognitiveRelationType,
+    extract_cognitive_graph_from_text,
+    strip_cognitive_graph_tags,
+)
 from .results import AgentContextSnapshot, AgentRoundResult
 
 
@@ -29,6 +38,7 @@ class Agent:
         tools: Optional[List[Any]] = None,
         core: Optional[Any] = None,
         max_tool_rounds: int = 5,
+        cognitive_graph: Optional[CognitiveGraph] = None,
     ) -> None:
         self.agent_id = agent_id
         self.name = name or agent_id
@@ -38,6 +48,7 @@ class Agent:
         self.tools = tools or []
         self.core = core
         self.max_tool_rounds = max_tool_rounds
+        self.cognitive_graph = cognitive_graph or CognitiveGraph(graph_id=f"agent_{agent_id}")
 
     def append_context(self, role: str, content: str) -> None:
         """Append one message into the agent-local context."""
@@ -192,6 +203,7 @@ class Agent:
             for tc in tool_calls:
                 result = await self._execute_tool_call(tc)
                 self.append_context("tool", result)
+                self._record_tool_call_in_cognitive_graph(tc, result)
 
             # Refresh prev_messages for the next LLM call
             prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages[:-1]]
@@ -202,10 +214,89 @@ class Agent:
         self._context.metadata["last_round"] = rounds
         self._context.metadata["turns"] = len(self._context.messages)
 
+        # Extract cognitive graph from the final assistant message
+        cg = extract_cognitive_graph_from_text(assistant_message, source_agent_id=self.agent_id)
+        if cg is not None:
+            for node in cg.nodes.values():
+                if not node.source:
+                    node.source = self.agent_id
+                self.cognitive_graph.add_node(node)
+            for edge in cg.edges:
+                self.cognitive_graph.add_edge(edge)
+            assistant_message = strip_cognitive_graph_tags(assistant_message)
+
         return AgentRoundResult(
             rounds=rounds,
             user_message=user_message,
             assistant_message=assistant_message,
             raw_response=raw_response,
             additional_prompt=additional_prompt,
+            cognitive_graph_snapshot=self.cognitive_graph.snapshot(),
         )
+
+    def _record_tool_call_in_cognitive_graph(self, tool_call: Any, result: str) -> None:
+        """Auto-graphify a tool call and its result into the agent's cognitive graph."""
+        # Extract tool name and arguments
+        if hasattr(tool_call, "function"):
+            tool_name = getattr(tool_call.function, "name", "unknown")
+            arguments_str = getattr(tool_call.function, "arguments", "{}")
+        elif isinstance(tool_call, dict):
+            tool_name = tool_call.get("function", {}).get("name", "unknown")
+            arguments_str = tool_call.get("function", {}).get("arguments", "{}")
+        else:
+            return
+
+        try:
+            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+        except Exception:
+            arguments = {}
+
+        query = arguments.get("query", "") or arguments.get("input", "") or str(arguments)[:120]
+
+        # Create TOOL_RESULT node
+        tool_node = CognitiveNode(
+            node_type=CognitiveNodeType.TOOL_RESULT,
+            content=f"Tool '{tool_name}' called with: {query}",
+            source=self.agent_id,
+            metadata={"tool_name": tool_name, "arguments": arguments},
+        )
+        self.cognitive_graph.add_node(tool_node)
+
+        # Create EVIDENCE node from result (truncate for brevity)
+        result_summary = result[:500] if len(result) > 500 else result
+        evidence_node = CognitiveNode(
+            node_type=CognitiveNodeType.EVIDENCE,
+            content=f"Result from {tool_name}: {result_summary}",
+            source=self.agent_id,
+            metadata={"tool_name": tool_name, "result_truncated": len(result) > 500},
+        )
+        self.cognitive_graph.add_node(evidence_node)
+
+        # Link: tool call leads_to evidence
+        self.cognitive_graph.add_edge(
+            CognitiveEdge(
+                source_id=tool_node.node_id,
+                target_id=evidence_node.node_id,
+                relation=CognitiveRelationType.LEADS_TO,
+                strength=1.0,
+                description=f"Output of {tool_name}",
+            )
+        )
+
+        # Link latest evidence to any existing REASONING node (heuristic: connect to most recent)
+        recent_reasoning = [
+            n for n in self.cognitive_graph.nodes.values()
+            if n.node_type == CognitiveNodeType.REASONING
+        ]
+        if recent_reasoning:
+            # Sort by created_at descending (newest first)
+            recent_reasoning.sort(key=lambda n: n.created_at, reverse=True)
+            self.cognitive_graph.add_edge(
+                CognitiveEdge(
+                    source_id=evidence_node.node_id,
+                    target_id=recent_reasoning[0].node_id,
+                    relation=CognitiveRelationType.EVIDENCE_FOR,
+                    strength=0.9,
+                    description="Supports recent reasoning",
+                )
+            )

@@ -244,6 +244,7 @@ class RunRegistry:
         graph: ExecutionGraph,
         initial_payload: Any,
         rounds: int = 0,
+        meta_mode: bool = False,
     ) -> RunRecord:
         """Create a run record and execute the graph in a daemon thread."""
         run_id = uuid.uuid4().hex
@@ -260,6 +261,7 @@ class RunRegistry:
                 "graph": graph,
                 "initial_payload": initial_payload,
                 "rounds": rounds,
+                "meta_mode": meta_mode,
             },
             daemon=True,
             name=f"angelus-run-{run_id[:8]}",
@@ -288,16 +290,30 @@ class RunRegistry:
         graph: ExecutionGraph,
         initial_payload: Any,
         rounds: int,
+        meta_mode: bool = False,
     ) -> None:
         async def _execute() -> None:
-            await graph.run(
-                core,
-                initial_payload,
-                rounds=rounds,
-                run_id=record.run_id,
-                swarm_name=swarm_name,
-                event_sink=record.append_event,
-            )
+            if meta_mode:
+                from core.meta_executor import MetaExecutor
+                meta = MetaExecutor(max_iterations=5)
+                await meta.run(
+                    graph,
+                    core,
+                    initial_payload,
+                    rounds=rounds,
+                    run_id=record.run_id,
+                    swarm_name=swarm_name,
+                    event_sink=record.append_event,
+                )
+            else:
+                await graph.run(
+                    core,
+                    initial_payload,
+                    rounds=rounds,
+                    run_id=record.run_id,
+                    swarm_name=swarm_name,
+                    event_sink=record.append_event,
+                )
 
         try:
             asyncio.run(_execute())

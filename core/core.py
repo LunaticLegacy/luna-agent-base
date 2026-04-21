@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from modules.llm_fetcher import LLMFetcher
 
 from .agent import Agent
+from .cognitive import CognitiveGraph, merge_cognitive_graphs
 from .config import AgentConfig
 from .runtime_info import RuntimeInfoManager
 from .toodefl import ToolDefinition
@@ -32,6 +33,7 @@ class Core:
         self.skills: Dict[str, SkillAsset] = {}
         self._execution_graph: Optional["ExecutionGraph"] = None
         self._runtime_info: Optional[RuntimeInfoManager] = None
+        self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
 
     async def init(self) -> None:
         """Initialize runtime resources and validate the current graph."""
@@ -56,6 +58,7 @@ class Core:
         name: Optional[str] = None,
         llm_handler: Optional[LLMFetcher] = None,
         tools: Optional[List[Any]] = None,
+        cognitive_graph: Optional[CognitiveGraph] = None,
     ) -> Agent:
         """Create a new managed agent and register it immediately."""
         handler = llm_handler or LLMFetcher(
@@ -72,6 +75,7 @@ class Core:
             tools=tools,
             core=self,
             max_tool_rounds=5,
+            cognitive_graph=cognitive_graph,
         )
         self.add_agent(agent)
         return agent
@@ -239,3 +243,21 @@ class Core:
             subject_id=subject_id,
             detail=detail,
         )
+
+    def merge_agent_cognitive_graph(self, agent_id: str) -> None:
+        """Merge an agent's private cognitive graph into the swarm shared graph."""
+        agent = self.agents.get(agent_id)
+        if agent is None:
+            return
+        agent_cg = getattr(agent, "cognitive_graph", None)
+        if agent_cg is None or not isinstance(agent_cg, CognitiveGraph):
+            return
+        merge_cognitive_graphs(self.swarm_cognitive_graph, agent_cg)
+
+    def get_cognitive_graph_export(self, query: Optional[str] = None, max_nodes: int = 20) -> str:
+        """Return a human-readable export of the swarm cognitive graph for LLM prompting."""
+        return self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=max_nodes)
+
+    def get_cognitive_graph_snapshot(self) -> Dict[str, Any]:
+        """Return a JSON-serializable snapshot of the swarm cognitive graph."""
+        return self.swarm_cognitive_graph.snapshot()
