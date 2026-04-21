@@ -1,0 +1,226 @@
+<main class="shell">
+  <section class="hero card">
+    <div class="hero-copy">
+      <p class="eyebrow">Angelus swarm runtime</p>
+      <h1>{{ title() }}</h1>
+      <p class="lede">
+        Inspect runtime status, explore loaded swarms, trigger graph execution, and call agents directly.
+      </p>
+      <div class="status-row">
+        <span class="chip">api: {{ apiIndex()?.api_root ?? apiBaseUrl() }}</span>
+        <span class="chip" [class.ok]="health()?.['status'] === 'ok'">health: {{ health()?.['status'] ?? 'unknown' }}</span>
+        <span class="chip" [class.ok]="ready()?.['ready'] === true">ready: {{ ready()?.['ready'] ? 'yes' : 'no' }}</span>
+        <span class="chip">{{ swarms().length }} swarms loaded</span>
+      </div>
+    </div>
+
+    <div class="hero-actions">
+      <label>
+        <span>API base URL</span>
+        <input
+          type="text"
+          [ngModel]="apiBaseUrl()"
+          (ngModelChange)="apiBaseUrl.set($event)"
+          placeholder="/api"
+        />
+      </label>
+      <div class="action-row">
+        <button type="button" (click)="loadOverview()" [disabled]="loading()">Refresh overview</button>
+        <button type="button" class="secondary" (click)="reloadSelectedSwarm()" [disabled]="loading() || !selectedSwarmName()">Reload swarm</button>
+      </div>
+      @if (error()) {
+        <p class="error-box">{{ error() }}</p>
+      }
+    </div>
+  </section>
+
+  <section class="grid">
+    <aside class="card panel list-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Loaded swarms</p>
+          <h2>Swarm registry</h2>
+        </div>
+      </div>
+
+      <div class="list">
+        @for (swarm of swarms(); track swarm.swarm_name) {
+          <button
+            type="button"
+            class="swarm-item"
+            [class.active]="swarm.swarm_name === selectedSwarmName()"
+            (click)="selectSwarm(swarm.swarm_name)"
+          >
+            <div>
+              <strong>{{ swarm.swarm_name }}</strong>
+              <span>{{ swarm.graph_file }}</span>
+            </div>
+            <small>{{ swarm.agent_count }} agents · {{ swarm.tool_count }} tools</small>
+          </button>
+        } @empty {
+          <div class="empty-state">
+            <strong>No swarms loaded.</strong>
+            <p>Make sure the Flask backend is running and the `agents/` packages are valid.</p>
+          </div>
+        }
+      </div>
+    </aside>
+
+    <section class="card panel detail-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Selected swarm</p>
+          <h2>{{ selectedSwarm()?.swarm_name ?? 'No swarm selected' }}</h2>
+        </div>
+        @if (selectedSwarm()) {
+          <span class="chip" [class.ok]="selectedSummary()?.graph_valid === true">graph valid</span>
+        }
+      </div>
+
+      @if (selectedSwarm(); as swarm) {
+        <div class="detail-grid">
+          <div class="metric">
+            <span>Agents</span>
+            <strong>{{ swarm.agent_count }}</strong>
+          </div>
+          <div class="metric">
+            <span>Skills</span>
+            <strong>{{ swarm.skill_count }}</strong>
+          </div>
+          <div class="metric">
+            <span>Tools</span>
+            <strong>{{ swarm.tool_count }}</strong>
+          </div>
+          <div class="metric">
+            <span>Graph</span>
+            <strong>{{ swarm.graph_file }}</strong>
+          </div>
+        </div>
+
+        <div class="stack">
+          <section class="subcard">
+            <h3>Agent files</h3>
+            <ul>
+              @for (agentFile of swarm.agent_files; track agentFile) {
+                <li>{{ agentFile }}</li>
+              }
+            </ul>
+          </section>
+
+          <section class="subcard">
+            <h3>Validation</h3>
+            @if (swarm.graph_errors.length) {
+              <ul class="warning-list">
+                @for (item of swarm.graph_errors; track item) {
+                  <li>{{ item }}</li>
+                }
+              </ul>
+            }
+            @if (swarm.graph_warnings.length) {
+              <ul class="warning-list muted">
+                @for (item of swarm.graph_warnings; track item) {
+                  <li>{{ item }}</li>
+                }
+              </ul>
+            }
+            @if (!swarm.graph_errors.length && !swarm.graph_warnings.length) {
+              <p class="muted">No graph validation issues reported.</p>
+            }
+          </section>
+        </div>
+      }
+    </section>
+  </section>
+
+  <section class="grid lower-grid">
+    <section class="card panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Execution</p>
+          <h2>Run selected swarm</h2>
+        </div>
+        <span class="chip">entry graph</span>
+      </div>
+
+      <label>
+        <span>Initial payload</span>
+        <textarea [ngModel]="swarmInput()" (ngModelChange)="swarmInput.set($event)" rows="8"></textarea>
+      </label>
+
+      <div class="two-col">
+        <label>
+          <span>Rounds</span>
+          <input type="number" [ngModel]="swarmRounds()" (ngModelChange)="setSwarmRounds($event)" min="0" />
+        </label>
+        <label>
+          <span>Primary agent</span>
+          <input type="text" [value]="selectedAgentId() ?? ''" readonly />
+        </label>
+      </div>
+
+      <div class="action-row">
+        <button type="button" (click)="runSwarm()" [disabled]="loading() || !selectedSwarmName()">Run swarm</button>
+        <button type="button" class="secondary" (click)="runSelectedAgent()" [disabled]="loading() || !selectedSwarm()">Run selected agent</button>
+      </div>
+
+      <div class="result-box">
+        <h3>API root</h3>
+        <pre>{{ prettyJson(apiIndex()) || 'No API index yet.' }}</pre>
+      </div>
+
+      <div class="result-box">
+        <h3>Swarm result</h3>
+        <pre>{{ prettyJson(swarmRunOutput()) || 'No run yet.' }}</pre>
+      </div>
+    </section>
+
+    <section class="card panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Agent round</p>
+          <h2>Direct agent call</h2>
+        </div>
+        <span class="chip">{{ selectedAgentId() ?? 'no agent' }}</span>
+      </div>
+
+      <label>
+        <span>Agent</span>
+        <select [ngModel]="selectedAgentId()" (ngModelChange)="selectedAgentId.set($event)">
+          @for (agentId of availableAgentIds(); track agentId) {
+            <option [value]="agentId">{{ agentId }}</option>
+          }
+        </select>
+      </label>
+
+      <label>
+        <span>Message</span>
+        <textarea [ngModel]="agentMessage()" (ngModelChange)="agentMessage.set($event)" rows="5"></textarea>
+      </label>
+
+      <label>
+        <span>Additional prompt</span>
+        <textarea [ngModel]="agentAdditionalPrompt()" (ngModelChange)="agentAdditionalPrompt.set($event)" rows="4"></textarea>
+      </label>
+
+      <div class="two-col">
+        <label>
+          <span>Rounds</span>
+          <input type="number" [ngModel]="agentRounds()" (ngModelChange)="setAgentRounds($event)" min="0" />
+        </label>
+        <label>
+          <span>Backend</span>
+          <input type="text" [value]="health()?.['status'] === 'ok' ? 'flask backend online' : 'offline'" readonly />
+        </label>
+      </div>
+
+      <div class="action-row">
+        <button type="button" (click)="runSelectedAgent()" [disabled]="loading() || !selectedSwarm()">Run agent</button>
+      </div>
+
+      <div class="result-box">
+        <h3>Agent result</h3>
+        <pre>{{ prettyJson(agentRunOutput()) || 'No agent round yet.' }}</pre>
+      </div>
+    </section>
+  </section>
+</main>

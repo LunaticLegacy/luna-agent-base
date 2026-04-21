@@ -1,0 +1,283 @@
+:host
+  display: block
+  min-height: 100vh
+  color: #eff4ff
+  background: radial-gradient(circle at top left, rgba(90, 120, 255, 0.30), transparent 32%), radial-gradient(circle at top right, rgba(15, 206, 168, 0.12), transparent 28%), linear-gradient(180deg, #081120 0%, #0c1322 55%, #050814 100%)
+  font-family: Inter, "Segoe UI", Arial, sans-serif
+
+.shell
+  width: min(1400px, calc(100% - 2rem))
+  margin: 0 auto
+  padding: 1.5rem 0 3rem
+
+.card
+  background: rgba(8, 14, 28, 0.82)
+  border: 1px solid rgba(167, 186, 255, 0.14)
+  border-radius: 24px
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28)
+  backdrop-filter: blur(18px)
+
+.hero
+  display: grid
+  grid-template-columns: 1.4fr 1fr
+  gap: 1.25rem
+  padding: 1.5rem
+  margin-bottom: 1.25rem
+
+.hero-copy h1
+  margin: 0.35rem 0 0.6rem
+  font-size: clamp(2rem, 3vw, 3.4rem)
+  line-height: 1
+  letter-spacing: -0.04em
+
+.lede
+  margin: 0
+  max-width: 56ch
+  color: rgba(225, 232, 255, 0.82)
+  font-size: 1.02rem
+  line-height: 1.6
+
+.eyebrow
+  margin: 0
+  text-transform: uppercase
+  letter-spacing: 0.18em
+  color: #8ea7ff
+  font-size: 0.72rem
+
+.status-row
+  display: flex
+  flex-wrap: wrap
+  gap: 0.65rem
+  margin-top: 1rem
+
+.chip
+  display: inline-flex
+  align-items: center
+  gap: 0.4rem
+  padding: 0.45rem 0.75rem
+  border-radius: 999px
+  background: rgba(255, 255, 255, 0.06)
+  border: 1px solid rgba(255, 255, 255, 0.08)
+  color: rgba(239, 244, 255, 0.88)
+  font-size: 0.82rem
+
+.chip.ok
+  background: rgba(69, 188, 142, 0.16)
+  border-color: rgba(69, 188, 142, 0.38)
+
+.hero-actions
+  display: flex
+  flex-direction: column
+  gap: 0.85rem
+  justify-content: flex-end
+
+label
+  display: flex
+  flex-direction: column
+  gap: 0.45rem
+  color: rgba(230, 236, 255, 0.92)
+  font-size: 0.92rem
+
+input, textarea, select
+  width: 100%
+  border-radius: 16px
+  border: 1px solid rgba(167, 186, 255, 0.12)
+  background: rgba(4, 8, 18, 0.72)
+  color: #f7f9ff
+  padding: 0.85rem 0.95rem
+  outline: none
+  transition: border-color 0.2s ease, box-shadow 0.2s ease
+
+textarea
+  resize: vertical
+  min-height: 120px
+
+input:focus, textarea:focus
+  border-color: rgba(118, 149, 255, 0.55)
+  box-shadow: 0 0 0 3px rgba(118, 149, 255, 0.12)
+
+.action-row
+  display: flex
+  flex-wrap: wrap
+  gap: 0.75rem
+
+button
+  appearance: none
+  border: 0
+  border-radius: 14px
+  padding: 0.85rem 1.05rem
+  background: linear-gradient(135deg, #7f8cff, #4ad6c2)
+  color: #04101c
+  font-weight: 700
+  cursor: pointer
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease
+
+button:hover:not(:disabled)
+  transform: translateY(-1px)
+  box-shadow: 0 12px 28px rgba(79, 136, 255, 0.22)
+
+button:disabled
+  cursor: not-allowed
+  opacity: 0.55
+
+button.secondary
+  background: rgba(255, 255, 255, 0.06)
+  color: #eff4ff
+  border: 1px solid rgba(167, 186, 255, 0.12)
+
+.grid
+  display: grid
+  grid-template-columns: 340px 1fr
+  gap: 1.25rem
+  align-items: start
+
+.panel
+  padding: 1.25rem
+
+.panel-head
+  display: flex
+  justify-content: space-between
+  align-items: flex-start
+  gap: 1rem
+  margin-bottom: 1rem
+
+.panel h2
+  margin: 0.2rem 0 0
+  font-size: 1.35rem
+
+.list
+  display: flex
+  flex-direction: column
+  gap: 0.7rem
+
+.swarm-item
+  display: flex
+  justify-content: space-between
+  align-items: center
+  gap: 1rem
+  padding: 0.9rem 1rem
+  border-radius: 18px
+  background: rgba(255, 255, 255, 0.04)
+  color: #edf3ff
+  text-align: left
+  width: 100%
+  border: 1px solid transparent
+
+.swarm-item strong
+  display: block
+
+.swarm-item span
+  display: block
+  color: rgba(217, 225, 255, 0.72)
+  font-size: 0.82rem
+
+.swarm-item small
+  color: rgba(197, 210, 255, 0.72)
+  white-space: nowrap
+
+.swarm-item.active
+  border-color: rgba(118, 149, 255, 0.55)
+  background: rgba(118, 149, 255, 0.13)
+
+.empty-state
+  padding: 1rem
+  border-radius: 18px
+  background: rgba(255, 255, 255, 0.04)
+  color: rgba(232, 238, 255, 0.8)
+
+.detail-grid
+  display: grid
+  grid-template-columns: repeat(4, minmax(0, 1fr))
+  gap: 0.75rem
+  margin-bottom: 1rem
+
+.metric
+  padding: 1rem
+  border-radius: 18px
+  background: rgba(255, 255, 255, 0.04)
+  border: 1px solid rgba(167, 186, 255, 0.08)
+
+.metric span
+  display: block
+  color: rgba(209, 219, 255, 0.72)
+  font-size: 0.78rem
+  text-transform: uppercase
+  letter-spacing: 0.08em
+
+.metric strong
+  display: block
+  margin-top: 0.35rem
+  font-size: 0.98rem
+  overflow: hidden
+  text-overflow: ellipsis
+
+.stack
+  display: grid
+  grid-template-columns: 1fr 1fr
+  gap: 0.75rem
+
+.subcard
+  padding: 1rem
+  border-radius: 18px
+  background: rgba(255, 255, 255, 0.04)
+  border: 1px solid rgba(167, 186, 255, 0.08)
+
+.subcard h3
+  margin: 0 0 0.75rem
+
+.subcard ul
+  margin: 0
+  padding-left: 1.15rem
+
+.warning-list
+  color: #f8d88b
+
+.warning-list.muted
+  color: rgba(210, 218, 255, 0.8)
+
+.muted
+  color: rgba(212, 220, 255, 0.72)
+
+.lower-grid
+  margin-top: 1.25rem
+  grid-template-columns: 1fr 1fr
+
+.two-col
+  display: grid
+  grid-template-columns: 1fr 1fr
+  gap: 0.75rem
+  margin: 0.75rem 0
+
+.result-box
+  margin-top: 1rem
+  padding: 1rem
+  border-radius: 18px
+  background: rgba(255, 255, 255, 0.04)
+  border: 1px solid rgba(167, 186, 255, 0.08)
+
+.result-box h3
+  margin: 0 0 0.75rem
+
+.result-box pre
+  margin: 0
+  max-height: 360px
+  overflow: auto
+  white-space: pre-wrap
+  word-break: break-word
+  color: #dbe4ff
+  font-size: 0.9rem
+
+.error-box
+  margin: 0
+  padding: 0.85rem 1rem
+  border-radius: 16px
+  background: rgba(220, 64, 102, 0.14)
+  border: 1px solid rgba(220, 64, 102, 0.28)
+  color: #ffd4df
+
+@media (max-width: 1080px)
+  .hero, .grid, .lower-grid, .stack, .detail-grid, .two-col
+    grid-template-columns: 1fr
+
+  .panel-head
+    flex-direction: column
