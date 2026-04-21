@@ -37,6 +37,7 @@ class AgentBlueprint:
     skill_name: Optional[str] = None
     prompt_file: Optional[str] = None
     prompt_text: Optional[str] = None
+    tools: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -202,6 +203,13 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
     if not agent_id:
         raise SwarmLoaderError(f"{source} is missing agent_id.")
 
+    tools_raw = raw.get("tools", [])
+    tools: List[str] = []
+    if isinstance(tools_raw, list):
+        tools = [str(item).strip() for item in tools_raw if str(item).strip()]
+    elif isinstance(tools_raw, str):
+        tools = [tools_raw.strip()]
+
     return AgentBlueprint(
         agent_id=agent_id,
         character_prompt=str(raw.get("character_prompt", "")).strip() or None,
@@ -214,6 +222,7 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
         skill_name=raw.get("skill_name"),
         prompt_file=raw.get("prompt_file"),
         prompt_text=raw.get("prompt_text"),
+        tools=tools,
     )
 
 

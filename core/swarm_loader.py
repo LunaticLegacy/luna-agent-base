@@ -139,6 +139,15 @@ def build_core_from_package(
             f"Manifest default_backend '{manifest.default_backend}' does not match any declared LLM backend."
         )
 
+    # Register tools BEFORE creating agents so that agent blueprints can reference them
+    tools, tool_requirement_files = load_swarm_tools(package_path, manifest)
+    for tool in tools.values():
+        core.register_tool(tool)
+        print(
+            f"[angelus] registered tool: swarm={manifest.swarm_name} tool={tool.tool_name}",
+            flush=True,
+        )
+
     for blueprint in blueprints:
         prompt = _resolve_agent_prompt(
             blueprint,
@@ -147,23 +156,28 @@ def build_core_from_package(
             skill_by_path=skill_by_path,
         )
         llm_handler = _build_llm_handler(blueprint, package_backends, manifest.default_backend)
+
+        # Resolve blueprint tools to actual ToolDefinition instances
+        agent_tools = []
+        for tool_name in blueprint.tools:
+            if tool_name in core.tools:
+                agent_tools.append(core.tools[tool_name])
+            else:
+                print(
+                    f"[angelus] warning: agent '{blueprint.agent_id}' references unknown tool '{tool_name}'",
+                    flush=True,
+                )
+
         core.create_agent(
             agent_id=blueprint.agent_id,
             character_prompt=prompt,
             name=blueprint.name,
             llm_handler=llm_handler,
+            tools=agent_tools if agent_tools else None,
         )
         print(
             f"[angelus] loaded agent: swarm={manifest.swarm_name} agent={blueprint.agent_id}"
             + (f" backend={blueprint.backend_name}" if blueprint.backend_name else ""),
-            flush=True,
-        )
-
-    tools, tool_requirement_files = load_swarm_tools(package_path, manifest)
-    for tool in tools.values():
-        core.register_tool(tool)
-        print(
-            f"[angelus] registered tool: swarm={manifest.swarm_name} tool={tool.tool_name}",
             flush=True,
         )
 
