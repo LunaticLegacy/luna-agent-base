@@ -55,6 +55,7 @@ class Core:
         *,
         name: Optional[str] = None,
         llm_handler: Optional[LLMFetcher] = None,
+        tools: Optional[List[Any]] = None,
     ) -> Agent:
         """Create a new managed agent and register it immediately."""
         handler = llm_handler or LLMFetcher(
@@ -68,6 +69,9 @@ class Core:
             llm_handler=handler,
             character_prompt=character_prompt,
             name=name,
+            tools=tools,
+            core=self,
+            max_tool_rounds=5,
         )
         self.add_agent(agent)
         return agent

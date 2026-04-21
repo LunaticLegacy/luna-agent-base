@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -25,12 +26,18 @@ class Agent:
         llm_handler: LLMFetcher,
         character_prompt: str,
         name: Optional[str] = None,
+        tools: Optional[List[Any]] = None,
+        core: Optional[Any] = None,
+        max_tool_rounds: int = 5,
     ) -> None:
         self.agent_id = agent_id
         self.name = name or agent_id
         self.llm_handler = llm_handler
         self.character_prompt = character_prompt
         self._context = AgentContext()
+        self.tools = tools or []
+        self.core = core
+        self.max_tool_rounds = max_tool_rounds
 
     def append_context(self, role: str, content: str) -> None:
         """Append one message into the agent-local context."""
@@ -66,26 +73,131 @@ class Agent:
             return None
         return getattr(message, "content", None) if not isinstance(message, dict) else message.get("content")
 
+    def _extract_message_and_tool_calls(self, response: Any):
+        """Extract content and tool_calls from an LLM response."""
+        choices = getattr(response, "choices", None)
+        if not choices:
+            return None, None
+        first_choice = choices[0]
+        message = getattr(first_choice, "message", None)
+        if message is None and isinstance(first_choice, dict):
+            message = first_choice.get("message")
+        if message is None:
+            return None, None
+
+        content = getattr(message, "content", None)
+        if isinstance(message, dict):
+            content = message.get("content")
+
+        tool_calls = getattr(message, "tool_calls", None)
+        if isinstance(message, dict):
+            tool_calls = message.get("tool_calls")
+
+        return content, tool_calls
+
+    async def _execute_tool_call(self, tool_call: Any) -> str:
+        """Execute a single tool call from the LLM response."""
+        if self.core is None:
+            return json.dumps({"error": "Agent has no core reference; cannot execute tools."})
+
+        if hasattr(tool_call, "function"):
+            tool_name = getattr(tool_call.function, "name", None)
+            arguments_str = getattr(tool_call.function, "arguments", "{}")
+        elif isinstance(tool_call, dict):
+            tool_name = tool_call.get("function", {}).get("name")
+            arguments_str = tool_call.get("function", {}).get("arguments", "{}")
+        else:
+            return json.dumps({"error": "Unrecognized tool_call format."})
+
+        try:
+            tool = self.core.get_tool(str(tool_name))
+        except KeyError:
+            return json.dumps({"error": f"Tool '{tool_name}' not found."})
+
+        try:
+            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+        except json.JSONDecodeError:
+            return json.dumps({"error": f"Invalid JSON arguments for tool '{tool_name}': {arguments_str}"})
+
+        from .toodefl import ToolContext
+
+        context = ToolContext(
+            agent_id=self.agent_id,
+            node_id=None,
+            rounds=0,
+            metadata={},
+            core=self.core,
+            graph=None,
+        )
+
+        try:
+            result = await tool.execute(arguments, context=context)
+            if isinstance(result, dict):
+                return json.dumps(result, ensure_ascii=False)
+            return str(result)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
     async def round_call(
         self,
         rounds: int,
         user_message: str,
         additional_prompt: Optional[str] = None,
     ) -> AgentRoundResult:
-        """Execute one agent round with isolated context."""
+        """Execute one agent round with isolated context.
+
+        If the agent has bound tools, this method enters a ReAct loop:
+        LLM -> tool_calls -> execute tools -> results back to context -> LLM again.
+        """
         self.append_context("user", user_message)
         system_prompt = self._build_system_prompt(additional_prompt)
         prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages[:-1]]
 
-        raw_response = await self.llm_handler.fetch(
-            msg=user_message,
-            system_prompt=system_prompt or None,
-            prev_messages=prev_messages or None,
-        )
-        assistant_message = self._extract_assistant_message(raw_response)
+        # Prepare tool schemas if tools are bound
+        tools_schemas = None
+        if self.tools:
+            schemas = [t.get_openai_schema() for t in self.tools if getattr(t, "get_openai_schema", None) and t.get_openai_schema()]
+            if schemas:
+                tools_schemas = schemas
 
-        if assistant_message:
-            self.append_context("assistant", assistant_message)
+        assistant_message = None
+        raw_response = None
+
+        for tool_round in range(self.max_tool_rounds):
+            raw_response = await self.llm_handler.fetch(
+                msg=user_message if tool_round == 0 else "",
+                system_prompt=system_prompt or None,
+                prev_messages=prev_messages or None,
+                tools=tools_schemas,
+            )
+
+            content, tool_calls = self._extract_message_and_tool_calls(raw_response)
+
+            if content:
+                self.append_context("assistant", content)
+            elif tool_calls:
+                tool_names = []
+                for tc in tool_calls:
+                    if hasattr(tc, "function"):
+                        tool_names.append(getattr(tc.function, "name", "?"))
+                    elif isinstance(tc, dict):
+                        tool_names.append(tc.get("function", {}).get("name", "?"))
+                self.append_context("assistant", f"[Calling tools: {tool_names}]")
+
+            if not tool_calls:
+                assistant_message = content
+                break
+
+            # Execute tool calls and feed results back into context
+            for tc in tool_calls:
+                result = await self._execute_tool_call(tc)
+                self.append_context("tool", result)
+
+            # Refresh prev_messages for the next LLM call
+            prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages[:-1]]
+
+        if assistant_message is None:
+            assistant_message = content or "[Agent reached max tool rounds without final response]"
 
         self._context.metadata["last_round"] = rounds
         self._context.metadata["turns"] = len(self._context.messages)

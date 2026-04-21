@@ -23,10 +23,13 @@ class ToolDefinition(ABC):
     tool_name: str
     description: str = ""
     enabled: bool = True
+    schema: Optional[Dict[str, Any]] = None
 
-    def __init__(self, tool_name: str, description: str = "") -> None:
+    def __init__(self, tool_name: str, description: str = "", schema: Optional[Dict[str, Any]] = None) -> None:
         self.tool_name = tool_name
         self.description = description
+        if schema is not None:
+            self.schema = schema
 
     @abstractmethod
     async def execute(
@@ -43,3 +46,16 @@ class ToolDefinition(ABC):
     def is_available(self) -> bool:
         """Return whether the tool can currently be used."""
         return self.enabled
+
+    def get_openai_schema(self) -> Optional[Dict[str, Any]]:
+        """Return an OpenAI-compatible function schema for this tool."""
+        if self.schema is None:
+            return None
+        return {
+            "type": "function",
+            "function": {
+                "name": self.tool_name,
+                "description": self.description,
+                "parameters": self.schema,
+            },
+        }
