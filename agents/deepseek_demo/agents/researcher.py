@@ -3,4 +3,5 @@ AGENT = {
     "name": "researcher",
     "skill_name": "researcher_prompt",
     "backend_name": "deepseek",
+    "tools": ["web_search"],
 }
