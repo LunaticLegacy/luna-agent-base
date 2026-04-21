@@ -2,13 +2,13 @@
 name = "publisher_prompt"
 version = "1.0"
 capability = "finalization"
-description = "Turn the drafted answer into a clean final response."
+description = "Turn the refined conclusion into a clean final response."
 content_file = "publisher.prompt.md"
 input_schema = { input = "string" }
 output_schema = { final_answer = "string" }
 requires_tools = ["file_writer"]
-requires_skills = ["reviewer_prompt"]
-preconditions = ["The workflow has been reviewed and routed."]
+requires_skills = ["auditor_prompt"]
+preconditions = ["The workflow has produced a refined conclusion."]
 postconditions = ["A user-facing final answer is ready."]
 failure_policy = "retry"
 parallelizable = false
