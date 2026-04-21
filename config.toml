@@ -1,0 +1,26 @@
+[core]
+# Name shown by the runtime when bootstrapping.
+agent_name = "angelus"
+
+# Default backend used when an agent does not override its own config.
+api_url = "https://api.openai.com/v1"
+api_key = ""
+model = ""
+provider = "openai"
+
+[agent]
+# Legacy/default agent backend fields. These are used when [core] does not
+# provide the same keys.
+api_url = "https://api.openai.com/v1"
+api_key = ""
+model = ""
+provider = "openai"
+
+[[agents]]
+agent_id = "assistant"
+name = "assistant"
+character_prompt = "You are a helpful assistant."
+api_url = "https://api.openai.com/v1"
+api_key = ""
+model = ""
+provider = "openai"
