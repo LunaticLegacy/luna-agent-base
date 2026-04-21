@@ -47,6 +47,84 @@ export interface SwarmDetailResponse {
   swarm: SwarmDetails;
 }
 
+export interface GraphNodeSnapshot {
+  node_id: number;
+  node_name: string;
+  node_type: string;
+  next_node_ids: number[];
+  metadata: Record<string, unknown>;
+  agent_id?: string;
+  additional_prompt?: string | null;
+  tool_name?: string;
+  input_mapping?: Record<string, unknown>;
+}
+
+export interface GraphEdgeSnapshot {
+  from_node_id: number;
+  to_node_id: number;
+  label?: string | null;
+  condition?: string | null;
+  priority: number;
+}
+
+export interface GraphSnapshot {
+  graph_name: string;
+  entry_node_id: number | null;
+  exit_node_id: number | null;
+  node_count: number;
+  edge_count: number;
+  nodes: GraphNodeSnapshot[];
+  edges: GraphEdgeSnapshot[];
+}
+
+export interface SwarmGraphResponse {
+  success: boolean;
+  swarm: string;
+  graph: GraphSnapshot;
+}
+
+export interface RunSnapshot {
+  success: boolean;
+  run_id: string;
+  swarm: string;
+  status: string;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  rounds: number;
+  current_node_id?: number | null;
+  current_node_name?: string | null;
+  current_node_type?: string | null;
+  state: unknown;
+  final_state: unknown;
+  error?: string | null;
+  event_count: number;
+  events_url: string;
+  status_url: string;
+}
+
+export interface StartSwarmRunResponse {
+  success: boolean;
+  status: string;
+  swarm: string;
+  run: RunSnapshot;
+}
+
+export interface RunEvent {
+  run_id: string;
+  event_type: string;
+  timestamp: number;
+  swarm_name?: string | null;
+  node_id?: number | null;
+  node_name?: string | null;
+  node_type?: string | null;
+  branch?: string | null;
+  rounds?: number | null;
+  status?: string | null;
+  data: Record<string, unknown>;
+  error?: string | null;
+}
+
 export interface RunSwarmRequest {
   input: unknown;
   rounds?: number;

@@ -9,7 +9,9 @@ import {
   HealthResponse,
   ReadyResponse,
   RunSwarmRequest,
-  RunSwarmResponse,
+  RunSnapshot,
+  StartSwarmRunResponse,
+  SwarmGraphResponse,
   SwarmDetailResponse,
   SwarmListResponse,
 } from './api.types';
@@ -42,13 +44,27 @@ export class ApiService {
     );
   }
 
-  runSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest) {
+  getSwarmGraph(baseUrl: string, swarmName: string) {
     return firstValueFrom(
-      this.http.post<RunSwarmResponse>(
-        `${baseUrl}/swarms/${encodeURIComponent(swarmName)}/run`,
+      this.http.get<SwarmGraphResponse>(`${baseUrl}/swarms/${encodeURIComponent(swarmName)}/graph`),
+    );
+  }
+
+  startSwarmRun(baseUrl: string, swarmName: string, request: RunSwarmRequest) {
+    return firstValueFrom(
+      this.http.post<StartSwarmRunResponse>(
+        `${baseUrl}/swarms/${encodeURIComponent(swarmName)}/runs`,
         request,
       ),
     );
+  }
+
+  getRun(baseUrl: string, runId: string) {
+    return firstValueFrom(this.http.get<{ success: boolean; run: RunSnapshot }>(`${baseUrl}/runs/${encodeURIComponent(runId)}`));
+  }
+
+  streamRunEvents(baseUrl: string, runId: string) {
+    return new EventSource(`${baseUrl}/runs/${encodeURIComponent(runId)}/events`);
   }
 
   runAgentRound(baseUrl: string, swarmName: string, agentId: string, request: AgentRoundRequest) {

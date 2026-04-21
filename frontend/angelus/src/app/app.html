@@ -132,20 +132,93 @@
     </section>
   </section>
 
-  <section class="grid lower-grid">
-    <section class="card panel">
+  <section class="grid live-grid">
+    <section class="card panel execution-panel">
       <div class="panel-head">
         <div>
           <p class="eyebrow">Execution</p>
           <h2>Run selected swarm</h2>
         </div>
-        <span class="chip">entry graph</span>
+        <span class="chip">async session</span>
       </div>
 
-      <label>
-        <span>Initial payload</span>
-        <textarea [ngModel]="swarmInput()" (ngModelChange)="swarmInput.set($event)" rows="8"></textarea>
-      </label>
+      @if (swarmRequestView(); as requestView) {
+        <div class="result-box result-box-tight">
+          <div class="rendered-head">
+            <h3>Request builder</h3>
+            <span class="chip">{{ requestView.summary[2]?.value ?? '0 keys' }}</span>
+          </div>
+
+          <div class="composer-grid">
+            <label class="span-2">
+              <span>Task</span>
+              <textarea [ngModel]="swarmTask()" (ngModelChange)="setSwarmTask($event)" rows="4" placeholder="What should the swarm do?"></textarea>
+            </label>
+
+            <label class="span-2">
+              <span>Context</span>
+              <textarea [ngModel]="swarmContext()" (ngModelChange)="setSwarmContext($event)" rows="4" placeholder="Background, scope, or special notes."></textarea>
+            </label>
+
+            <label>
+              <span>Audience</span>
+              <input type="text" [ngModel]="swarmAudience()" (ngModelChange)="setSwarmAudience($event)" placeholder="General audience" />
+            </label>
+
+            <label>
+              <span>Output format</span>
+              <input type="text" [ngModel]="swarmOutputFormat()" (ngModelChange)="setSwarmOutputFormat($event)" placeholder="Markdown summary with headings and bullets." />
+            </label>
+
+            <label class="span-2">
+              <span>Constraints</span>
+              <textarea [ngModel]="swarmConstraints()" (ngModelChange)="setSwarmConstraints($event)" rows="4" placeholder="One constraint per line, for example: stay concise"></textarea>
+            </label>
+          </div>
+
+          <div class="summary-grid compact">
+            @for (item of requestView.summary; track item.key) {
+              <div class="summary-item">
+                <span>{{ item.key }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            }
+          </div>
+
+          @for (section of requestView.sections; track section.title) {
+            <article class="rendered-block">
+              <div class="rendered-head">
+                <h4>{{ section.title }}</h4>
+                <span class="chip">{{ section.facts.length }} facts</span>
+              </div>
+
+              @if (section.facts.length) {
+                <dl class="fact-grid fact-grid-tight">
+                  @for (fact of section.facts; track fact.key) {
+                    <div class="fact-row">
+                      <dt>{{ fact.key }}</dt>
+                      <dd>{{ fact.value }}</dd>
+                    </div>
+                  }
+                </dl>
+              }
+
+              @if (section.blocks.length) {
+                <div class="markdown-stack">
+                  @for (block of section.blocks; track $index) {
+                    <div class="markdown-block" [innerHTML]="block.html"></div>
+                  }
+                </div>
+              }
+            </article>
+          }
+
+          <details class="raw-details">
+            <summary>Preview payload JSON</summary>
+            <pre>{{ requestView.rawJson }}</pre>
+          </details>
+        </div>
+      }
 
       <div class="two-col">
         <label>
@@ -159,22 +232,221 @@
       </div>
 
       <div class="action-row">
-        <button type="button" (click)="runSwarm()" [disabled]="loading() || !selectedSwarmName()">Run swarm</button>
-        <button type="button" class="secondary" (click)="runSelectedAgent()" [disabled]="loading() || !selectedSwarm()">Run selected agent</button>
+        <button type="button" (click)="runSwarm()" [disabled]="executionLoading() || !selectedSwarmName() || !swarmTask().trim()">Start async run</button>
+        <button type="button" class="secondary" (click)="runSelectedAgent()" [disabled]="executionLoading() || !selectedSwarm()">Run selected agent</button>
       </div>
 
-      <div class="result-box">
-        <h3>API root</h3>
-        <pre>{{ prettyJson(apiIndex()) || 'No API index yet.' }}</pre>
-      </div>
+      @if (runError()) {
+        <p class="error-box">{{ runError() }}</p>
+      }
 
       <div class="result-box">
-        <h3>Swarm result</h3>
-        <pre>{{ prettyJson(swarmRunOutput()) || 'No run yet.' }}</pre>
+        <h3>Run session</h3>
+        @if (liveRunView(); as view) {
+          <div class="summary-grid">
+            <div class="summary-item">
+              <span>Run</span>
+              <strong>{{ view.run.run_id }}</strong>
+            </div>
+            <div class="summary-item">
+              <span>Status</span>
+              <strong>{{ view.run.status }}</strong>
+            </div>
+            <div class="summary-item">
+              <span>Rounds</span>
+              <strong>{{ view.run.rounds }}</strong>
+            </div>
+            <div class="summary-item">
+              <span>Events</span>
+              <strong>{{ view.run.event_count }}</strong>
+            </div>
+          </div>
+
+          @if (view.stateView) {
+            <article class="rendered-block">
+              <div class="rendered-head">
+                <h4>Current state</h4>
+                <span class="chip">{{ view.run.current_node_name ?? 'waiting' }}</span>
+              </div>
+              @for (section of view.stateView.sections; track section.title) {
+                <article class="rendered-block nested-block">
+                  <div class="rendered-head">
+                    <h4>{{ section.title }}</h4>
+                    <span class="chip">{{ section.facts.length }} facts</span>
+                  </div>
+                  @if (section.facts.length) {
+                    <dl class="fact-grid fact-grid-tight">
+                      @for (fact of section.facts; track fact.key) {
+                        <div class="fact-row">
+                          <dt>{{ fact.key }}</dt>
+                          <dd>{{ fact.value }}</dd>
+                        </div>
+                      }
+                    </dl>
+                  }
+                  @if (section.blocks.length) {
+                    <div class="markdown-stack">
+                      @for (block of section.blocks; track $index) {
+                        <div class="markdown-block" [innerHTML]="block.html"></div>
+                      }
+                    </div>
+                  }
+                </article>
+              }
+            </article>
+          }
+
+          @if (view.finalStateView) {
+            <article class="rendered-block">
+              <div class="rendered-head">
+                <h4>Final state</h4>
+                <span class="chip">{{ view.run.finished_at ?? 'not finished yet' }}</span>
+              </div>
+              @for (section of view.finalStateView.sections; track section.title) {
+                <article class="rendered-block nested-block">
+                  <div class="rendered-head">
+                    <h4>{{ section.title }}</h4>
+                    <span class="chip">{{ section.facts.length }} facts</span>
+                  </div>
+                  @if (section.facts.length) {
+                    <dl class="fact-grid fact-grid-tight">
+                      @for (fact of section.facts; track fact.key) {
+                        <div class="fact-row">
+                          <dt>{{ fact.key }}</dt>
+                          <dd>{{ fact.value }}</dd>
+                        </div>
+                      }
+                    </dl>
+                  }
+                  @if (section.blocks.length) {
+                    <div class="markdown-stack">
+                      @for (block of section.blocks; track $index) {
+                        <div class="markdown-block" [innerHTML]="block.html"></div>
+                      }
+                    </div>
+                  }
+                </article>
+              }
+            </article>
+          }
+
+          @if (view.events.length) {
+            <div class="trace-panel">
+              <div class="rendered-head">
+                <h4>Live events</h4>
+                <span class="chip">{{ view.events.length }} items</span>
+              </div>
+
+              <div class="trace-stack">
+                @for (event of view.events; track event.rawJson) {
+                  <article class="trace-card">
+                    <div class="rendered-head">
+                      <div>
+                        <h5>{{ event.title }}</h5>
+                        <p class="trace-subtitle">{{ event.timestamp }} · {{ event.summary }}</p>
+                      </div>
+                      <span class="chip">{{ event.branch }}</span>
+                    </div>
+                    <details class="raw-details">
+                      <summary>Raw event JSON</summary>
+                      <pre>{{ event.rawJson }}</pre>
+                    </details>
+                  </article>
+                }
+              </div>
+            </div>
+          }
+
+          <details class="raw-details">
+            <summary>Raw run JSON</summary>
+            <pre>{{ view.rawJson }}</pre>
+          </details>
+        } @else {
+          <p class="muted">No run yet.</p>
+        }
       </div>
     </section>
 
-    <section class="card panel">
+    <section class="card panel graph-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Execution graph</p>
+          <h2>Current graph snapshot</h2>
+        </div>
+        <span class="chip">live highlight</span>
+      </div>
+
+      <div class="action-row">
+        <button type="button" class="secondary" (click)="reloadSelectedGraph()" [disabled]="loading() || !selectedSwarmName()">Refresh graph</button>
+      </div>
+
+      @if (graphError()) {
+        <p class="error-box">{{ graphError() }}</p>
+      }
+
+      @if (graphView(); as view) {
+        <div class="summary-grid compact">
+          <div class="summary-item">
+            <span>Graph</span>
+            <strong>{{ view.graphName }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>Entry</span>
+            <strong>{{ view.entryNodeId ?? 'none' }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>Current</span>
+            <strong>{{ view.currentNodeName ?? 'idle' }}</strong>
+          </div>
+          <div class="summary-item">
+            <span>Status</span>
+            <strong>{{ view.status ?? 'idle' }}</strong>
+          </div>
+        </div>
+
+        <div class="graph-stage">
+          @for (node of view.nodes; track node.node_id) {
+            <article class="graph-node" [class.entry]="node.isEntry" [class.exit]="node.isExit" [class.running]="node.status === 'running'" [class.completed]="node.status === 'completed'" [class.failed]="node.status === 'failed'">
+              <div class="graph-node-head">
+                <strong>#{{ node.node_id }} {{ node.node_name }}</strong>
+                <span class="chip">{{ node.status }}</span>
+              </div>
+              <p>{{ node.node_type }}</p>
+              <small>next: {{ node.next_node_ids.length ? node.next_node_ids.join(', ') : 'none' }}</small>
+              @if (node.agent_id) {
+                <small>agent: {{ node.agent_id }}</small>
+              }
+              @if (node.tool_name) {
+                <small>tool: {{ node.tool_name }}</small>
+              }
+            </article>
+          }
+        </div>
+
+        @if (view.edges.length) {
+          <div class="edge-list">
+            @for (edge of view.edges; track edge.from_node_id + '-' + edge.to_node_id + '-' + edge.priority) {
+              <span class="edge-pill" [class.active]="edge.active">
+                {{ edge.from_node_id }} → {{ edge.to_node_id }}
+                @if (edge.label) {
+                  <small>{{ edge.label }}</small>
+                }
+              </span>
+            }
+          </div>
+        }
+
+        <details class="raw-details">
+          <summary>Raw graph JSON</summary>
+          <pre>{{ view.rawJson }}</pre>
+        </details>
+      } @else {
+        <p class="muted">No graph loaded yet.</p>
+      }
+    </section>
+  </section>
+
+  <section class="card panel agent-panel">
       <div class="panel-head">
         <div>
           <p class="eyebrow">Agent round</p>
@@ -214,13 +486,56 @@
       </div>
 
       <div class="action-row">
-        <button type="button" (click)="runSelectedAgent()" [disabled]="loading() || !selectedSwarm()">Run agent</button>
+        <button type="button" (click)="runSelectedAgent()" [disabled]="executionLoading() || !selectedSwarm()">Run agent</button>
       </div>
 
       <div class="result-box">
         <h3>Agent result</h3>
-        <pre>{{ prettyJson(agentRunOutput()) || 'No agent round yet.' }}</pre>
+        @if (agentRunView(); as view) {
+          <div class="summary-grid">
+            @for (item of view.summary; track item.key) {
+              <div class="summary-item">
+                <span>{{ item.key }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            }
+          </div>
+
+          @for (section of view.sections; track section.title) {
+            <article class="rendered-block">
+              <div class="rendered-head">
+                <h4>{{ section.title }}</h4>
+                <span class="chip">{{ section.facts.length }} facts</span>
+              </div>
+
+              @if (section.facts.length) {
+                <dl class="fact-grid">
+                  @for (fact of section.facts; track fact.key) {
+                    <div class="fact-row">
+                      <dt>{{ fact.key }}</dt>
+                      <dd>{{ fact.value }}</dd>
+                    </div>
+                  }
+                </dl>
+              }
+
+              @if (section.blocks.length) {
+                <div class="markdown-stack">
+                  @for (block of section.blocks; track $index) {
+                    <div class="markdown-block" [innerHTML]="block.html"></div>
+                  }
+                </div>
+              }
+            </article>
+          }
+
+          <details class="raw-details">
+            <summary>Raw agent JSON</summary>
+            <pre>{{ view.rawJson }}</pre>
+          </details>
+        } @else {
+          <p class="muted">No agent round yet.</p>
+        }
       </div>
     </section>
-  </section>
 </main>

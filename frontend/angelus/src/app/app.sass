@@ -1,47 +1,48 @@
 :host
   display: block
   min-height: 100vh
-  color: #eff4ff
-  background: radial-gradient(circle at top left, rgba(90, 120, 255, 0.30), transparent 32%), radial-gradient(circle at top right, rgba(15, 206, 168, 0.12), transparent 28%), linear-gradient(180deg, #081120 0%, #0c1322 55%, #050814 100%)
-  font-family: Inter, "Segoe UI", Arial, sans-serif
+  color: #efe8dc
+  background: radial-gradient(circle at top left, rgba(218, 158, 84, 0.16), transparent 26%), radial-gradient(circle at top right, rgba(74, 179, 168, 0.14), transparent 22%), linear-gradient(180deg, #0c1016 0%, #0d1117 56%, #07090d 100%)
+  font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif
 
 .shell
-  width: min(1400px, calc(100% - 2rem))
+  width: min(1440px, calc(100% - 2rem))
   margin: 0 auto
   padding: 1.5rem 0 3rem
 
 .card
-  background: rgba(8, 14, 28, 0.82)
-  border: 1px solid rgba(167, 186, 255, 0.14)
-  border-radius: 24px
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28)
+  background: rgba(14, 17, 22, 0.84)
+  border: 1px solid rgba(233, 216, 188, 0.12)
+  border-radius: 26px
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34)
   backdrop-filter: blur(18px)
 
 .hero
   display: grid
-  grid-template-columns: 1.4fr 1fr
+  grid-template-columns: 1.45fr 1fr
   gap: 1.25rem
   padding: 1.5rem
   margin-bottom: 1.25rem
 
 .hero-copy h1
-  margin: 0.35rem 0 0.6rem
-  font-size: clamp(2rem, 3vw, 3.4rem)
-  line-height: 1
-  letter-spacing: -0.04em
+  margin: 0.35rem 0 0.65rem
+  font-size: clamp(2rem, 3.2vw, 3.7rem)
+  line-height: 0.97
+  letter-spacing: -0.05em
+  font-family: Georgia, "Times New Roman", serif
 
 .lede
   margin: 0
-  max-width: 56ch
-  color: rgba(225, 232, 255, 0.82)
+  max-width: 60ch
+  color: rgba(240, 229, 209, 0.78)
   font-size: 1.02rem
-  line-height: 1.6
+  line-height: 1.7
 
 .eyebrow
   margin: 0
   text-transform: uppercase
-  letter-spacing: 0.18em
-  color: #8ea7ff
+  letter-spacing: 0.2em
+  color: #d7a15f
   font-size: 0.72rem
 
 .status-row
@@ -54,16 +55,16 @@
   display: inline-flex
   align-items: center
   gap: 0.4rem
-  padding: 0.45rem 0.75rem
+  padding: 0.45rem 0.8rem
   border-radius: 999px
-  background: rgba(255, 255, 255, 0.06)
-  border: 1px solid rgba(255, 255, 255, 0.08)
-  color: rgba(239, 244, 255, 0.88)
+  background: rgba(255, 255, 255, 0.05)
+  border: 1px solid rgba(255, 255, 255, 0.09)
+  color: rgba(242, 235, 223, 0.9)
   font-size: 0.82rem
 
 .chip.ok
-  background: rgba(69, 188, 142, 0.16)
-  border-color: rgba(69, 188, 142, 0.38)
+  background: rgba(74, 179, 168, 0.15)
+  border-color: rgba(74, 179, 168, 0.38)
 
 .hero-actions
   display: flex
@@ -75,26 +76,30 @@ label
   display: flex
   flex-direction: column
   gap: 0.45rem
-  color: rgba(230, 236, 255, 0.92)
+  color: rgba(241, 231, 215, 0.9)
   font-size: 0.92rem
 
-input, textarea, select
+input,
+textarea,
+select
   width: 100%
   border-radius: 16px
-  border: 1px solid rgba(167, 186, 255, 0.12)
-  background: rgba(4, 8, 18, 0.72)
-  color: #f7f9ff
+  border: 1px solid rgba(233, 216, 188, 0.12)
+  background: rgba(7, 9, 12, 0.72)
+  color: #fff6eb
   padding: 0.85rem 0.95rem
   outline: none
-  transition: border-color 0.2s ease, box-shadow 0.2s ease
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease
 
 textarea
   resize: vertical
   min-height: 120px
 
-input:focus, textarea:focus
-  border-color: rgba(118, 149, 255, 0.55)
-  box-shadow: 0 0 0 3px rgba(118, 149, 255, 0.12)
+input:focus,
+textarea:focus,
+select:focus
+  border-color: rgba(216, 156, 83, 0.62)
+  box-shadow: 0 0 0 3px rgba(216, 156, 83, 0.12)
 
 .action-row
   display: flex
@@ -106,30 +111,34 @@ button
   border: 0
   border-radius: 14px
   padding: 0.85rem 1.05rem
-  background: linear-gradient(135deg, #7f8cff, #4ad6c2)
-  color: #04101c
-  font-weight: 700
+  background: linear-gradient(135deg, #d8a05f, #4ab3a8)
+  color: #071018
+  font-weight: 800
   cursor: pointer
   transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease
 
 button:hover:not(:disabled)
   transform: translateY(-1px)
-  box-shadow: 0 12px 28px rgba(79, 136, 255, 0.22)
+  box-shadow: 0 14px 28px rgba(216, 160, 95, 0.18)
 
 button:disabled
   cursor: not-allowed
   opacity: 0.55
 
 button.secondary
-  background: rgba(255, 255, 255, 0.06)
-  color: #eff4ff
-  border: 1px solid rgba(167, 186, 255, 0.12)
+  background: rgba(255, 255, 255, 0.05)
+  color: #f1e9db
+  border: 1px solid rgba(233, 216, 188, 0.12)
 
 .grid
   display: grid
   grid-template-columns: 340px 1fr
   gap: 1.25rem
   align-items: start
+
+.live-grid
+  margin-top: 1.25rem
+  grid-template-columns: 1.1fr 0.9fr
 
 .panel
   padding: 1.25rem
@@ -158,7 +167,7 @@ button.secondary
   padding: 0.9rem 1rem
   border-radius: 18px
   background: rgba(255, 255, 255, 0.04)
-  color: #edf3ff
+  color: #f4ede1
   text-align: left
   width: 100%
   border: 1px solid transparent
@@ -168,22 +177,22 @@ button.secondary
 
 .swarm-item span
   display: block
-  color: rgba(217, 225, 255, 0.72)
+  color: rgba(225, 215, 199, 0.7)
   font-size: 0.82rem
 
 .swarm-item small
-  color: rgba(197, 210, 255, 0.72)
+  color: rgba(214, 202, 184, 0.72)
   white-space: nowrap
 
 .swarm-item.active
-  border-color: rgba(118, 149, 255, 0.55)
-  background: rgba(118, 149, 255, 0.13)
+  border-color: rgba(216, 160, 95, 0.62)
+  background: rgba(216, 160, 95, 0.12)
 
 .empty-state
   padding: 1rem
   border-radius: 18px
   background: rgba(255, 255, 255, 0.04)
-  color: rgba(232, 238, 255, 0.8)
+  color: rgba(236, 228, 214, 0.8)
 
 .detail-grid
   display: grid
@@ -195,11 +204,11 @@ button.secondary
   padding: 1rem
   border-radius: 18px
   background: rgba(255, 255, 255, 0.04)
-  border: 1px solid rgba(167, 186, 255, 0.08)
+  border: 1px solid rgba(233, 216, 188, 0.08)
 
 .metric span
   display: block
-  color: rgba(209, 219, 255, 0.72)
+  color: rgba(214, 202, 184, 0.72)
   font-size: 0.78rem
   text-transform: uppercase
   letter-spacing: 0.08em
@@ -220,7 +229,7 @@ button.secondary
   padding: 1rem
   border-radius: 18px
   background: rgba(255, 255, 255, 0.04)
-  border: 1px solid rgba(167, 186, 255, 0.08)
+  border: 1px solid rgba(233, 216, 188, 0.08)
 
 .subcard h3
   margin: 0 0 0.75rem
@@ -230,17 +239,20 @@ button.secondary
   padding-left: 1.15rem
 
 .warning-list
-  color: #f8d88b
+  color: #f1c86d
 
 .warning-list.muted
-  color: rgba(210, 218, 255, 0.8)
+  color: rgba(220, 211, 198, 0.8)
 
 .muted
-  color: rgba(212, 220, 255, 0.72)
+  color: rgba(221, 212, 198, 0.72)
 
 .lower-grid
   margin-top: 1.25rem
   grid-template-columns: 1fr 1fr
+
+.agent-panel
+  margin-top: 1.25rem
 
 .two-col
   display: grid
@@ -253,31 +265,345 @@ button.secondary
   padding: 1rem
   border-radius: 18px
   background: rgba(255, 255, 255, 0.04)
-  border: 1px solid rgba(167, 186, 255, 0.08)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+
+.result-box-tight
+  margin-top: 0
 
 .result-box h3
   margin: 0 0 0.75rem
 
-.result-box pre
+.composer-grid
+  display: grid
+  grid-template-columns: repeat(2, minmax(0, 1fr))
+  gap: 0.75rem
+  margin-bottom: 0.9rem
+
+.composer-grid .span-2
+  grid-column: span 2
+
+.nested-block
+  margin-top: 0.75rem
+  padding: 0.85rem
+
+.graph-stage
+  display: grid
+  grid-template-columns: repeat(2, minmax(0, 1fr))
+  gap: 0.75rem
+  margin-top: 0.75rem
+
+.graph-node
+  padding: 0.95rem
+  border-radius: 18px
+  background: rgba(8, 10, 14, 0.72)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+  display: flex
+  flex-direction: column
+  gap: 0.4rem
+
+.graph-node-head
+  display: flex
+  align-items: flex-start
+  justify-content: space-between
+  gap: 0.75rem
+
+.graph-node p,
+.graph-node small
   margin: 0
-  max-height: 360px
+  color: rgba(242, 235, 223, 0.78)
+
+.graph-node.entry
+  border-color: rgba(216, 160, 95, 0.36)
+
+.graph-node.exit
+  border-color: rgba(74, 179, 168, 0.36)
+
+.graph-node.running
+  border-color: rgba(216, 160, 95, 0.65)
+  box-shadow: 0 0 0 1px rgba(216, 160, 95, 0.18) inset
+
+.graph-node.completed
+  border-color: rgba(74, 179, 168, 0.34)
+
+.graph-node.failed
+  border-color: rgba(241, 104, 104, 0.38)
+
+.edge-list
+  display: flex
+  flex-wrap: wrap
+  gap: 0.5rem
+  margin-top: 0.75rem
+
+.edge-pill
+  display: inline-flex
+  align-items: center
+  gap: 0.35rem
+  padding: 0.45rem 0.65rem
+  border-radius: 999px
+  background: rgba(255, 255, 255, 0.05)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+  color: rgba(242, 235, 223, 0.82)
+  font-size: 0.8rem
+
+.edge-pill.active
+  border-color: rgba(216, 160, 95, 0.55)
+  background: rgba(216, 160, 95, 0.12)
+
+.summary-grid
+  display: grid
+  grid-template-columns: repeat(4, minmax(0, 1fr))
+  gap: 0.65rem
+  margin-bottom: 0.9rem
+
+.summary-grid.compact
+  grid-template-columns: repeat(2, minmax(0, 1fr))
+
+.summary-item
+  padding: 0.9rem
+  border-radius: 16px
+  background: rgba(8, 10, 14, 0.7)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+
+.summary-item span
+  display: block
+  margin-bottom: 0.35rem
+  color: rgba(214, 202, 184, 0.68)
+  font-size: 0.75rem
+  text-transform: uppercase
+  letter-spacing: 0.08em
+
+.summary-item strong
+  display: block
+  color: #fff7ed
+  font-size: 0.95rem
+  word-break: break-word
+
+.rendered-block,
+.trace-card
+  padding: 1rem
+  border-radius: 18px
+  background: rgba(8, 10, 14, 0.72)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+  margin-top: 0.9rem
+
+.rendered-head
+  display: flex
+  align-items: flex-start
+  justify-content: space-between
+  gap: 0.75rem
+  margin-bottom: 0.75rem
+
+.rendered-head h4,
+.rendered-head h5
+  margin: 0
+
+.rendered-head h4
+  font-size: 1.04rem
+
+.rendered-head h5
+  font-size: 0.98rem
+
+.markdown-stack
+  display: flex
+  flex-direction: column
+  gap: 0.7rem
+
+.markdown-block
+  color: rgba(242, 235, 223, 0.94)
+  line-height: 1.72
+  font-size: 0.98rem
+
+.markdown-block :is(p, ul, ol, blockquote, pre, h1, h2, h3, h4, h5, h6)
+  margin: 0
+
+.markdown-block h1,
+.markdown-block h2,
+.markdown-block h3,
+.markdown-block h4
+  line-height: 1.25
+  letter-spacing: -0.02em
+
+.markdown-block h1,
+.markdown-block h2
+  font-family: Georgia, "Times New Roman", serif
+
+.markdown-block h1
+  font-size: 1.45rem
+
+.markdown-block h2
+  font-size: 1.3rem
+
+.markdown-block h3
+  font-size: 1.12rem
+
+.markdown-block p + p
+  margin-top: 0.65rem
+
+.markdown-block ul,
+.markdown-block ol
+  padding-left: 1.2rem
+
+.markdown-block li + li
+  margin-top: 0.35rem
+
+.markdown-block blockquote
+  padding: 0.8rem 0.95rem
+  border-left: 3px solid rgba(216, 160, 95, 0.65)
+  background: rgba(216, 160, 95, 0.08)
+  border-radius: 0 12px 12px 0
+
+.markdown-block code
+  padding: 0.12rem 0.3rem
+  border-radius: 6px
+  background: rgba(255, 255, 255, 0.08)
+  color: #ffd9a2
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace
+  font-size: 0.92em
+
+.markdown-block pre
   overflow: auto
+  padding: 0.95rem 1rem
+  border-radius: 14px
+  background: rgba(4, 6, 9, 0.86)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+
+.markdown-block a
+  color: #78d7c9
+  text-decoration: none
+
+.markdown-block a:hover
+  text-decoration: underline
+
+.fact-grid
+  display: grid
+  grid-template-columns: repeat(2, minmax(0, 1fr))
+  gap: 0.6rem
+  margin: 0 0 0.9rem
+
+.fact-grid-tight
+  grid-template-columns: repeat(3, minmax(0, 1fr))
+
+.fact-row
+  display: flex
+  flex-direction: column
+  gap: 0.22rem
+  padding: 0.7rem 0.8rem
+  border-radius: 14px
+  background: rgba(255, 255, 255, 0.03)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+
+.fact-row dt
+  color: rgba(214, 202, 184, 0.68)
+  font-size: 0.74rem
+  text-transform: uppercase
+  letter-spacing: 0.08em
+
+.fact-row dd
+  margin: 0
+  color: #fff7eb
+  word-break: break-word
+
+.trace-panel
+  margin-top: 1rem
+
+.trace-stack
+  display: flex
+  flex-direction: column
+  gap: 0.85rem
+
+.trace-subtitle
+  margin: 0.18rem 0 0
+  color: rgba(214, 202, 184, 0.66)
+  font-size: 0.84rem
+
+.trace-cluster
+  margin-top: 0.9rem
+
+.trace-label
+  display: inline-flex
+  margin-bottom: 0.45rem
+  color: #d8a05f
+  text-transform: uppercase
+  letter-spacing: 0.08em
+  font-size: 0.72rem
+
+.trace-error
+  margin: 0.75rem 0 0
+  color: #f1c86d
+
+.raw-details
+  margin-top: 0.9rem
+
+.raw-details summary
+  cursor: pointer
+  color: rgba(242, 235, 223, 0.82)
+  list-style: none
+
+.raw-details summary::-webkit-details-marker
+  display: none
+
+.raw-details pre
+  margin: 0.75rem 0 0
+  overflow: auto
+  padding: 1rem
+  border-radius: 14px
+  background: rgba(4, 6, 9, 0.86)
+  color: #f0e6d8
+  border: 1px solid rgba(233, 216, 188, 0.08)
   white-space: pre-wrap
   word-break: break-word
-  color: #dbe4ff
-  font-size: 0.9rem
 
 .error-box
   margin: 0
-  padding: 0.85rem 1rem
+  padding: 0.8rem 0.95rem
   border-radius: 16px
-  background: rgba(220, 64, 102, 0.14)
-  border: 1px solid rgba(220, 64, 102, 0.28)
-  color: #ffd4df
+  background: rgba(241, 104, 104, 0.14)
+  color: #ffd6d6
+  border: 1px solid rgba(241, 104, 104, 0.25)
 
-@media (max-width: 1080px)
-  .hero, .grid, .lower-grid, .stack, .detail-grid, .two-col
+@media (max-width: 1180px)
+  .hero,
+  .grid,
+  .lower-grid
     grid-template-columns: 1fr
 
-  .panel-head
+  .detail-grid,
+  .summary-grid,
+  .summary-grid.compact,
+  .composer-grid,
+  .graph-stage,
+  .fact-grid,
+  .fact-grid-tight
+    grid-template-columns: repeat(2, minmax(0, 1fr))
+
+@media (max-width: 720px)
+  .shell
+    width: min(100% - 1rem, 100%)
+    padding-top: 0.75rem
+
+  .hero,
+  .panel,
+  .result-box
+    padding: 1rem
+
+  .detail-grid,
+  .summary-grid,
+  .summary-grid.compact,
+  .composer-grid,
+  .graph-stage,
+  .fact-grid,
+  .fact-grid-tight,
+  .stack,
+  .two-col
+    grid-template-columns: 1fr
+
+  .composer-grid .span-2
+    grid-column: auto
+
+  .panel-head,
+  .rendered-head
+    flex-direction: column
+
+  .swarm-item
+    align-items: flex-start
     flex-direction: column
