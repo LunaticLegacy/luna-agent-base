@@ -3,10 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request, stream_with_context
 
 from core.swarm_loader import SwarmLoaderError, load_all_swarms
 from core.swarm_spec import load_root_config
+from web.runs import (
+    RunRegistry,
+    serialize_graph_snapshot,
+    serialize_swarm_detail,
+    serialize_swarm_summary,
+    stream_run_events,
+)
 from web.utils import to_jsonable
 
 from .errors import register_error_handlers
@@ -20,6 +27,7 @@ def _load_runtime_registry(config_path: Path) -> Dict[str, object]:
         "config_path": config_path,
         "root_config": root_config,
         "swarms": {swarm.manifest.swarm_name: swarm for swarm in swarms},
+        "runs": RunRegistry(),
     }
 
 
@@ -75,24 +83,7 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
     def api_swarms():
         registry = app.extensions.get("angelus_runtime", {})
         swarms = registry.get("swarms", {})
-        payload = []
-        for swarm in swarms.values():
-            validation = swarm.core.check_execution_graph_available()
-            payload.append(
-                {
-                    "swarm_name": swarm.manifest.swarm_name,
-                    "package_path": str(swarm.package_path),
-                    "manifest_path": str(swarm.manifest_path),
-                    "graph_file": swarm.manifest.graph_file,
-                    "agent_count": len(swarm.core.list_agents()),
-                    "skill_count": len(swarm.core.list_skills()),
-                    "tool_count": len(swarm.core.tools),
-                    "graph_attached": swarm.core.get_execution_graph() is not None,
-                    "graph_valid": validation.is_valid,
-                    "graph_errors": validation.errors,
-                    "graph_warnings": validation.warnings,
-                }
-            )
+        payload = [serialize_swarm_summary(swarm) for swarm in swarms.values()]
         return jsonify({"success": True, "swarms": payload})
 
     @app.get("/api/swarms/<string:swarm_name>")
@@ -103,24 +94,27 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
         if swarm is None:
             return jsonify({"success": False, "error": f"Unknown swarm: {swarm_name}"}), 404
 
-        validation = swarm.core.check_execution_graph_available()
+        return jsonify({"success": True, "swarm": serialize_swarm_detail(swarm)})
+
+    @app.get("/api/swarms/<string:swarm_name>/graph")
+    def api_swarm_graph(swarm_name: str):
+        registry = app.extensions.get("angelus_runtime", {})
+        swarms = registry.get("swarms", {})
+        swarm = swarms.get(swarm_name)
+        if swarm is None:
+            return jsonify({"success": False, "error": f"Unknown swarm: {swarm_name}"}), 404
+
+        graph = swarm.core.get_execution_graph()
+        if graph is None:
+            return jsonify(
+                {"success": False, "error": f"Swarm '{swarm_name}' has no execution graph attached."}
+            ), 400
+
         return jsonify(
             {
                 "success": True,
-                "swarm": {
-                    "swarm_name": swarm.manifest.swarm_name,
-                    "package_path": str(swarm.package_path),
-                    "manifest_path": str(swarm.manifest_path),
-                    "graph_file": swarm.manifest.graph_file,
-                    "agent_files": list(swarm.manifest.agent_files),
-                    "agent_count": len(swarm.core.list_agents()),
-                    "skill_count": len(swarm.core.list_skills()),
-                    "tool_count": len(swarm.core.tools),
-                    "graph_attached": swarm.core.get_execution_graph() is not None,
-                    "graph_valid": validation.is_valid,
-                    "graph_errors": validation.errors,
-                    "graph_warnings": validation.warnings,
-                },
+                "swarm": swarm_name,
+                "graph": serialize_graph_snapshot(graph),
             }
         )
 
@@ -150,6 +144,63 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
                 "metadata": to_jsonable(state.metadata),
             }
         )
+
+    @app.post("/api/swarms/<string:swarm_name>/runs")
+    def api_start_swarm_run(swarm_name: str):
+        registry = app.extensions.get("angelus_runtime", {})
+        swarms = registry.get("swarms", {})
+        swarm = swarms.get(swarm_name)
+        if swarm is None:
+            return jsonify({"success": False, "error": f"Unknown swarm: {swarm_name}"}), 404
+
+        graph = swarm.core.get_execution_graph()
+        if graph is None:
+            return jsonify({"success": False, "error": f"Swarm '{swarm_name}' has no execution graph attached."}), 400
+
+        request_data = request.get_json(silent=True) or {}
+        payload = request_data.get("input")
+        rounds = int(request_data.get("rounds", 0))
+        runs: RunRegistry = registry.get("runs")
+        record = runs.launch_run(
+            swarm_name=swarm_name,
+            core=swarm.core,
+            graph=graph,
+            initial_payload=payload,
+            rounds=rounds,
+        )
+        return jsonify(
+            {
+                "success": True,
+                "status": "started",
+                "swarm": swarm_name,
+                "run": record.snapshot(),
+            }
+        ), 202
+
+    @app.get("/api/runs/<string:run_id>")
+    def api_get_run(run_id: str):
+        registry = app.extensions.get("angelus_runtime", {})
+        runs: RunRegistry = registry.get("runs")
+        record = runs.get_run(run_id) if runs is not None else None
+        if record is None:
+            return jsonify({"success": False, "error": f"Unknown run: {run_id}"}), 404
+        return jsonify({"success": True, "run": record.snapshot()})
+
+    @app.get("/api/runs/<string:run_id>/events")
+    def api_stream_run_events(run_id: str):
+        registry = app.extensions.get("angelus_runtime", {})
+        runs: RunRegistry = registry.get("runs")
+        record = runs.get_run(run_id) if runs is not None else None
+        if record is None:
+            return jsonify({"success": False, "error": f"Unknown run: {run_id}"}), 404
+
+        response = Response(
+            stream_with_context(stream_run_events(record)),
+            mimetype="text/event-stream",
+        )
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+        return response
 
     @app.post("/api/swarms/<string:swarm_name>/agents/<string:agent_id>/round")
     async def api_run_agent_round(swarm_name: str, agent_id: str):

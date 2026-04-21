@@ -21,6 +21,10 @@ class NotFoundError(ApiError):
     status_code = 404
 
 
+class RunNotFoundError(NotFoundError):
+    """Raised when a requested live run cannot be found."""
+
+
 class ConflictError(ApiError):
     status_code = 409
 

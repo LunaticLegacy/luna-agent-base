@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .policy import AgentNode, ExecutionGraph, ExecutionStep, ToolNode
-from .results import ExecutionState
+from .results import ExecutionEvent, ExecutionState
 from .toodefl import ToolContext
 
 if TYPE_CHECKING:
@@ -20,6 +20,9 @@ class GraphExecutor:
         initial_payload: Any,
         *,
         rounds: int = 0,
+        run_id: Optional[str] = None,
+        swarm_name: Optional[str] = None,
+        event_sink: Optional[Callable[[ExecutionEvent], None]] = None,
     ) -> ExecutionState:
         validation = graph.validate(core)
         if not validation.is_valid:
@@ -28,7 +31,62 @@ class GraphExecutor:
             raise ValueError("Graph entry node is not set.")
 
         state = ExecutionState(payload=initial_payload, rounds=rounds)
-        return await self._execute_from_node(graph, core, state, graph.entry_node_id)
+        self._emit(
+            event_sink,
+            ExecutionEvent(
+                run_id=run_id or "",
+                swarm_name=swarm_name,
+                event_type="run.started",
+                rounds=state.rounds,
+                status="running",
+                data={
+                    "entry_node_id": graph.entry_node_id,
+                    "entry_node_name": graph.nodes[graph.entry_node_id].node_name,
+                    "state_snapshot": state.snapshot(),
+                },
+            ),
+        )
+        try:
+            result = await self._execute_from_node(
+                graph,
+                core,
+                state,
+                graph.entry_node_id,
+                run_id=run_id,
+                swarm_name=swarm_name,
+                event_sink=event_sink,
+            )
+        except Exception as exc:
+            self._emit(
+                event_sink,
+                ExecutionEvent(
+                    run_id=run_id or "",
+                    swarm_name=swarm_name,
+                    event_type="run.failed",
+                    rounds=state.rounds,
+                    status="failed",
+                    data={
+                        "error": str(exc),
+                        "state_snapshot": state.snapshot(),
+                    },
+                ),
+            )
+            raise
+
+        self._emit(
+            event_sink,
+            ExecutionEvent(
+                run_id=run_id or "",
+                swarm_name=swarm_name,
+                event_type="run.completed",
+                rounds=result.rounds,
+                status="completed",
+                data={
+                    "state_snapshot": result.snapshot(),
+                },
+            ),
+        )
+        return result
 
     async def _execute_from_node(
         self,
@@ -36,12 +94,34 @@ class GraphExecutor:
         core: "Core",
         state: ExecutionState,
         current_node_id: Optional[int],
+        *,
+        run_id: Optional[str] = None,
+        swarm_name: Optional[str] = None,
+        event_sink: Optional[Callable[[ExecutionEvent], None]] = None,
     ) -> ExecutionState:
         while current_node_id is not None:
             node = graph.nodes[current_node_id]
             input_payload = state.payload
             output_payload = input_payload
             next_node_override: Optional[int] = None
+
+            self._emit(
+                event_sink,
+                ExecutionEvent(
+                    run_id=run_id or "",
+                    swarm_name=swarm_name,
+                    event_type="node.started",
+                    node_id=node.node_id,
+                    node_name=node.node_name,
+                    node_type=node.__class__.__name__,
+                    rounds=state.rounds,
+                    status="running",
+                    data={
+                        "input_payload": input_payload,
+                        "state_snapshot": state.snapshot(),
+                    },
+                ),
+            )
 
             try:
                 if isinstance(node, AgentNode):
@@ -98,13 +178,69 @@ class GraphExecutor:
                         error=str(exc),
                     ).__dict__
                 )
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=run_id or "",
+                        swarm_name=swarm_name,
+                        event_type="node.failed",
+                        node_id=node.node_id,
+                        node_name=node.node_name,
+                        node_type=node.__class__.__name__,
+                        rounds=state.rounds,
+                        status="failed",
+                        data={
+                            "input_payload": input_payload,
+                            "error": str(exc),
+                            "state_snapshot": state.snapshot(),
+                        },
+                    ),
+                )
                 raise
 
             next_targets = self._resolve_next_targets(graph, node, state.payload, next_node_override)
             if not next_targets:
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=run_id or "",
+                        swarm_name=swarm_name,
+                        event_type="node.completed",
+                        node_id=node.node_id,
+                        node_name=node.node_name,
+                        node_type=node.__class__.__name__,
+                        branch=None,
+                        rounds=state.rounds,
+                        status="ok",
+                        data={
+                            "input_payload": input_payload,
+                            "output_payload": output_payload,
+                            "state_snapshot": state.snapshot(),
+                        },
+                    ),
+                )
                 return state
 
             if len(next_targets) == 1:
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=run_id or "",
+                        swarm_name=swarm_name,
+                        event_type="node.completed",
+                        node_id=node.node_id,
+                        node_name=node.node_name,
+                        node_type=node.__class__.__name__,
+                        branch=None,
+                        rounds=state.rounds,
+                        status="ok",
+                        data={
+                            "input_payload": input_payload,
+                            "output_payload": output_payload,
+                            "state_snapshot": state.snapshot(),
+                        },
+                    ),
+                )
                 current_node_id = next_targets[0]
                 continue
 
@@ -115,12 +251,57 @@ class GraphExecutor:
                     branch_state = state.clone()
                     branch_state.metadata["branch_index"] = branch_index
                     branch_state.metadata["branch_source_node_id"] = node.node_id
-                    branch_state = await self._execute_from_node(
-                        graph,
-                        core,
-                        branch_state,
-                        branch_node_id,
+                    self._emit(
+                        event_sink,
+                        ExecutionEvent(
+                            run_id=run_id or "",
+                            swarm_name=swarm_name,
+                            event_type="branch.started",
+                            node_id=branch_node_id,
+                            node_name=graph.nodes[branch_node_id].node_name,
+                            node_type=graph.nodes[branch_node_id].__class__.__name__,
+                            branch=str(branch_index),
+                            rounds=branch_state.rounds,
+                            status="running",
+                            data={
+                                "source_node_id": node.node_id,
+                                "branch_index": branch_index,
+                                "state_snapshot": branch_state.snapshot(),
+                            },
+                        ),
                     )
+                    try:
+                        branch_state = await self._execute_from_node(
+                            graph,
+                            core,
+                            branch_state,
+                            branch_node_id,
+                            run_id=run_id,
+                            swarm_name=swarm_name,
+                            event_sink=event_sink,
+                        )
+                    except Exception as exc:
+                        self._emit(
+                            event_sink,
+                            ExecutionEvent(
+                                run_id=run_id or "",
+                                swarm_name=swarm_name,
+                                event_type="branch.failed",
+                                node_id=branch_node_id,
+                                node_name=graph.nodes[branch_node_id].node_name,
+                                node_type=graph.nodes[branch_node_id].__class__.__name__,
+                                branch=str(branch_index),
+                                rounds=branch_state.rounds,
+                                status="failed",
+                                data={
+                                    "source_node_id": node.node_id,
+                                    "branch_index": branch_index,
+                                    "error": str(exc),
+                                    "state_snapshot": branch_state.snapshot(),
+                                },
+                            ),
+                        )
+                        raise
                     branch_results.append(
                         {
                             "branch_index": branch_index,
@@ -142,6 +323,25 @@ class GraphExecutor:
                             branch=str(branch_index),
                         ).__dict__
                     )
+                    self._emit(
+                        event_sink,
+                        ExecutionEvent(
+                            run_id=run_id or "",
+                            swarm_name=swarm_name,
+                            event_type="branch.completed",
+                            node_id=branch_node_id,
+                            node_name=graph.nodes[branch_node_id].node_name,
+                            node_type="BranchResult",
+                            branch=str(branch_index),
+                            rounds=branch_state.rounds,
+                            status="ok",
+                            data={
+                                "source_node_id": node.node_id,
+                                "branch_index": branch_index,
+                                "state_snapshot": branch_state.snapshot(),
+                            },
+                        ),
+                    )
 
                 state.branch_results[str(node.node_id)] = branch_results
                 state.payload = {
@@ -154,13 +354,78 @@ class GraphExecutor:
                 )
                 join_node_id = node.metadata.get("join_node_id")
                 if join_node_id is None:
+                    self._emit(
+                        event_sink,
+                        ExecutionEvent(
+                            run_id=run_id or "",
+                            swarm_name=swarm_name,
+                            event_type="node.completed",
+                            node_id=node.node_id,
+                            node_name=node.node_name,
+                            node_type=node.__class__.__name__,
+                            branch=None,
+                            rounds=state.rounds,
+                            status="ok",
+                            data={
+                                "input_payload": input_payload,
+                                "output_payload": output_payload,
+                                "state_snapshot": state.snapshot(),
+                            },
+                        ),
+                    )
                     return state
                 current_node_id = int(join_node_id)
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=run_id or "",
+                        swarm_name=swarm_name,
+                        event_type="node.completed",
+                        node_id=node.node_id,
+                        node_name=node.node_name,
+                        node_type=node.__class__.__name__,
+                        branch=None,
+                        rounds=state.rounds,
+                        status="ok",
+                        data={
+                            "input_payload": input_payload,
+                            "output_payload": output_payload,
+                            "state_snapshot": state.snapshot(),
+                        },
+                    ),
+                )
                 continue
 
+            self._emit(
+                event_sink,
+                ExecutionEvent(
+                    run_id=run_id or "",
+                    swarm_name=swarm_name,
+                    event_type="node.completed",
+                    node_id=node.node_id,
+                    node_name=node.node_name,
+                    node_type=node.__class__.__name__,
+                    branch=None,
+                    rounds=state.rounds,
+                    status="ok",
+                    data={
+                        "input_payload": input_payload,
+                        "output_payload": output_payload,
+                        "state_snapshot": state.snapshot(),
+                    },
+                ),
+            )
             current_node_id = next_targets[0]
 
         return state
+
+    def _emit(
+        self,
+        event_sink: Optional[Callable[[ExecutionEvent], None]],
+        event: ExecutionEvent,
+    ) -> None:
+        if event_sink is not None:
+            event_sink(event)
 
     def _build_tool_arguments(self, node: ToolNode, payload: Any) -> Dict[str, Any]:
         if isinstance(payload, dict):

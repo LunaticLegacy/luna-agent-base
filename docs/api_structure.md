@@ -176,6 +176,98 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 - `result` 是这轮 agent 调用结果
 - `context` 是该 agent 的隔离上下文快照
 
+### 3.9 `GET /api/swarms/<swarm_name>/graph`
+
+返回当前 swarm 的执行图快照。
+
+返回内容包括：
+
+- `graph_name`
+- `entry_node_id`
+- `exit_node_id`
+- `node_count`
+- `edge_count`
+- `nodes`
+- `edges`
+
+这个接口用于前端先把“静态图”画出来，再叠加实时运行态。
+
+### 3.10 `POST /api/swarms/<swarm_name>/runs`
+
+启动一个异步 run session。
+
+请求体与同步 `/run` 基本一致：
+
+```json
+{
+  "input": {
+    "text": "write a summary"
+  },
+  "rounds": 0
+}
+```
+
+返回示例：
+
+```json
+{
+  "success": true,
+  "status": "started",
+  "swarm": "deepseek_demo",
+  "run": {
+    "run_id": "9f2c...",
+    "status": "running",
+    "events_url": "/api/runs/9f2c.../events",
+    "status_url": "/api/runs/9f2c..."
+  }
+}
+```
+
+这个接口不会等待图执行结束，而是返回一个 `run_id` 供后续查询和订阅。
+
+### 3.11 `GET /api/runs/<run_id>`
+
+查询一个异步 run session 的当前状态。
+
+返回内容包括：
+
+- `status`
+- `rounds`
+- `current_node_id`
+- `current_node_name`
+- `current_node_type`
+- `state`
+- `final_state`
+- `error`
+- `event_count`
+- `events_url`
+- `status_url`
+
+这个接口适合轮询式前端，也适合调试当前执行进度。
+
+### 3.12 `GET /api/runs/<run_id>/events`
+
+订阅一个异步 run session 的 SSE 事件流。
+
+该流会持续推送：
+
+- `run.started`
+- `node.started`
+- `node.completed`
+- `node.failed`
+- `branch.started`
+- `branch.completed`
+- `branch.failed`
+- `run.completed`
+- `run.failed`
+
+SSE 事件体是 JSON 字符串，前端可用来实时高亮当前节点、更新 trace 面板、展示分支状态。
+连接建立后，后端会先推送一条 `run.snapshot` 作为初始状态。
+
+更详细的实时执行协议见：
+
+- [docs/backend_live_execution.md](/run/media/luna/数据和游戏/Codes/Python/angelus/docs/backend_live_execution.md)
+
 ## 4. 错误处理
 
 当前 API 使用统一错误处理。
@@ -216,6 +308,7 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 - `root_config`
 - `swarms`
 - `load_error`
+- `runs`
 
 路由层只消费这个注册表，不直接碰文件系统。
 

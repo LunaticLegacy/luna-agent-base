@@ -448,3 +448,21 @@ API 首页，用于前端和调试工具确认服务状态。
 - `swarm_loader` 负责把磁盘上的 swarm 包装配成 runtime
 
 也就是说，后端 API 只是“触发器”和“结果出口”，真正的调度和执行都发生在 `core/`。
+
+## 11. 实时执行补充
+
+为了支持前端实时展示执行图和当前节点，后端现在还提供了一组实时执行接口：
+
+- `GET /api/swarms/<swarm_name>/graph`
+  - 获取当前 swarm 的静态图快照
+- `POST /api/swarms/<swarm_name>/runs`
+  - 启动异步 run session，返回 `run_id`
+- `GET /api/runs/<run_id>`
+  - 查询 run 当前状态
+- `GET /api/runs/<run_id>/events`
+  - 订阅 SSE 事件流
+
+这组接口和同步 `/run` 是并存关系：
+
+- 同步 `/run` 适合直接拿最终结果
+- 异步 `runs` + `events` 适合实时 UI 和调试面板

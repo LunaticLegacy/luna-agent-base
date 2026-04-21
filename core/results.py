@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -44,6 +45,16 @@ class ExecutionState:
             branch_results=copy.deepcopy(self.branch_results),
         )
 
+    def snapshot(self) -> Dict[str, Any]:
+        """Create a lightweight runtime snapshot for tracing and live streaming."""
+        return {
+            "payload": copy.deepcopy(self.payload),
+            "rounds": self.rounds,
+            "metadata": copy.deepcopy(self.metadata),
+            "trace": [dict(item) for item in self.trace],
+            "branch_results": copy.deepcopy(self.branch_results),
+        }
+
 
 @dataclass
 class GraphValidationResult:
@@ -52,3 +63,20 @@ class GraphValidationResult:
     is_valid: bool
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ExecutionEvent:
+    """One live runtime event emitted during graph execution."""
+
+    run_id: str
+    event_type: str
+    timestamp: float = field(default_factory=time.time)
+    swarm_name: Optional[str] = None
+    node_id: Optional[int] = None
+    node_name: Optional[str] = None
+    node_type: Optional[str] = None
+    branch: Optional[str] = None
+    rounds: Optional[int] = None
+    status: Optional[str] = None
+    data: Dict[str, Any] = field(default_factory=dict)

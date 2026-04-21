@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-from .results import ExecutionState, GraphValidationResult
+from .results import ExecutionEvent, ExecutionState, GraphValidationResult
 
 if TYPE_CHECKING:
     from .core import Core
@@ -238,12 +238,23 @@ class ExecutionGraph:
         initial_payload: Any,
         *,
         rounds: int = 0,
+        run_id: Optional[str] = None,
+        swarm_name: Optional[str] = None,
+        event_sink: Optional[Callable[[ExecutionEvent], None]] = None,
     ) -> ExecutionState:
         """Execute the graph from its entry node."""
         from .executor import GraphExecutor
 
         executor = GraphExecutor()
-        return await executor.execute(self, core, initial_payload, rounds=rounds)
+        return await executor.execute(
+            self,
+            core,
+            initial_payload,
+            rounds=rounds,
+            run_id=run_id,
+            swarm_name=swarm_name,
+            event_sink=event_sink,
+        )
 
     def clone(self) -> "ExecutionGraph":
         """Create a shallow clone of the graph structure."""
