@@ -77,9 +77,9 @@ class AgentManagerTool(ToolDefinition):
                     "spawned_agent_skill": skill_name,
                     "spawned_agent_node_id": node_id,
                     "spawned_agent_next_node_ids": list(next_node_ids),
-                    "next_node_id": node_id,
                 }
             )
+            self._validate_runtime_graph(context)
             return {
                 "success": True,
                 "action": "create_agent",
@@ -87,7 +87,6 @@ class AgentManagerTool(ToolDefinition):
                 "agent_name": agent.name,
                 "content": content_passthrough,
                 "metadata_patch": metadata_patch,
-                "next_node_id": node_id,
             }
 
         if action in {"destroy", "destroy_agent", "remove", "remove_agent", "delete", "delete_agent"}:
@@ -105,13 +104,14 @@ class AgentManagerTool(ToolDefinition):
                     "deleted_agent_name": getattr(agent, "name", agent_id) if agent is not None else agent_id,
                 }
             )
+            self._validate_runtime_graph(context)
             return {
                 "success": True,
                 "action": "destroy_agent",
                 "agent_id": agent_id,
                 "content": content_passthrough,
                 "metadata_patch": metadata_patch,
-                "next_node_id": self._pick_optional_value(control_source, runtime_metadata, "next_node_id"),
+                "metadata_clear": self._cleanup_metadata_keys(),
             }
 
         raise ValueError(f"Unknown agent_manager action: {action}")
@@ -202,6 +202,28 @@ class AgentManagerTool(ToolDefinition):
         if isinstance(raw, list):
             return [int(item) for item in raw]
         return [int(raw)]
+
+    def _validate_runtime_graph(self, context: ToolContext) -> None:
+        graph = context.core.get_execution_graph()
+        if graph is None:
+            return
+        validation = graph.validate(context.core)
+        if not validation.is_valid:
+            raise ValueError("; ".join(validation.errors))
+
+    def _cleanup_metadata_keys(self) -> list[str]:
+        return [
+            "agent_action",
+            "spawned_agent_id",
+            "spawned_agent_name",
+            "spawned_agent_prompt",
+            "spawned_agent_skill",
+            "spawned_agent_node_id",
+            "spawned_agent_next_node_ids",
+            "deleted_agent_id",
+            "deleted_agent_name",
+            "next_node_id",
+        ]
 
     def _compose_prompt(
         self,

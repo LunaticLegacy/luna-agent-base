@@ -32,6 +32,13 @@
 
 节点 metadata 仍然允许继续扩展，前端应保留未知字段并原样展示。
 
+### `runtime_transient`
+
+- 类型：`bool`
+- 语义：
+  - 表示该节点是运行时临时节点
+  - 允许 runtime 在临时 agent 已删除、但对应节点尚未移除时，把它视为可接受的过渡态
+
 ---
 
 ## 2. 运行状态 metadata
@@ -61,6 +68,13 @@
 
 - 工具可继续写入新的执行上下文信息
 - 前端应把未知字段展示为原始 JSON
+
+### `metadata_clear`
+
+- 类型：`array[string]` 或 `string`
+- 语义：
+  - 指示执行器从 `state.metadata` 删除哪些旧控制键
+  - 适合 cleanup 场景清理 `next_node_id`、`spawned_agent_*` 等残留值
 
 ---
 
@@ -227,4 +241,3 @@ skill asset 会把 contract 结构扁平化到 `metadata` 中。当前字段包�
 - `requires_skills`
 - `failure_policy`
 - `parallelizable`
-

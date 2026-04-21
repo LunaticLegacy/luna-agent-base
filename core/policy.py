@@ -160,6 +160,10 @@ class ExecutionGraph:
         if node_id not in self.nodes:
             raise KeyError(f"Unknown node_id: {node_id}")
 
+    def _allows_missing_binding(self, node: Node) -> bool:
+        metadata = node.metadata if isinstance(node.metadata, dict) else {}
+        return bool(metadata.get("runtime_transient") or metadata.get("temporary"))
+
     def validate(self, core: Optional["Core"] = None) -> GraphValidationResult:
         """Validate graph structure and runtime bindings."""
         errors: List[str] = []
@@ -200,17 +204,29 @@ class ExecutionGraph:
                 if not node.agent_id:
                     errors.append(f"Agent node {node.node_id} has no agent_id.")
                 elif core is not None and node.agent_id not in core.agents:
-                    errors.append(
-                        f"Agent node {node.node_id} references missing agent '{node.agent_id}'."
-                    )
+                    if self._allows_missing_binding(node):
+                        warnings.append(
+                            f"Agent node {node.node_id} references missing agent '{node.agent_id}' "
+                            "but is marked transient."
+                        )
+                    else:
+                        errors.append(
+                            f"Agent node {node.node_id} references missing agent '{node.agent_id}'."
+                        )
 
             if isinstance(node, ToolNode):
                 if not node.tool_name:
                     errors.append(f"Tool node {node.node_id} has no tool_name.")
                 elif core is not None and node.tool_name not in core.tools:
-                    errors.append(
-                        f"Tool node {node.node_id} references missing tool '{node.tool_name}'."
-                    )
+                    if self._allows_missing_binding(node):
+                        warnings.append(
+                            f"Tool node {node.node_id} references missing tool '{node.tool_name}' "
+                            "but is marked transient."
+                        )
+                    else:
+                        errors.append(
+                            f"Tool node {node.node_id} references missing tool '{node.tool_name}'."
+                        )
 
         if self.entry_node_id is not None and self.entry_node_id not in self.nodes:
             errors.append("Graph entry node references a missing node.")

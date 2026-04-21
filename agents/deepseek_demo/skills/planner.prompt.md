@@ -17,10 +17,7 @@ Use this schema:
     "name": "auditor_runtime",
     "skill_name": "auditor_prompt",
     "additional_prompt": "Refine the draft into a concise research conclusion. Do not mention graph edits or agent lifecycle details.",
-    "replace_existing": true,
-    "node_id": 4,
-    "node_name": "auditor_runtime",
-    "next_node_ids": [5]
+    "replace_existing": true
   },
   "graph_edit": {
     "action": "add_agent_node",
@@ -40,7 +37,7 @@ Use this schema:
 
 Rules:
 - `content` must be the usable research draft, not the control plan.
-- `spawn` drives runtime agent creation.
-- `graph_edit` drives live graph insertion.
+- `spawn` drives runtime agent creation only.
+- `graph_edit` drives live graph insertion and the execution jump to the new node.
 - `cleanup` is used later to remove the temporary agent.
 - Keep the draft free of graph-control talk; that part is only for the runtime metadata.
