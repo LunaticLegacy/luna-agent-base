@@ -7,6 +7,11 @@
     "eyebrow": "Angelus 编队运行时",
     "lede": "检查运行状态、浏览已加载编队、触发图谱执行，并直接调用代理。"
   },
+  "locale": {
+    "label": "语言",
+    "zhCN": "中文",
+    "enUS": "English"
+  },
   "status": {
     "apiPrefix": "API",
     "healthPrefix": "健康",
@@ -121,8 +126,7 @@
       "branchMember": "分支成员",
       "joinTarget": "汇合目标",
       "node": "节点"
-    }
-    ,
+    },
     "routePolicyAll": "全部分支",
     "routePolicyFirst": "默认顺序",
     "routePolicyDefault": "默认",

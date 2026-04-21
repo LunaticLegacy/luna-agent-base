@@ -2,6 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import enUS from './i18n/en-US.json';
 import zhCN from './i18n/zh-CN.json';
 
 import { ApiService } from './api.service';
@@ -224,6 +225,9 @@ interface ExecutionFeedbackView {
   tone: 'neutral' | 'running' | 'success' | 'error';
 }
 
+type LocaleCode = 'zh-CN' | 'en-US';
+type LocaleBundle = typeof zhCN;
+
 @Component({
   selector: 'app-root',
   imports: [CommonModule, FormsModule],
@@ -234,7 +238,14 @@ export class App implements OnDestroy {
   private readonly api = inject(ApiService);
   private runEventSource: EventSource | null = null;
   private graphDragState: GraphDragState | null = null;
-  protected readonly text = zhCN;
+  private readonly bundles: Record<LocaleCode, LocaleBundle> = {
+    'zh-CN': zhCN,
+    'en-US': enUS as LocaleBundle,
+  };
+  protected readonly locale = signal<LocaleCode>(this.resolveInitialLocale());
+  protected get text(): LocaleBundle {
+    return this.bundles[this.locale()];
+  }
   private readonly runEventTypes = [
     'run.started',
     'node.started',
@@ -247,7 +258,7 @@ export class App implements OnDestroy {
     'run.failed',
   ];
 
-  protected readonly title = signal(zhCN.app.title);
+  protected readonly title = computed(() => this.text.app.title);
   protected readonly apiBaseUrl = signal('/api');
   protected readonly loading = signal(false);
   protected readonly executionLoading = signal(false);
@@ -280,10 +291,10 @@ export class App implements OnDestroy {
   protected readonly swarmRunStatus = signal<'idle' | 'launching' | 'running' | 'success' | 'error'>('idle');
   protected readonly agentRunOutput = signal<Record<string, unknown> | null>(null);
   protected readonly agentRunView = computed(() => this.buildAgentRunView(this.agentRunOutput()));
-  protected readonly swarmTask = signal(zhCN.swarm.placeholders.task);
-  protected readonly swarmContext = signal(zhCN.swarm.placeholders.context);
-  protected readonly swarmAudience = signal(zhCN.swarm.placeholders.audience);
-  protected readonly swarmOutputFormat = signal(zhCN.swarm.placeholders.outputFormat);
+  protected readonly swarmTask = signal(this.text.swarm.placeholders.task);
+  protected readonly swarmContext = signal(this.text.swarm.placeholders.context);
+  protected readonly swarmAudience = signal(this.text.swarm.placeholders.audience);
+  protected readonly swarmOutputFormat = signal(this.text.swarm.placeholders.outputFormat);
   protected readonly swarmConstraints = signal('');
   protected readonly swarmRequestPayload = computed(() => this.buildSwarmRequestPayload());
   protected readonly swarmRequestView = computed(() => this.buildPayloadView(this.swarmRequestPayload()));
@@ -320,7 +331,7 @@ export class App implements OnDestroy {
 
   protected readonly swarmRounds = signal(0);
 
-  protected readonly agentMessage = signal(zhCN.agent.placeholders.message);
+  protected readonly agentMessage = signal(this.text.agent.placeholders.message);
   protected readonly agentRounds = signal(0);
   protected readonly agentAdditionalPrompt = signal('');
 
@@ -330,6 +341,33 @@ export class App implements OnDestroy {
 
   ngOnDestroy() {
     this.closeRunStream();
+  }
+
+  setLocale(value: string) {
+    const nextLocale: LocaleCode = value === 'zh-CN' ? 'zh-CN' : 'en-US';
+    this.locale.set(nextLocale);
+    try {
+      window.localStorage.setItem('angelus.locale', nextLocale);
+    } catch {
+      // Ignore persistence failures and keep the in-memory locale.
+    }
+  }
+
+  private resolveInitialLocale(): LocaleCode {
+    try {
+      const stored = window.localStorage.getItem('angelus.locale');
+      if (stored === 'zh-CN' || stored === 'en-US') {
+        return stored;
+      }
+    } catch {
+      // Fall back to navigator/default locale.
+    }
+
+    const preferred = typeof navigator !== 'undefined' ? navigator.language : '';
+    if (preferred.toLowerCase().startsWith('zh')) {
+      return 'zh-CN';
+    }
+    return 'en-US';
   }
 
   async loadOverview() {
