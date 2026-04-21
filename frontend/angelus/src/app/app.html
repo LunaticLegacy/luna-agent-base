@@ -1,22 +1,20 @@
 <main class="shell">
   <section class="hero card">
     <div class="hero-copy">
-      <p class="eyebrow">Angelus swarm runtime</p>
+      <p class="eyebrow">{{ text.hero.eyebrow }}</p>
       <h1>{{ title() }}</h1>
-      <p class="lede">
-        Inspect runtime status, explore loaded swarms, trigger graph execution, and call agents directly.
-      </p>
+      <p class="lede">{{ text.hero.lede }}</p>
       <div class="status-row">
-        <span class="chip">api: {{ apiIndex()?.api_root ?? apiBaseUrl() }}</span>
-        <span class="chip" [class.ok]="health()?.['status'] === 'ok'">health: {{ health()?.['status'] ?? 'unknown' }}</span>
-        <span class="chip" [class.ok]="ready()?.['ready'] === true">ready: {{ ready()?.['ready'] ? 'yes' : 'no' }}</span>
-        <span class="chip">{{ swarms().length }} swarms loaded</span>
+        <span class="chip">{{ text.status.apiPrefix }}: {{ apiIndex()?.api_root ?? apiBaseUrl() }}</span>
+        <span class="chip" [class.ok]="health()?.['status'] === 'ok'">{{ text.status.healthPrefix }}: {{ displayHealthStatus(health()?.['status'] ?? null) }}</span>
+        <span class="chip" [class.ok]="ready()?.['ready'] === true">{{ text.status.readyPrefix }}: {{ displayReadyStatus(ready()?.['ready'] ?? null) }}</span>
+        <span class="chip">{{ swarms().length }} {{ text.status.loadedSwarms }}</span>
       </div>
     </div>
 
     <div class="hero-actions">
       <label>
-        <span>API base URL</span>
+        <span>{{ text.actions.apiBaseUrl }}</span>
         <input
           type="text"
           [ngModel]="apiBaseUrl()"
@@ -25,8 +23,8 @@
         />
       </label>
       <div class="action-row">
-        <button type="button" (click)="loadOverview()" [disabled]="loading()">Refresh overview</button>
-        <button type="button" class="secondary" (click)="reloadSelectedSwarm()" [disabled]="loading() || !selectedSwarmName()">Reload swarm</button>
+        <button type="button" (click)="loadOverview()" [disabled]="loading()">{{ text.actions.refreshOverview }}</button>
+        <button type="button" class="secondary" (click)="reloadSelectedSwarm()" [disabled]="loading() || !selectedSwarmName()">{{ text.actions.reloadSwarm }}</button>
       </div>
       @if (error()) {
         <p class="error-box">{{ error() }}</p>
@@ -38,8 +36,8 @@
     <aside class="card panel list-panel">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">Loaded swarms</p>
-          <h2>Swarm registry</h2>
+          <p class="eyebrow">{{ text.overview.loadedSwarms }}</p>
+          <h2>{{ text.overview.registry }}</h2>
         </div>
       </div>
 
@@ -55,12 +53,12 @@
               <strong>{{ swarm.swarm_name }}</strong>
               <span>{{ swarm.graph_file }}</span>
             </div>
-            <small>{{ swarm.agent_count }} agents · {{ swarm.tool_count }} tools</small>
+            <small>{{ swarm.agent_count }} {{ text.swarmDetail.agents }} · {{ swarm.tool_count }} {{ text.swarmDetail.tools }}</small>
           </button>
         } @empty {
           <div class="empty-state">
-            <strong>No swarms loaded.</strong>
-            <p>Make sure the Flask backend is running and the `agents/` packages are valid.</p>
+            <strong>{{ text.overview.noSwarms }}</strong>
+            <p>{{ text.overview.noSwarmsHint }}</p>
           </div>
         }
       </div>
@@ -69,37 +67,37 @@
     <section class="card panel detail-panel">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">Selected swarm</p>
-          <h2>{{ selectedSwarm()?.swarm_name ?? 'No swarm selected' }}</h2>
+          <p class="eyebrow">{{ text.swarmDetail.selected }}</p>
+          <h2>{{ selectedSwarm()?.swarm_name ?? text.swarmDetail.noSelection }}</h2>
         </div>
         @if (selectedSwarm()) {
-          <span class="chip" [class.ok]="selectedSummary()?.graph_valid === true">graph valid</span>
+          <span class="chip" [class.ok]="selectedSummary()?.graph_valid === true">{{ text.status.graphValid }}</span>
         }
       </div>
 
       @if (selectedSwarm(); as swarm) {
         <div class="detail-grid">
           <div class="metric">
-            <span>Agents</span>
+            <span>{{ text.swarmDetail.agents }}</span>
             <strong>{{ swarm.agent_count }}</strong>
           </div>
           <div class="metric">
-            <span>Skills</span>
+            <span>{{ text.swarmDetail.skills }}</span>
             <strong>{{ swarm.skill_count }}</strong>
           </div>
           <div class="metric">
-            <span>Tools</span>
+            <span>{{ text.swarmDetail.tools }}</span>
             <strong>{{ swarm.tool_count }}</strong>
           </div>
           <div class="metric">
-            <span>Graph</span>
+            <span>{{ text.swarmDetail.graph }}</span>
             <strong>{{ swarm.graph_file }}</strong>
           </div>
         </div>
 
         <div class="stack">
           <section class="subcard">
-            <h3>Agent files</h3>
+            <h3>{{ text.swarmDetail.agentFiles }}</h3>
             <ul>
               @for (agentFile of swarm.agent_files; track agentFile) {
                 <li>{{ agentFile }}</li>
@@ -108,7 +106,7 @@
           </section>
 
           <section class="subcard">
-            <h3>Validation</h3>
+            <h3>{{ text.swarmDetail.validation }}</h3>
             @if (swarm.graph_errors.length) {
               <ul class="warning-list">
                 @for (item of swarm.graph_errors; track item) {
@@ -124,7 +122,7 @@
               </ul>
             }
             @if (!swarm.graph_errors.length && !swarm.graph_warnings.length) {
-              <p class="muted">No graph validation issues reported.</p>
+              <p class="muted">{{ text.swarmDetail.noValidationIssues }}</p>
             }
           </section>
         </div>
@@ -136,12 +134,12 @@
     <section class="card panel graph-panel">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">Execution graph</p>
-          <h2>Graph snapshot and spectrum</h2>
+          <p class="eyebrow">{{ text.graph.eyebrow }}</p>
+          <h2>{{ text.graph.title }}</h2>
         </div>
         <div class="tab-row">
-          <button type="button" class="secondary" [class.active-tab]="graphTab() === 'snapshot'" (click)="setGraphTab('snapshot')">Current graph snapshot</button>
-          <button type="button" class="secondary" [class.active-tab]="graphTab() === 'spectrum'" (click)="setGraphTab('spectrum')">Graph spectrum</button>
+          <button type="button" class="secondary" [class.active-tab]="graphTab() === 'snapshot'" (click)="setGraphTab('snapshot')">{{ text.graph.snapshotTab }}</button>
+          <button type="button" class="secondary" [class.active-tab]="graphTab() === 'spectrum'" (click)="setGraphTab('spectrum')">{{ text.graph.spectrumTab }}</button>
         </div>
       </div>
 
@@ -152,26 +150,26 @@
       @if (graphTab() === 'snapshot') {
         <div class="graph-snapshot-shell">
           <div class="action-row">
-            <button type="button" class="secondary" (click)="reloadSelectedGraph()" [disabled]="loading() || !selectedSwarmName()">Refresh graph</button>
+            <button type="button" class="secondary" (click)="reloadSelectedGraph()" [disabled]="loading() || !selectedSwarmName()">{{ text.actions.refreshGraph }}</button>
           </div>
 
           @if (graphView(); as view) {
             <div class="summary-grid compact">
               <div class="summary-item">
-                <span>Graph</span>
+                <span>{{ text.graph.graph }}</span>
                 <strong>{{ view.graphName }}</strong>
               </div>
               <div class="summary-item">
-                <span>Entry</span>
-                <strong>{{ view.entryNodeId ?? 'none' }}</strong>
+                <span>{{ text.graph.entry }}</span>
+                <strong>{{ view.entryNodeId ?? text.graph.none }}</strong>
               </div>
               <div class="summary-item">
-                <span>Current</span>
-                <strong>{{ view.currentNodeName ?? 'idle' }}</strong>
+                <span>{{ text.graph.current }}</span>
+                <strong>{{ view.currentNodeName ?? text.graph.idle }}</strong>
               </div>
               <div class="summary-item">
-                <span>Status</span>
-                <strong>{{ view.status ?? 'idle' }}</strong>
+                <span>{{ text.graph.status }}</span>
+                <strong>{{ displayRunStatus(view.status ?? null) }}</strong>
               </div>
             </div>
 
@@ -180,15 +178,15 @@
                 <article class="graph-node" [class.entry]="node.isEntry" [class.exit]="node.isExit" [class.running]="node.status === 'running'" [class.completed]="node.status === 'completed'" [class.failed]="node.status === 'failed'">
                   <div class="graph-node-head">
                     <strong>#{{ node.node_id }} {{ node.node_name }}</strong>
-                    <span class="chip">{{ node.status }}</span>
+                    <span class="chip">{{ displayNodeStatus(node.status) }}</span>
                   </div>
                   <p>{{ node.node_type }}</p>
-                  <small>next: {{ node.next_node_ids.length ? node.next_node_ids.join(', ') : 'none' }}</small>
+                  <small>{{ text.labels.next }}: {{ node.next_node_ids.length ? node.next_node_ids.join(', ') : text.graph.none }}</small>
                   @if (node.agent_id) {
-                    <small>agent: {{ node.agent_id }}</small>
+                    <small>{{ text.labels.agent }}: {{ node.agent_id }}</small>
                   }
                   @if (node.tool_name) {
-                    <small>tool: {{ node.tool_name }}</small>
+                    <small>{{ text.labels.tool }}: {{ node.tool_name }}</small>
                   }
                 </article>
               }
@@ -208,27 +206,27 @@
             }
 
             <details class="raw-details">
-              <summary>Raw graph JSON</summary>
+              <summary>{{ text.graph.rawSnapshot }}</summary>
               <pre>{{ view.rawJson }}</pre>
             </details>
           } @else {
-            <p class="muted">No graph loaded yet.</p>
+            <p class="muted">{{ text.graph.noGraph }}</p>
           }
         </div>
       } @else {
         <div class="graph-spectrum-shell">
           <div class="panel-toolbar">
-            <span class="chip">vector svg</span>
-            <span class="chip">zoom {{ (graphSpectrumView()?.zoom ?? 1) | number:'1.0-1' }}x</span>
+            <span class="chip">{{ text.graph.vectorSvg }}</span>
+            <span class="chip">{{ text.graph.zoom }} {{ (graphSpectrumView()?.zoom ?? 1) | number:'1.0-1' }}x</span>
             <div class="tab-row">
-              <button type="button" class="secondary" [class.active-tab]="graphLayout() === 'horizontal'" (click)="setGraphLayout('horizontal')">Horizontal</button>
-              <button type="button" class="secondary" [class.active-tab]="graphLayout() === 'vertical'" (click)="setGraphLayout('vertical')">Vertical</button>
+              <button type="button" class="secondary" [class.active-tab]="graphLayout() === 'horizontal'" (click)="setGraphLayout('horizontal')">{{ text.graph.horizontal }}</button>
+              <button type="button" class="secondary" [class.active-tab]="graphLayout() === 'vertical'" (click)="setGraphLayout('vertical')">{{ text.graph.vertical }}</button>
             </div>
             <div class="action-row">
-              <button type="button" class="secondary" (click)="zoomGraphOut()" [disabled]="!graphSpectrumView()">Zoom out</button>
-              <button type="button" class="secondary" (click)="resetGraphZoom()" [disabled]="!graphSpectrumView()">Reset</button>
-              <button type="button" class="secondary" (click)="zoomGraphIn()" [disabled]="!graphSpectrumView()">Zoom in</button>
-              <button type="button" class="secondary" (click)="reloadSelectedGraph()" [disabled]="loading() || !selectedSwarmName()">Refresh graph</button>
+              <button type="button" class="secondary" (click)="zoomGraphOut()" [disabled]="!graphSpectrumView()">{{ text.actions.zoomOut }}</button>
+              <button type="button" class="secondary" (click)="resetGraphZoom()" [disabled]="!graphSpectrumView()">{{ text.actions.reset }}</button>
+              <button type="button" class="secondary" (click)="zoomGraphIn()" [disabled]="!graphSpectrumView()">{{ text.actions.zoomIn }}</button>
+              <button type="button" class="secondary" (click)="reloadSelectedGraph()" [disabled]="loading() || !selectedSwarmName()">{{ text.actions.refreshGraph }}</button>
             </div>
           </div>
 
@@ -238,10 +236,10 @@
                 <aside class="graph-spectrum-inspector">
                   <div class="rendered-head">
                     <div>
-                      <p class="eyebrow">Node detail</p>
+                      <p class="eyebrow">{{ text.nodeDetail.eyebrow }}</p>
                       <h4>{{ detail.node.node_name }}</h4>
                     </div>
-                    <button type="button" class="secondary inspector-close" (click)="selectedGraphNodeId.set(null)">Close</button>
+                    <button type="button" class="secondary inspector-close" (click)="selectedGraphNodeId.set(null)">{{ text.nodeDetail.close }}</button>
                   </div>
 
                   <div class="summary-grid compact inspector-summary">
@@ -289,7 +287,7 @@
                     <article class="rendered-block inspector-block">
                       <div class="rendered-head">
                         <h4>{{ section.title }}</h4>
-                        <span class="chip">{{ section.facts.length }} facts</span>
+                        <span class="chip">{{ section.facts.length }} {{ text.status.factsSuffix }}</span>
                       </div>
 
                       @if (section.facts.length) {
@@ -314,7 +312,7 @@
                   }
 
                   <details class="raw-details inspector-raw">
-                    <summary>Raw node JSON</summary>
+                    <summary>{{ text.nodeDetail.rawJson }}</summary>
                     <pre>{{ detail.rawJson }}</pre>
                   </details>
                 </aside>
@@ -325,7 +323,7 @@
                 [class.dragging]="graphDragging()"
                 [attr.viewBox]="spectrum.viewBox"
                 role="img"
-                aria-label="Swarm execution graph"
+                [attr.aria-label]="text.graph.ariaLabel"
                 (click)="clearGraphSelection()"
                 (pointerdown)="startGraphDrag($event)"
                 (pointermove)="moveGraphDrag($event)"
@@ -373,51 +371,51 @@
 
             <div class="summary-grid compact graph-spectrum-summary">
               <div class="summary-item">
-                <span>Graph</span>
-                <strong>{{ selectedGraph()?.graph_name ?? 'unknown' }}</strong>
+                <span>{{ text.labels.graph }}</span>
+                <strong>{{ selectedGraph()?.graph_name ?? text.status.unknown }}</strong>
               </div>
               <div class="summary-item">
-                <span>Nodes</span>
+                <span>{{ text.graph.summary.nodes }}</span>
                 <strong>{{ spectrum.nodes.length }}</strong>
               </div>
               <div class="summary-item">
-                <span>Edges</span>
+                <span>{{ text.graph.summary.edges }}</span>
                 <strong>{{ spectrum.edges.length }}</strong>
               </div>
               <div class="summary-item">
-                <span>Zoom</span>
+                <span>{{ text.graph.zoom }}</span>
                 <strong>{{ spectrum.zoom | number:'1.0-1' }}x</strong>
               </div>
               <div class="summary-item">
-                <span>Branches</span>
+                <span>{{ text.graph.summary.branches }}</span>
                 <strong>{{ spectrum.semanticSummary.branchGroups.length }}</strong>
               </div>
               <div class="summary-item">
-                <span>Joins</span>
+                <span>{{ text.graph.summary.joins }}</span>
                 <strong>{{ spectrum.semanticSummary.joinGroups.length }}</strong>
               </div>
               <div class="summary-item">
-                <span>Hints</span>
+                <span>{{ text.graph.summary.hints }}</span>
                 <strong>{{ spectrum.semanticSummary.unresolvedMetadataHints.length }}</strong>
               </div>
               <div class="summary-item">
-                <span>Branch index</span>
-                <strong>{{ spectrum.branchIndex ?? 'none' }}</strong>
+                <span>{{ text.graph.summary.branchIndex }}</span>
+                <strong>{{ spectrum.branchIndex ?? text.graph.none }}</strong>
               </div>
               <div class="summary-item">
-                <span>Branch source</span>
-                <strong>{{ spectrum.branchSourceNodeId ?? 'none' }}</strong>
+                <span>{{ text.graph.summary.branchSource }}</span>
+                <strong>{{ spectrum.branchSourceNodeId ?? text.graph.none }}</strong>
               </div>
             </div>
 
-            <div class="graph-legend" aria-label="Graph legend">
-              <span class="legend-item"><i class="legend-swatch entry"></i>Entry node</span>
-              <span class="legend-item"><i class="legend-swatch running"></i>Running node</span>
-              <span class="legend-item"><i class="legend-swatch completed"></i>Completed node</span>
-              <span class="legend-item"><i class="legend-swatch failed"></i>Failed node</span>
-              <span class="legend-item"><i class="legend-swatch selected"></i>Selected node</span>
-              <span class="legend-item"><i class="legend-swatch edge"></i>Active edge</span>
-              <span class="legend-item"><i class="legend-swatch derived"></i>Derived relation</span>
+            <div class="graph-legend" [attr.aria-label]="text.graph.legendLabel">
+              <span class="legend-item"><i class="legend-swatch entry"></i>{{ text.graph.legend.entry }}</span>
+              <span class="legend-item"><i class="legend-swatch running"></i>{{ text.graph.legend.running }}</span>
+              <span class="legend-item"><i class="legend-swatch completed"></i>{{ text.graph.legend.completed }}</span>
+              <span class="legend-item"><i class="legend-swatch failed"></i>{{ text.graph.legend.failed }}</span>
+              <span class="legend-item"><i class="legend-swatch selected"></i>{{ text.graph.legend.selected }}</span>
+              <span class="legend-item"><i class="legend-swatch edge"></i>{{ text.graph.legend.edge }}</span>
+              <span class="legend-item"><i class="legend-swatch derived"></i>{{ text.graph.legend.derived }}</span>
             </div>
 
             @if (spectrum.semanticSummary.branchGroups.length || spectrum.semanticSummary.joinGroups.length) {
@@ -425,16 +423,16 @@
                 @if (spectrum.semanticSummary.branchGroups.length) {
                   <article class="semantic-group">
                     <div class="rendered-head">
-                      <h4>Branch groups</h4>
+                      <h4>{{ text.graph.branchGroups }}</h4>
                       <span class="chip">{{ spectrum.semanticSummary.branchGroups.length }}</span>
                     </div>
                     <div class="semantic-list">
                       @for (group of spectrum.semanticSummary.branchGroups; track group.sourceNodeId) {
                         <div class="semantic-row">
                           <strong>#{{ group.sourceNodeId }} {{ group.sourceNodeName }}</strong>
-                          <span>role: {{ group.joinNodeId !== null ? 'branch_source' : 'branch_member' }}</span>
-                          <small>branches: {{ group.branchIndexes.length ? group.branchIndexes.join(', ') : 'n/a' }}</small>
-                          <small>branch nodes: {{ group.branchNodeIds.length ? group.branchNodeIds.join(', ') : 'n/a' }}</small>
+                          <span>{{ text.graph.summary.role }}: {{ group.joinNodeId !== null ? text.graph.semantic.branchSource : text.graph.semantic.branchMember }}</span>
+                          <small>{{ text.graph.summary.branches }}: {{ group.branchIndexes.length ? group.branchIndexes.join(', ') : text.graph.none }}</small>
+                          <small>{{ text.graph.summary.branchNodes }}: {{ group.branchNodeIds.length ? group.branchNodeIds.join(', ') : text.graph.none }}</small>
                         </div>
                       }
                     </div>
@@ -444,14 +442,14 @@
                 @if (spectrum.semanticSummary.joinGroups.length) {
                   <article class="semantic-group">
                     <div class="rendered-head">
-                      <h4>Join groups</h4>
+                      <h4>{{ text.graph.joinGroups }}</h4>
                       <span class="chip">{{ spectrum.semanticSummary.joinGroups.length }}</span>
                     </div>
                     <div class="semantic-list">
                       @for (group of spectrum.semanticSummary.joinGroups; track group.joinNodeId) {
                         <div class="semantic-row">
                           <strong>#{{ group.joinNodeId }} {{ group.joinNodeName }}</strong>
-                          <span>sources: {{ group.sourceNodeIds.join(', ') }}</span>
+                          <span>{{ text.graph.summary.sources }}: {{ group.sourceNodeIds.join(', ') }}</span>
                           <small>{{ group.sourceNodeNames.join(' · ') }}</small>
                         </div>
                       }
@@ -463,7 +461,7 @@
 
             @if (spectrum.semanticSummary.unresolvedMetadataHints.length) {
               <details class="raw-details semantic-hints">
-                <summary>Unresolved metadata hints</summary>
+                <summary>{{ text.graph.unresolvedHints }}</summary>
                 <ul class="warning-list muted">
                   @for (hint of spectrum.semanticSummary.unresolvedMetadataHints; track hint) {
                     <li>{{ hint }}</li>
@@ -473,11 +471,11 @@
             }
 
             <details class="raw-details">
-              <summary>Raw spectrum layout</summary>
+              <summary>{{ text.graph.rawSpectrum }}</summary>
               <pre>{{ spectrum.rawJson }}</pre>
             </details>
           } @else {
-            <p class="muted">No graph loaded yet.</p>
+            <p class="muted">{{ text.graph.noGraph }}</p>
           }
         </div>
       }
@@ -486,12 +484,12 @@
     <section class="card panel workbench-panel">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">Execution workbench</p>
-          <h2>Direct agent call and swarm run</h2>
+          <p class="eyebrow">{{ text.workbench.eyebrow }}</p>
+          <h2>{{ text.workbench.title }}</h2>
         </div>
         <div class="tab-row">
-          <button type="button" class="secondary" [class.active-tab]="controlMode() === 'agent'" (click)="setControlMode('agent')">Direct agent call</button>
-          <button type="button" class="secondary" [class.active-tab]="controlMode() === 'swarm'" (click)="setControlMode('swarm')">Run selected swarm</button>
+          <button type="button" class="secondary" [class.active-tab]="controlMode() === 'agent'" (click)="setControlMode('agent')">{{ text.workbench.agentTab }}</button>
+          <button type="button" class="secondary" [class.active-tab]="controlMode() === 'swarm'" (click)="setControlMode('swarm')">{{ text.workbench.swarmTab }}</button>
         </div>
       </div>
 
@@ -501,15 +499,15 @@
 
       @if (controlMode() === 'agent') {
         <div class="page-switch">
-          <button type="button" class="secondary" [class.active-tab]="agentPage() === 'input'" (click)="setAgentPage('input')">Input</button>
-          <button type="button" class="secondary" [class.active-tab]="agentPage() === 'output'" (click)="setAgentPage('output')">Output</button>
+          <button type="button" class="secondary" [class.active-tab]="agentPage() === 'input'" (click)="setAgentPage('input')">{{ text.workbench.input }}</button>
+          <button type="button" class="secondary" [class.active-tab]="agentPage() === 'output'" (click)="setAgentPage('output')">{{ text.workbench.output }}</button>
         </div>
 
         @if (executionFeedbackView(); as feedback) {
           <div class="execution-feedback" [class.running]="feedback.status === 'running'" [class.success]="feedback.status === 'success'" [class.error]="feedback.status === 'error'">
             <div class="execution-feedback-head">
               <div>
-                <p class="eyebrow">Execution feedback</p>
+                <p class="eyebrow">{{ text.workbench.feedback }}</p>
                 <h3>{{ feedback.title }}</h3>
               </div>
               <span class="chip">{{ feedback.message }}</span>
@@ -524,25 +522,25 @@
           <section class="page-card">
             <div class="summary-grid compact">
               <div class="summary-item">
-                <span>Agent</span>
-                <strong>{{ selectedAgentId() ?? 'no agent' }}</strong>
+                <span>{{ text.agent.summary.agent }}</span>
+                <strong>{{ selectedAgentId() ?? text.status.unknown }}</strong>
               </div>
               <div class="summary-item">
-                <span>Rounds</span>
+                <span>{{ text.agent.summary.rounds }}</span>
                 <strong>{{ agentRounds() }}</strong>
               </div>
               <div class="summary-item">
-                <span>Backend</span>
-                <strong>{{ health()?.['status'] === 'ok' ? 'online' : 'offline' }}</strong>
+                <span>{{ text.agent.summary.backend }}</span>
+                <strong>{{ health()?.['status'] === 'ok' ? text.status.online : text.status.offline }}</strong>
               </div>
               <div class="summary-item">
-                <span>Mode</span>
-                <strong>input</strong>
+                <span>{{ text.agent.summary.mode }}</span>
+                <strong>{{ text.agent.mode }}</strong>
               </div>
             </div>
 
             <label>
-              <span>Agent</span>
+              <span>{{ text.agent.input.agent }}</span>
               <select [ngModel]="selectedAgentId()" (ngModelChange)="selectedAgentId.set($event)">
                 @for (agentId of availableAgentIds(); track agentId) {
                   <option [value]="agentId">{{ agentId }}</option>
@@ -551,28 +549,28 @@
             </label>
 
             <label>
-              <span>Message</span>
+              <span>{{ text.agent.input.message }}</span>
               <textarea [ngModel]="agentMessage()" (ngModelChange)="agentMessage.set($event)" rows="5"></textarea>
             </label>
 
             <label>
-              <span>Additional prompt</span>
+              <span>{{ text.agent.input.additionalPrompt }}</span>
               <textarea [ngModel]="agentAdditionalPrompt()" (ngModelChange)="agentAdditionalPrompt.set($event)" rows="4"></textarea>
             </label>
 
             <div class="two-col">
               <label>
-                <span>Rounds</span>
+                <span>{{ text.agent.input.rounds }}</span>
                 <input type="number" [ngModel]="agentRounds()" (ngModelChange)="setAgentRounds($event)" min="0" />
               </label>
               <label>
-                <span>Selected swarm</span>
-                <input type="text" [value]="selectedSwarmName() ?? ''" readonly />
+                <span>{{ text.agent.input.selectedSwarm }}</span>
+                <input type="text" [value]="selectedSwarmName() ?? text.agent.placeholders.selectedSwarm" readonly />
               </label>
             </div>
 
             <div class="action-row">
-              <button type="button" (click)="runSelectedAgent()" [disabled]="executionLoading() || !selectedSwarm()">Run agent</button>
+              <button type="button" (click)="runSelectedAgent()" [disabled]="executionLoading() || !selectedSwarm()">{{ text.agent.input.run }}</button>
             </div>
           </section>
         } @else {
@@ -592,7 +590,7 @@
                   <details class="rendered-block collapsible-result" open>
                     <summary class="rendered-head collapsible-summary">
                       <h4>{{ section.title }}</h4>
-                      <span class="chip">{{ section.facts.length }} facts</span>
+                      <span class="chip">{{ section.facts.length }} {{ text.status.factsSuffix }}</span>
                     </summary>
                     <div class="collapsible-body">
                       @if (section.facts.length) {
@@ -619,7 +617,7 @@
                   <article class="rendered-block">
                     <div class="rendered-head">
                       <h4>{{ section.title }}</h4>
-                      <span class="chip">{{ section.facts.length }} facts</span>
+                      <span class="chip">{{ section.facts.length }} {{ text.status.factsSuffix }}</span>
                     </div>
 
                     @if (section.facts.length) {
@@ -645,25 +643,25 @@
               }
 
               <details class="raw-details">
-                <summary>Raw agent JSON</summary>
+                <summary>{{ text.agent.output.rawJson }}</summary>
                 <pre>{{ view.rawJson }}</pre>
               </details>
             } @else {
-              <p class="muted">No agent round yet.</p>
+              <p class="muted">{{ text.agent.output.noRound }}</p>
             }
           </section>
         }
       } @else {
         <div class="page-switch">
-          <button type="button" class="secondary" [class.active-tab]="swarmPage() === 'input'" (click)="setSwarmPage('input')">Input</button>
-          <button type="button" class="secondary" [class.active-tab]="swarmPage() === 'output'" (click)="setSwarmPage('output')">Output</button>
+          <button type="button" class="secondary" [class.active-tab]="swarmPage() === 'input'" (click)="setSwarmPage('input')">{{ text.workbench.input }}</button>
+          <button type="button" class="secondary" [class.active-tab]="swarmPage() === 'output'" (click)="setSwarmPage('output')">{{ text.workbench.output }}</button>
         </div>
 
         @if (executionFeedbackView(); as feedback) {
           <div class="execution-feedback" [class.running]="feedback.status === 'running'" [class.success]="feedback.status === 'success'" [class.error]="feedback.status === 'error'">
             <div class="execution-feedback-head">
               <div>
-                <p class="eyebrow">Execution feedback</p>
+                <p class="eyebrow">{{ text.workbench.feedback }}</p>
                 <h3>{{ feedback.title }}</h3>
               </div>
               <span class="chip">{{ feedback.message }}</span>
@@ -688,28 +686,28 @@
 
               <div class="composer-grid">
                 <label class="span-2">
-                  <span>Task</span>
-                  <textarea [ngModel]="swarmTask()" (ngModelChange)="setSwarmTask($event)" rows="4" placeholder="What should the swarm do?"></textarea>
+                  <span>{{ text.swarm.input.task }}</span>
+                  <textarea [ngModel]="swarmTask()" (ngModelChange)="setSwarmTask($event)" rows="4" [placeholder]="text.swarm.placeholders.task"></textarea>
                 </label>
 
                 <label class="span-2">
-                  <span>Context</span>
-                  <textarea [ngModel]="swarmContext()" (ngModelChange)="setSwarmContext($event)" rows="4" placeholder="Background, scope, or special notes."></textarea>
+                  <span>{{ text.swarm.input.context }}</span>
+                  <textarea [ngModel]="swarmContext()" (ngModelChange)="setSwarmContext($event)" rows="4" [placeholder]="text.swarm.placeholders.context"></textarea>
                 </label>
 
                 <label>
-                  <span>Audience</span>
-                  <input type="text" [ngModel]="swarmAudience()" (ngModelChange)="setSwarmAudience($event)" placeholder="General audience" />
+                  <span>{{ text.swarm.input.audience }}</span>
+                  <input type="text" [ngModel]="swarmAudience()" (ngModelChange)="setSwarmAudience($event)" [placeholder]="text.swarm.placeholders.audience" />
                 </label>
 
                 <label>
-                  <span>Output format</span>
-                  <input type="text" [ngModel]="swarmOutputFormat()" (ngModelChange)="setSwarmOutputFormat($event)" placeholder="Markdown summary with headings and bullets." />
+                  <span>{{ text.swarm.input.outputFormat }}</span>
+                  <input type="text" [ngModel]="swarmOutputFormat()" (ngModelChange)="setSwarmOutputFormat($event)" [placeholder]="text.swarm.placeholders.outputFormat" />
                 </label>
 
                 <label class="span-2">
-                  <span>Constraints</span>
-                  <textarea [ngModel]="swarmConstraints()" (ngModelChange)="setSwarmConstraints($event)" rows="4" placeholder="One constraint per line, for example: stay concise"></textarea>
+                  <span>{{ text.swarm.input.constraints }}</span>
+                  <textarea [ngModel]="swarmConstraints()" (ngModelChange)="setSwarmConstraints($event)" rows="4" [placeholder]="text.swarm.placeholders.constraints"></textarea>
                 </label>
               </div>
 
@@ -717,7 +715,7 @@
                 <article class="rendered-block">
                   <div class="rendered-head">
                     <h4>{{ section.title }}</h4>
-                    <span class="chip">{{ section.facts.length }} facts</span>
+                    <span class="chip">{{ section.facts.length }} {{ text.status.factsSuffix }}</span>
                   </div>
 
                   @if (section.facts.length) {
@@ -743,21 +741,21 @@
 
               <div class="two-col">
                 <label>
-                  <span>Rounds</span>
+                  <span>{{ text.swarm.input.rounds }}</span>
                   <input type="number" [ngModel]="swarmRounds()" (ngModelChange)="setSwarmRounds($event)" min="0" />
                 </label>
                 <label>
-                  <span>Primary agent</span>
-                  <input type="text" [value]="selectedAgentId() ?? ''" readonly />
+                  <span>{{ text.swarm.input.primaryAgent }}</span>
+                  <input type="text" [value]="selectedAgentId() ?? text.agent.placeholders.selectedSwarm" readonly />
                 </label>
               </div>
 
               <div class="action-row">
-                <button type="button" (click)="runSwarm()" [disabled]="executionLoading() || !selectedSwarmName() || !swarmTask().trim()">Start async run</button>
+                <button type="button" (click)="runSwarm()" [disabled]="executionLoading() || !selectedSwarmName() || !swarmTask().trim()">{{ text.swarm.input.start }}</button>
               </div>
 
               <details class="raw-details">
-                <summary>Preview payload JSON</summary>
+                <summary>{{ text.swarm.input.preview }}</summary>
                 <pre>{{ requestView.rawJson }}</pre>
               </details>
             }
@@ -767,19 +765,19 @@
             @if (liveRunView(); as view) {
               <div class="summary-grid">
                 <div class="summary-item">
-                  <span>Run</span>
+                  <span>{{ text.swarm.summary.run }}</span>
                   <strong>{{ view.run.run_id }}</strong>
                 </div>
                 <div class="summary-item">
-                  <span>Status</span>
-                  <strong>{{ view.run.status }}</strong>
+                  <span>{{ text.swarm.summary.status }}</span>
+                  <strong>{{ displayRunStatus(view.run.status) }}</strong>
                 </div>
                 <div class="summary-item">
-                  <span>Rounds</span>
+                  <span>{{ text.swarm.summary.rounds }}</span>
                   <strong>{{ view.run.rounds }}</strong>
                 </div>
                 <div class="summary-item">
-                  <span>Events</span>
+                  <span>{{ text.swarm.summary.events }}</span>
                   <strong>{{ view.run.event_count }}</strong>
                 </div>
               </div>
@@ -787,14 +785,14 @@
               @if (view.stateView) {
                 <article class="rendered-block">
                   <div class="rendered-head">
-                    <h4>Current state</h4>
-                    <span class="chip">{{ view.run.current_node_name ?? 'waiting' }}</span>
+                    <h4>{{ text.swarm.output.currentState }}</h4>
+                    <span class="chip">{{ view.run.current_node_name ?? text.status.waiting }}</span>
                   </div>
                   @for (section of view.stateView.sections; track section.title) {
                     <article class="rendered-block nested-block">
                       <div class="rendered-head">
                         <h4>{{ section.title }}</h4>
-                        <span class="chip">{{ section.facts.length }} facts</span>
+                    <span class="chip">{{ section.facts.length }} {{ text.status.factsSuffix }}</span>
                       </div>
                       @if (section.facts.length) {
                         <dl class="fact-grid fact-grid-tight">
@@ -821,14 +819,14 @@
               @if (view.finalStateView) {
                 <article class="rendered-block">
                   <div class="rendered-head">
-                    <h4>Final state</h4>
-                    <span class="chip">{{ view.run.finished_at ?? 'not finished yet' }}</span>
+                    <h4>{{ text.swarm.output.finalState }}</h4>
+                    <span class="chip">{{ view.run.finished_at ?? text.status.pending }}</span>
                   </div>
                   @for (section of view.finalStateView.sections; track section.title) {
                     <article class="rendered-block nested-block">
                       <div class="rendered-head">
                         <h4>{{ section.title }}</h4>
-                        <span class="chip">{{ section.facts.length }} facts</span>
+                        <span class="chip">{{ section.facts.length }} {{ text.status.factsSuffix }}</span>
                       </div>
                       @if (section.facts.length) {
                         <dl class="fact-grid fact-grid-tight">
@@ -855,8 +853,8 @@
               @if (view.events.length) {
                 <div class="trace-panel">
                   <div class="rendered-head">
-                    <h4>Live events</h4>
-                    <span class="chip">{{ view.events.length }} items</span>
+                    <h4>{{ text.swarm.output.liveEvents }}</h4>
+                    <span class="chip">{{ view.events.length }} {{ text.status.itemsSuffix }}</span>
                   </div>
 
                   <div class="trace-stack">
@@ -867,10 +865,10 @@
                             <h5>{{ event.title }}</h5>
                             <p class="trace-subtitle">{{ event.timestamp }} · {{ event.summary }}</p>
                           </div>
-                          <span class="chip">{{ event.branch }}</span>
+                          <span class="chip">{{ displayBranchLabel(event.branch) }}</span>
                         </div>
                         <details class="raw-details">
-                          <summary>Raw event JSON</summary>
+                          <summary>{{ text.trace.rawJson }}</summary>
                           <pre>{{ event.rawJson }}</pre>
                         </details>
                       </article>
@@ -880,11 +878,11 @@
               }
 
               <details class="raw-details">
-                <summary>Raw run JSON</summary>
+                <summary>{{ text.swarm.output.rawRunJson }}</summary>
                 <pre>{{ view.rawJson }}</pre>
               </details>
             } @else {
-              <p class="muted">No run yet.</p>
+              <p class="muted">{{ text.swarm.output.noRun }}</p>
             }
           </section>
         }
