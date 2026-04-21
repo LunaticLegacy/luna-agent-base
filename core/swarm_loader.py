@@ -42,7 +42,11 @@ class LoadedSwarm:
 
 def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) -> ExecutionGraph:
     """Load the single execution graph file for a swarm package."""
-    module = _load_module_from_entry(package_path / manifest.graph_file, package_path)
+    print(
+        f"[angelus] loading graph: swarm={manifest.swarm_name} file={manifest.graph_file}",
+        flush=True,
+    )
+    module = _load_module_from_entry(manifest.graph_file, package_path)
     if hasattr(module, "build_graph"):
         graph = module.build_graph(core)
     elif hasattr(module, "GRAPH"):
@@ -55,6 +59,24 @@ def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) ->
     if not isinstance(graph, ExecutionGraph):
         raise SwarmLoaderError(
             f"Graph file '{manifest.graph_file}' must return an ExecutionGraph instance."
+        )
+
+    validation = graph.validate(core)
+    if validation.is_valid:
+        print(
+            f"[angelus] graph ready: swarm={manifest.swarm_name} nodes={len(graph.nodes)} "
+            f"edges={len(graph.edges)} entry={graph.entry_node_id} exit={graph.exit_node_id}",
+            flush=True,
+        )
+    else:
+        print(
+            f"[angelus] graph invalid: swarm={manifest.swarm_name} errors={validation.errors}",
+            flush=True,
+        )
+    if validation.warnings:
+        print(
+            f"[angelus] graph warnings: swarm={manifest.swarm_name} warnings={validation.warnings}",
+            flush=True,
         )
 
     return graph
@@ -73,10 +95,22 @@ def build_core_from_package(
     assert manifest is not None
     assert manifest_path is not None
 
+    print(
+        f"[angelus] loading swarm package: name={manifest.swarm_name} "
+        f"package={package_path} manifest={manifest_path}",
+        flush=True,
+    )
+
     blueprints = load_agent_blueprints(package_path, manifest)
     skills = load_skill_assets(package_path, manifest)
     skill_by_name = {skill.name: skill for skill in skills}
     skill_by_path = {skill.path.resolve(): skill for skill in skills}
+
+    print(
+        f"[angelus] loaded assets: swarm={manifest.swarm_name} "
+        f"agents={len(blueprints)} skills={len(skills)} tools_declared={len(manifest.tool_files)}",
+        flush=True,
+    )
 
     default_config = manifest.default_llm or _backend_to_agent_config(manifest.llm_backends[0])
     core = Core(
@@ -91,6 +125,10 @@ def build_core_from_package(
 
     for skill in skills:
         core.register_skill(skill)
+        print(
+            f"[angelus] registered skill: swarm={manifest.swarm_name} skill={skill.name}",
+            flush=True,
+        )
 
     package_backends = _merge_backends(manifest)
     if manifest.default_backend is not None and manifest.default_backend not in {
@@ -114,13 +152,27 @@ def build_core_from_package(
             name=blueprint.name,
             llm_handler=llm_handler,
         )
+        print(
+            f"[angelus] loaded agent: swarm={manifest.swarm_name} agent={blueprint.agent_id}"
+            + (f" backend={blueprint.backend_name}" if blueprint.backend_name else ""),
+            flush=True,
+        )
 
     tools, tool_requirement_files = load_swarm_tools(package_path, manifest)
     for tool in tools.values():
         core.register_tool(tool)
+        print(
+            f"[angelus] registered tool: swarm={manifest.swarm_name} tool={tool.tool_name}",
+            flush=True,
+        )
 
     graph = load_swarm_graph(package_path, manifest, core)
     core.set_execution_graph(graph)
+    print(
+        f"[angelus] swarm loaded: name={manifest.swarm_name} agents={len(core.agents)} "
+        f"skills={len(core.skills)} tools={len(core.tools)}",
+        flush=True,
+    )
     return LoadedSwarm(
         package_path=package_path,
         manifest_path=manifest_path,
@@ -135,10 +187,19 @@ def build_core_from_package(
 def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = True) -> List[LoadedSwarm]:
     """Discover and load every swarm package in the given root."""
     package_paths = discover_swarm_packages(root)
+    print(
+        f"[angelus] discovered swarm packages: root={root} count={len(package_paths)}",
+        flush=True,
+    )
     manifest_entries = [load_swarm_manifest(package_path) for package_path in package_paths]
 
     if preinstall_tool_requirements:
         requirements = collect_tool_requirement_files(package_paths, manifest_entries)
+        if requirements:
+            print(
+                f"[angelus] preinstalling tool requirements: files={len(requirements)}",
+                flush=True,
+            )
         install_tool_requirements(requirements)
 
     swarms: List[LoadedSwarm] = []
@@ -150,6 +211,10 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = True) ->
                 manifest_path=manifest_path,
             )
         )
+    print(
+        f"[angelus] swarm loading complete: loaded={len(swarms)}",
+        flush=True,
+    )
     return swarms
 
 

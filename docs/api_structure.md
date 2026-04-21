@@ -33,7 +33,9 @@ API 本身不负责：
 
 ## 3. 当前路由
 
-### 3.1 `GET /health`
+当前项目对外 API 统一使用 `/api` 前缀。
+
+### 3.1 `GET /api/health`
 
 基础存活检查。
 
@@ -46,7 +48,7 @@ API 本身不负责：
 }
 ```
 
-### 3.2 `GET /ready`
+### 3.2 `GET /api/ready`
 
 检查当前运行时是否可用。
 
@@ -76,7 +78,11 @@ API 本身不负责：
 - `swarm_count`
 - `load_error`
 
-### 3.4 `GET /swarms`
+### 3.4 `GET /api`
+
+API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端的 API 根路径。
+
+### 3.5 `GET /api/swarms`
 
 列出所有已加载的 swarm。
 
@@ -94,7 +100,7 @@ API 本身不负责：
 - `graph_errors`
 - `graph_warnings`
 
-### 3.5 `GET /swarms/<swarm_name>`
+### 3.6 `GET /api/swarms/<swarm_name>`
 
 查看单个 swarm 的详情。
 
@@ -110,7 +116,7 @@ API 本身不负责：
 - `graph_errors`
 - `graph_warnings`
 
-### 3.6 `POST /swarms/<swarm_name>/run`
+### 3.7 `POST /api/swarms/<swarm_name>/run`
 
 执行指定 swarm 的工作图。
 
@@ -146,7 +152,7 @@ API 本身不负责：
 - `trace` 是执行轨迹
 - `metadata` 是执行状态附加信息
 
-### 3.7 `POST /swarms/<swarm_name>/agents/<agent_id>/round`
+### 3.8 `POST /api/swarms/<swarm_name>/agents/<agent_id>/round`
 
 直接驱动某个 agent 执行一轮。
 
@@ -243,4 +249,3 @@ API 层只负责调用 runtime，不直接执行业务逻辑。
 - `POST /swarms/<name>/tools/<tool_name>/execute`
 
 这些接口适合调试、运维和可视化，但现在还不是必须项。
-

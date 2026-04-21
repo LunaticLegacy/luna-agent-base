@@ -24,7 +24,7 @@ def _get_swarm_or_404(swarm_name: str):
     return swarm
 
 
-@swarms_bp.get("")
+@swarms_bp.get("/")
 def list_swarms():
     registry = _get_runtime_registry()
     swarms = registry.get("swarms", {})

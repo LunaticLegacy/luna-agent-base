@@ -21,5 +21,5 @@ tool_files = ["tools.graph_editor_tool", "tools.echo_tool", "tools.file_writer_t
 name = "deepseek"
 provider = "openai"
 api_url = "https://api.deepseek.com"
-api_key = "YOUR_DEEPSEEK_API_KEY"
+api_key = "sk-75103506b7014076837bbf0eec5ac5bc"
 model = "deepseek-reasoner"
