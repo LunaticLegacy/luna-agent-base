@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, TYPE_CHECKING
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from modules.llm_fetcher import LLMFetcher
 
 from .agent import Agent
 from .config import AgentConfig
+from .runtime_info import RuntimeInfoManager
 from .toodefl import ToolDefinition
 from .skills import SkillAsset
 from .protocols import AgentLike
@@ -29,11 +31,22 @@ class Core:
         self.tools: Dict[str, ToolDefinition] = {}
         self.skills: Dict[str, SkillAsset] = {}
         self._execution_graph: Optional["ExecutionGraph"] = None
+        self._runtime_info: Optional[RuntimeInfoManager] = None
 
     async def init(self) -> None:
         """Initialize runtime resources and validate the current graph."""
         if self._execution_graph is not None:
             self.check_execution_graph_complete()
+
+    def set_runtime_info_dir(self, runtime_dir: Path) -> None:
+        """Attach a runtime info recorder for live state persistence."""
+        self._runtime_info = RuntimeInfoManager(runtime_dir=runtime_dir, agent_name=self.agent_name)
+        self._record_runtime_change(
+            action="runtime_info_initialized",
+            subject_kind="runtime",
+            subject_id=self.agent_name,
+            detail={"runtime_dir": str(runtime_dir)},
+        )
 
     def create_agent(
         self,
@@ -64,12 +77,26 @@ class Core:
         if agent.agent_id in self.agents:
             raise ValueError(f"Duplicate agent_id: {agent.agent_id}")
         self.agents[agent.agent_id] = agent
+        self._record_runtime_change(
+            action="add_agent",
+            subject_kind="agent",
+            subject_id=agent.agent_id,
+            detail={
+                "name": getattr(agent, "name", agent.agent_id),
+            },
+        )
 
     def remove_agent(self, agent_id: str) -> None:
         """Remove an agent from the runtime registry."""
         agent = self.agents.pop(agent_id, None)
         if agent is not None:
             agent.reset_context()
+            self._record_runtime_change(
+                action="remove_agent",
+                subject_kind="agent",
+                subject_id=agent_id,
+                detail={"name": getattr(agent, "name", agent_id)},
+            )
 
     def destroy_agent(self, agent_id: str) -> None:
         """Alias for method `remove_agent`."""
@@ -92,12 +119,24 @@ class Core:
         if tool.tool_name in self.tools:
             raise ValueError(f"Duplicate tool_name: {tool.tool_name}")
         self.tools[tool.tool_name] = tool
+        self._record_runtime_change(
+            action="register_tool",
+            subject_kind="tool",
+            subject_id=tool.tool_name,
+            detail={"description": getattr(tool, "description", "")},
+        )
 
     def register_skill(self, skill: SkillAsset) -> None:
         """Register a runtime skill asset."""
         if skill.name in self.skills:
             raise ValueError(f"Duplicate skill name: {skill.name}")
         self.skills[skill.name] = skill
+        self._record_runtime_change(
+            action="register_skill",
+            subject_kind="skill",
+            subject_id=skill.name,
+            detail={"path": str(skill.path)},
+        )
 
     def get_skill(self, skill_name: str) -> SkillAsset:
         """Fetch a registered skill by name."""
@@ -112,7 +151,14 @@ class Core:
 
     def remove_tool(self, tool_name: str) -> None:
         """Remove a tool from the runtime registry."""
-        self.tools.pop(tool_name, None)
+        removed = self.tools.pop(tool_name, None)
+        if removed is not None:
+            self._record_runtime_change(
+                action="remove_tool",
+                subject_kind="tool",
+                subject_id=tool_name,
+                detail={"description": getattr(removed, "description", "")},
+            )
 
     def get_tool(self, tool_name: str) -> ToolDefinition:
         """Fetch a registered tool by name."""
@@ -124,6 +170,15 @@ class Core:
     def set_execution_graph(self, graph: "ExecutionGraph") -> None:
         """Attach the current execution graph."""
         self._execution_graph = graph
+        self._record_runtime_change(
+            action="set_execution_graph",
+            subject_kind="graph",
+            subject_id=getattr(graph, "graph_name", None),
+            detail={
+                "entry_node_id": getattr(graph, "entry_node_id", None),
+                "exit_node_id": getattr(graph, "exit_node_id", None),
+            },
+        )
 
     def get_execution_graph(self) -> Optional["ExecutionGraph"]:
         """Return the current execution graph."""
@@ -146,3 +201,37 @@ class Core:
                 errors=["Execution graph is not attached."],
             )
         return self._execution_graph.validate(self)
+
+    def _record_runtime_change(
+        self,
+        *,
+        action: str,
+        subject_kind: str,
+        subject_id: Optional[str] = None,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self._runtime_info is None:
+            return
+        self._runtime_info.record(
+            action=action,
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            detail=detail,
+            core=self,
+        )
+
+    def record_runtime_change(
+        self,
+        *,
+        action: str,
+        subject_kind: str,
+        subject_id: Optional[str] = None,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record a runtime mutation into the package runtime-info directory."""
+        self._record_runtime_change(
+            action=action,
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            detail=detail,
+        )

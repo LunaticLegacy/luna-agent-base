@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .policy import AgentNode, ExecutionGraph, ExecutionStep, ToolNode
@@ -134,13 +135,41 @@ class GraphExecutor:
                         additional_prompt=node.additional_prompt,
                     )
                     output_payload = result
+                    parsed_agent_output = self._parse_structured_agent_output(result.assistant_message)
                     if getattr(result, "assistant_message", None):
                         state.payload = result.assistant_message
                     elif getattr(result, "raw_response", None) is not None:
                         state.payload = result.raw_response
                     else:
                         state.payload = result
-                    next_node_override = self._extract_next_node_id(state.payload)
+                    if parsed_agent_output is not None:
+                        output_payload = parsed_agent_output
+                        if isinstance(parsed_agent_output, dict):
+                            metadata_patch = parsed_agent_output.get("metadata_patch")
+                            if isinstance(metadata_patch, dict):
+                                state.metadata.update(metadata_patch)
+                            for key, value in parsed_agent_output.items():
+                                if key in {
+                                    "content",
+                                    "metadata_patch",
+                                    "next_node_id",
+                                    "next_node_ids",
+                                    "branch",
+                                    "branches",
+                                    "status",
+                                    "error",
+                                }:
+                                    continue
+                                state.metadata[key] = value
+                            if "content" in parsed_agent_output:
+                                state.payload = parsed_agent_output["content"]
+                            else:
+                                state.payload = parsed_agent_output
+                            next_node_override = self._extract_next_node_id(parsed_agent_output)
+                        elif isinstance(parsed_agent_output, str):
+                            state.payload = parsed_agent_output
+                    else:
+                        next_node_override = self._extract_next_node_id(state.payload)
                 elif isinstance(node, ToolNode):
                     tool = core.get_tool(node.tool_name)
                     tool_context = ToolContext(
@@ -150,9 +179,18 @@ class GraphExecutor:
                         core=core,
                         graph=graph,
                     )
-                    arguments = self._build_tool_arguments(node, state.payload)
+                    arguments = self._build_tool_arguments(node, state.payload, state.metadata)
                     output_payload = await tool.execute(arguments, context=tool_context)
-                    state.payload = output_payload
+                    if isinstance(output_payload, dict):
+                        metadata_patch = output_payload.get("metadata_patch")
+                        if isinstance(metadata_patch, dict):
+                            state.metadata.update(metadata_patch)
+                        if "content" in output_payload:
+                            state.payload = output_payload["content"]
+                        else:
+                            state.payload = output_payload
+                    else:
+                        state.payload = output_payload
                     next_node_override = self._extract_next_node_id(output_payload)
                 else:
                     output_payload = state.payload
@@ -427,12 +465,13 @@ class GraphExecutor:
         if event_sink is not None:
             event_sink(event)
 
-    def _build_tool_arguments(self, node: ToolNode, payload: Any) -> Dict[str, Any]:
+    def _build_tool_arguments(self, node: ToolNode, payload: Any, runtime_metadata: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(payload, dict):
             base_arguments = dict(payload)
         else:
             base_arguments = {"input": payload}
         base_arguments.update(node.input_mapping)
+        base_arguments.setdefault("runtime_metadata", dict(runtime_metadata))
         return base_arguments
 
     def _extract_next_node_id(self, payload: Any) -> Optional[int]:
@@ -442,6 +481,30 @@ class GraphExecutor:
         if next_node_id is None:
             return None
         return int(next_node_id)
+
+    def _parse_structured_agent_output(self, assistant_message: Optional[str]) -> Any:
+        if not isinstance(assistant_message, str):
+            return None
+        candidate = assistant_message.strip()
+        if not candidate:
+            return None
+        if candidate.startswith("```"):
+            candidate = self._strip_code_fence(candidate)
+        if not candidate.startswith("{") and not candidate.startswith("["):
+            return None
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+
+    def _strip_code_fence(self, text: str) -> str:
+        lines = text.splitlines()
+        if len(lines) >= 2 and lines[0].strip().startswith("```") and lines[-1].strip().startswith("```"):
+            inner = lines[1:-1]
+            if inner and inner[0].strip().lower() == "json":
+                inner = inner[1:]
+            return "\n".join(inner).strip()
+        return text.strip()
 
     def _resolve_next_targets(
         self,

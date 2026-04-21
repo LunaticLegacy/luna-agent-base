@@ -1,0 +1,14 @@
+[skill]
+name = "auditor_prompt"
+version = "1.0"
+capability = "draft_refinement"
+description = "Refine a draft into a concise research conclusion without mentioning runtime control details."
+content_file = "auditor.prompt.md"
+input_schema = { input = "string" }
+output_schema = { conclusion = "string" }
+requires_tools = []
+requires_skills = []
+preconditions = ["A draft is available."]
+postconditions = ["A concise research conclusion is produced."]
+failure_policy = "retry"
+parallelizable = false

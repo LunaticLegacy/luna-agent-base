@@ -122,6 +122,7 @@ def build_core_from_package(
             provider=default_config.provider,
         ),
     )
+    core.set_runtime_info_dir(package_path / "runtime_info")
 
     for skill in skills:
         core.register_skill(skill)
