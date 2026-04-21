@@ -57,10 +57,74 @@ interface GraphNodeView extends GraphNodeSnapshot {
   status: 'pending' | 'running' | 'completed' | 'failed';
   isEntry: boolean;
   isExit: boolean;
+  rawMetadata: Record<string, unknown>;
+  routePolicy: 'all' | 'first' | null;
+  joinNodeId: number | null;
+  branchIndex: number | null;
+  branchIndexes: number[];
+  branchSourceNodeId: number | null;
+  derivedRole: string;
+  semanticTags: string[];
+  warnings: string[];
+  skillMetadata: GraphSkillMetadataView | null;
+}
+
+interface GraphSkillMetadataView {
+  contractVersion: string | null;
+  capability: string | null;
+  description: string | null;
+  inputSchema: unknown;
+  outputSchema: unknown;
+  requiresTools: string[];
+  requiresSkills: string[];
+  preconditions: string[];
+  postconditions: string[];
+  failurePolicy: string | null;
+  parallelizable: boolean | null;
+  rawMetadata: Record<string, unknown>;
+  warnings: string[];
 }
 
 interface GraphEdgeView extends GraphEdgeSnapshot {
   active: boolean;
+  derivedFromMetadata: string[] | null;
+  derivedRelation: boolean;
+}
+
+interface GraphBranchGroupView {
+  sourceNodeId: number;
+  sourceNodeName: string | null;
+  joinNodeId: number | null;
+  branchIndexes: number[];
+  branchNodeIds: number[];
+}
+
+interface GraphJoinGroupView {
+  joinNodeId: number;
+  joinNodeName: string | null;
+  sourceNodeIds: number[];
+  sourceNodeNames: string[];
+}
+
+interface GraphSemanticSummaryView {
+  entryNodeId: number | null;
+  exitNodeId: number | null;
+  branchGroups: GraphBranchGroupView[];
+  joinGroups: GraphJoinGroupView[];
+  unresolvedMetadataHints: string[];
+}
+
+interface GraphRuntimeContextView {
+  currentBranchIndex: number | null;
+  currentBranchSourceNodeId: number | null;
+  nodeBranchIndexes: Map<number, Set<number>>;
+  nodeBranchSourceNodeIds: Map<number, Set<number>>;
+  sourceBranchGroups: Map<number, {
+    branchIndexes: Set<number>;
+    branchNodeIds: Set<number>;
+    joinNodeId: number | null;
+  }>;
+  unresolvedMetadataHints: string[];
 }
 
 interface GraphView {
@@ -74,6 +138,9 @@ interface GraphView {
   currentNodeType: string | null;
   status: string | null;
   rounds: number;
+  branchIndex: number | null;
+  branchSourceNodeId: number | null;
+  semanticSummary: GraphSemanticSummaryView;
   nodes: GraphNodeView[];
   edges: GraphEdgeView[];
   rawJson: string;
@@ -96,12 +163,26 @@ interface GraphSpectrumView {
   height: number;
   viewBox: string;
   zoom: number;
+  displayScale: number;
   panX: number;
   panY: number;
   panTransform: string;
   scaleTransform: string;
+  branchIndex: number | null;
+  branchSourceNodeId: number | null;
+  semanticSummary: GraphSemanticSummaryView;
   nodes: GraphSpectrumNodeView[];
   edges: GraphSpectrumEdgeView[];
+  rawJson: string;
+}
+
+interface GraphNodeDetailView {
+  node: GraphSpectrumNodeView;
+  summary: FactRow[];
+  semanticChips: string[];
+  skillChips: string[];
+  runtimeChips: string[];
+  sections: ResultSection[];
   rawJson: string;
 }
 
@@ -111,6 +192,7 @@ interface GraphDragState {
   startClientY: number;
   originPanX: number;
   originPanY: number;
+  activated: boolean;
 }
 
 interface RunEventView {
@@ -130,6 +212,15 @@ interface RunLiveView {
   stateView: ResultView | null;
   finalStateView: ResultView | null;
   rawJson: string;
+}
+
+interface ExecutionFeedbackView {
+  title: string;
+  message: string;
+  status: 'idle' | 'running' | 'success' | 'error';
+  progress: number;
+  indeterminate: boolean;
+  tone: 'neutral' | 'running' | 'success' | 'error';
 }
 
 @Component({
@@ -171,6 +262,7 @@ export class App implements OnDestroy {
   protected readonly selectedGraph = signal<GraphSnapshot | null>(null);
   protected readonly selectedAgentId = signal<string | null>(null);
   protected readonly graphTab = signal<'snapshot' | 'spectrum'>('spectrum');
+  protected readonly graphLayout = signal<'horizontal' | 'vertical'>('horizontal');
   protected readonly controlMode = signal<'agent' | 'swarm'>('agent');
   protected readonly agentPage = signal<'input' | 'output'>('input');
   protected readonly swarmPage = signal<'input' | 'output'>('input');
@@ -178,9 +270,12 @@ export class App implements OnDestroy {
   protected readonly graphPanX = signal(0);
   protected readonly graphPanY = signal(0);
   protected readonly graphDragging = signal(false);
+  protected readonly selectedGraphNodeId = signal<number | null>(null);
   protected readonly activeRun = signal<RunSnapshot | null>(null);
   protected readonly activeRunEvents = signal<RunEventView[]>([]);
   protected readonly activeRunCompleted = signal(false);
+  protected readonly agentRunStatus = signal<'idle' | 'running' | 'success' | 'error'>('idle');
+  protected readonly swarmRunStatus = signal<'idle' | 'launching' | 'running' | 'success' | 'error'>('idle');
   protected readonly agentRunOutput = signal<Record<string, unknown> | null>(null);
   protected readonly agentRunView = computed(() => this.buildAgentRunView(this.agentRunOutput()));
   protected readonly swarmTask = signal('Draft a concise swarm summary for the selected workflow.');
@@ -191,8 +286,20 @@ export class App implements OnDestroy {
   protected readonly swarmRequestPayload = computed(() => this.buildSwarmRequestPayload());
   protected readonly swarmRequestView = computed(() => this.buildPayloadView(this.swarmRequestPayload()));
   protected readonly graphView = computed(() => this.buildGraphView(this.selectedGraph(), this.activeRun()));
-  protected readonly graphSpectrumView = computed(() => this.buildGraphSpectrumView(this.graphView(), this.graphZoom()));
+  protected readonly graphSpectrumView = computed(() => this.buildGraphSpectrumView(this.graphView(), this.graphZoom(), this.graphLayout()));
+  protected readonly graphNodeDetailView = computed(() => this.buildGraphNodeDetailView(this.graphSpectrumView(), this.selectedGraphNodeId()));
   protected readonly liveRunView = computed(() => this.buildRunLiveView(this.activeRun(), this.activeRunEvents()));
+  protected readonly executionFeedbackView = computed(() =>
+    this.buildExecutionFeedbackView(
+      this.controlMode(),
+      this.agentRunStatus(),
+      this.swarmRunStatus(),
+      this.activeRun(),
+      this.activeRunEvents(),
+      this.executionLoading(),
+      this.runError(),
+    ),
+  );
 
   protected readonly availableAgentIds = computed(() => {
     const swarm = this.selectedSwarm();
@@ -263,12 +370,16 @@ export class App implements OnDestroy {
     this.graphPanX.set(0);
     this.graphPanY.set(0);
     this.graphDragging.set(false);
+    this.selectedGraphNodeId.set(null);
     this.graphDragState = null;
     this.graphTab.set('spectrum');
+    this.graphLayout.set('horizontal');
     this.controlMode.set('agent');
     this.agentPage.set('input');
     this.swarmPage.set('input');
     this.selectedSwarmName.set(swarmName);
+    this.agentRunStatus.set('idle');
+    this.swarmRunStatus.set('idle');
     await this.reloadSelectedSwarm();
     await this.reloadSelectedGraph();
   }
@@ -310,6 +421,14 @@ export class App implements OnDestroy {
     this.graphTab.set(value);
   }
 
+  setGraphLayout(value: 'horizontal' | 'vertical') {
+    this.graphLayout.set(value);
+    this.graphPanX.set(0);
+    this.graphPanY.set(0);
+    this.graphDragging.set(false);
+    this.graphDragState = null;
+  }
+
   setControlMode(value: 'agent' | 'swarm') {
     this.controlMode.set(value);
   }
@@ -338,13 +457,22 @@ export class App implements OnDestroy {
     this.graphDragState = null;
   }
 
+  selectGraphNode(nodeId: number, event?: MouseEvent) {
+    event?.stopPropagation();
+    this.selectedGraphNodeId.set(nodeId);
+  }
+
+  clearGraphSelection() {
+    this.selectedGraphNodeId.set(null);
+  }
+
   startGraphDrag(event: PointerEvent) {
     if (!this.graphSpectrumView()) {
       return;
     }
 
     const target = event.target as Element | null;
-    if (target?.closest('button, a, input, textarea, select, summary, details')) {
+    if (target?.closest('button, a, input, textarea, select, summary, details, .graph-spectrum-inspector')) {
       return;
     }
 
@@ -358,6 +486,7 @@ export class App implements OnDestroy {
       startClientY: event.clientY,
       originPanX: this.graphPanX(),
       originPanY: this.graphPanY(),
+      activated: false,
     };
   }
 
@@ -368,9 +497,19 @@ export class App implements OnDestroy {
     }
 
     event.preventDefault();
-    const zoom = this.graphSpectrumView()?.zoom ?? this.graphZoom();
-    const deltaX = (event.clientX - drag.startClientX) / zoom;
-    const deltaY = (event.clientY - drag.startClientY) / zoom;
+    const threshold = 4;
+    const distanceX = event.clientX - drag.startClientX;
+    const distanceY = event.clientY - drag.startClientY;
+    if (!drag.activated) {
+      if (Math.hypot(distanceX, distanceY) < threshold) {
+        return;
+      }
+      drag.activated = true;
+      this.graphDragging.set(true);
+    }
+
+    const deltaX = distanceX;
+    const deltaY = distanceY;
     this.graphPanX.set(drag.originPanX + deltaX);
     this.graphPanY.set(drag.originPanY + deltaY);
   }
@@ -392,18 +531,21 @@ export class App implements OnDestroy {
   async runSwarm() {
     const name = this.selectedSwarmName();
     if (!name) {
+      this.swarmRunStatus.set('error');
       this.runError.set('Select a swarm before running it.');
       return;
     }
 
     const payload = this.swarmRequestPayload();
     if (!this.safeString(payload['text'])) {
+      this.swarmRunStatus.set('error');
       this.runError.set('Task is required before starting the run.');
       return;
     }
 
     this.executionLoading.set(true);
     this.runError.set(null);
+    this.swarmRunStatus.set('launching');
     try {
       const response = await this.api.startSwarmRun(this.apiBaseUrl(), name, {
         input: payload,
@@ -411,6 +553,7 @@ export class App implements OnDestroy {
       });
       this.beginRunFollow(response);
     } catch (error) {
+      this.swarmRunStatus.set('error');
       this.runError.set(this.formatError(error));
     } finally {
       this.executionLoading.set(false);
@@ -420,18 +563,22 @@ export class App implements OnDestroy {
   async runSelectedAgent() {
     const swarm = this.selectedSwarm();
     if (!swarm) {
+      this.agentRunStatus.set('error');
       this.runError.set('Select a swarm before running an agent.');
       return;
     }
 
     const agentId = this.selectedAgentId();
     if (!agentId) {
+      this.agentRunStatus.set('error');
       this.runError.set('The selected swarm has no agents.');
       return;
     }
 
     this.executionLoading.set(true);
     this.runError.set(null);
+    this.agentRunStatus.set('running');
+    this.agentRunOutput.set(null);
     try {
       const response = await this.api.runAgentRound(this.apiBaseUrl(), swarm.swarm_name, agentId, {
         message: this.agentMessage().trim(),
@@ -439,7 +586,9 @@ export class App implements OnDestroy {
         additional_prompt: this.agentAdditionalPrompt().trim() || undefined,
       });
       this.agentRunOutput.set(response as unknown as Record<string, unknown>);
+      this.agentRunStatus.set('success');
     } catch (error) {
+      this.agentRunStatus.set('error');
       this.runError.set(this.formatError(error));
     } finally {
       this.executionLoading.set(false);
@@ -451,6 +600,7 @@ export class App implements OnDestroy {
     this.activeRun.set(response.run);
     this.activeRunEvents.set([]);
     this.activeRunCompleted.set(false);
+    this.swarmRunStatus.set('running');
     void this.refreshRunSnapshot(response.run.run_id);
     this.openRunStream(response.run.run_id);
   }
@@ -491,6 +641,7 @@ export class App implements OnDestroy {
 
     if (eventType === 'run.completed' || eventType === 'run.failed') {
       this.activeRunCompleted.set(true);
+      this.swarmRunStatus.set(eventType === 'run.completed' ? 'success' : 'error');
       this.closeRunStream();
     }
   }
@@ -689,6 +840,121 @@ export class App implements OnDestroy {
     };
   }
 
+  private buildExecutionFeedbackView(
+    mode: 'agent' | 'swarm',
+    agentStatus: 'idle' | 'running' | 'success' | 'error',
+    swarmStatus: 'idle' | 'launching' | 'running' | 'success' | 'error',
+    run: RunSnapshot | null,
+    events: RunEventView[],
+    loading: boolean,
+    runError: string | null,
+  ): ExecutionFeedbackView {
+    if (mode === 'agent') {
+      if (agentStatus === 'running') {
+        return {
+          title: 'Agent call in progress',
+          message: 'The direct agent request is being processed.',
+          status: 'running',
+          progress: 62,
+          indeterminate: true,
+          tone: 'running',
+        };
+      }
+      if (agentStatus === 'success') {
+        return {
+          title: 'Agent call complete',
+          message: 'The latest agent response is ready.',
+          status: 'success',
+          progress: 100,
+          indeterminate: false,
+          tone: 'success',
+        };
+      }
+      if (agentStatus === 'error') {
+        return {
+          title: 'Agent call failed',
+          message: runError ?? 'The direct agent request did not complete.',
+          status: 'error',
+          progress: 100,
+          indeterminate: false,
+          tone: 'error',
+        };
+      }
+      return {
+        title: 'Ready for agent call',
+        message: 'Fill the input form and run a direct agent request.',
+        status: 'idle',
+        progress: 0,
+        indeterminate: false,
+        tone: 'neutral',
+      };
+    }
+
+    if (swarmStatus === 'launching' || (loading && !run)) {
+      return {
+        title: 'Swarm run launching',
+        message: 'Submitting the async swarm run request.',
+        status: 'running',
+        progress: 26,
+        indeterminate: true,
+        tone: 'running',
+      };
+    }
+
+    if (run) {
+      const status = run.status?.toLowerCase() ?? 'idle';
+      if (status === 'completed' || swarmStatus === 'success') {
+        return {
+          title: 'Swarm run complete',
+          message: run.finished_at ? `Finished at ${new Date(run.finished_at).toLocaleString()}.` : 'The swarm finished successfully.',
+          status: 'success',
+          progress: 100,
+          indeterminate: false,
+          tone: 'success',
+        };
+      }
+      if (status === 'failed' || swarmStatus === 'error') {
+        return {
+          title: 'Swarm run failed',
+          message: run.error ?? runError ?? 'The swarm run encountered an error.',
+          status: 'error',
+          progress: 100,
+          indeterminate: false,
+          tone: 'error',
+        };
+      }
+      const estimated = Math.min(92, 18 + events.length * 7);
+      return {
+        title: 'Swarm run live',
+        message: events.length ? `${events.length} live event${events.length === 1 ? '' : 's'} received.` : 'Waiting for live execution events.',
+        status: 'running',
+        progress: estimated,
+        indeterminate: false,
+        tone: 'running',
+      };
+    }
+
+    if (swarmStatus === 'error') {
+      return {
+        title: 'Swarm run failed',
+        message: runError ?? 'The swarm run could not be started.',
+        status: 'error',
+        progress: 100,
+        indeterminate: false,
+        tone: 'error',
+      };
+    }
+
+    return {
+      title: 'Ready for swarm run',
+      message: 'Fill the swarm input form and start an async run.',
+      status: 'idle',
+      progress: 0,
+      indeterminate: false,
+      tone: 'neutral',
+    };
+  }
+
   private buildRunLiveView(run: RunSnapshot | null, events: RunEventView[]): RunLiveView | null {
     if (!run) {
       return null;
@@ -712,6 +978,10 @@ export class App implements OnDestroy {
     const currentStatus = run?.status ?? null;
     const completedNodeIds = this.extractCompletedNodeIds(run?.state, run?.final_state);
     const failedNodeIds = this.extractFailedNodeIds(run?.state, run?.final_state);
+    const runtimeContext = this.extractRuntimeGraphContext(run);
+    const nodeLookup = new Map<number, GraphNodeSnapshot>();
+    graph.nodes.forEach((node) => nodeLookup.set(node.node_id, node));
+    const summary = this.buildGraphSemanticSummary(graph, nodeLookup, runtimeContext);
 
     return {
       graphName: graph.graph_name,
@@ -724,38 +994,545 @@ export class App implements OnDestroy {
       currentNodeType: run?.current_node_type ?? null,
       status: currentStatus,
       rounds: run?.rounds ?? 0,
+      branchIndex: runtimeContext.currentBranchIndex,
+      branchSourceNodeId: runtimeContext.currentBranchSourceNodeId,
+      semanticSummary: summary,
       nodes: graph.nodes.map((node) => ({
-        ...node,
+        ...this.normalizeGraphNode(node, graph, runtimeContext),
         status: this.resolveNodeStatus(node.node_id, currentNodeId, completedNodeIds, failedNodeIds, currentStatus),
         isEntry: graph.entry_node_id === node.node_id,
         isExit: graph.exit_node_id === node.node_id,
       })),
-      edges: graph.edges.map((edge) => ({
-        ...edge,
-        active: currentNodeId !== null && edge.from_node_id === currentNodeId,
-      })),
+      edges: this.normalizeGraphEdges(graph, nodeLookup, currentNodeId, runtimeContext),
       rawJson: this.prettyJson(graph),
     };
   }
 
-  private buildGraphSpectrumView(view: GraphView | null, zoom: number): GraphSpectrumView | null {
+  private extractRuntimeGraphContext(run: RunSnapshot | null): GraphRuntimeContextView {
+    const context: GraphRuntimeContextView = {
+      currentBranchIndex: null,
+      currentBranchSourceNodeId: null,
+      nodeBranchIndexes: new Map<number, Set<number>>(),
+      nodeBranchSourceNodeIds: new Map<number, Set<number>>(),
+      sourceBranchGroups: new Map<number, { branchIndexes: Set<number>; branchNodeIds: Set<number>; joinNodeId: number | null }>(),
+      unresolvedMetadataHints: [],
+    };
+
+    if (!run) {
+      return context;
+    }
+
+    const scan = (value: unknown) => {
+      if (!this.isRecord(value)) {
+        return;
+      }
+
+      const metadata = this.isRecord(value['metadata']) ? value['metadata'] : null;
+      if (metadata) {
+        const branchIndex = this.readNumber(metadata['branch_index']);
+        const branchSourceNodeId = this.readNumber(metadata['branch_source_node_id']);
+        if (branchIndex !== null) {
+          context.currentBranchIndex = branchIndex;
+        }
+        if (branchSourceNodeId !== null) {
+          context.currentBranchSourceNodeId = branchSourceNodeId;
+        }
+      }
+
+      const branchResults = value['branch_results'];
+      if (this.isRecord(branchResults)) {
+        for (const [sourceKey, rawResults] of Object.entries(branchResults)) {
+          const sourceNodeId = this.readNumber(sourceKey);
+          if (sourceNodeId === null || !Array.isArray(rawResults)) {
+            continue;
+          }
+
+          const group = context.sourceBranchGroups.get(sourceNodeId) ?? {
+            branchIndexes: new Set<number>(),
+            branchNodeIds: new Set<number>(),
+            joinNodeId: null,
+          };
+
+          for (const rawResult of rawResults) {
+            if (!this.isRecord(rawResult)) {
+              continue;
+            }
+
+            const branchIndex = this.readNumber(rawResult['branch_index']);
+            const branchNodeId = this.readNumber(rawResult['branch_node_id']);
+            const branchMetadata = this.isRecord(rawResult['metadata']) ? rawResult['metadata'] : null;
+            const nestedJoinNodeId = branchMetadata ? this.readNumber(branchMetadata['join_node_id']) : null;
+            if (branchIndex !== null) {
+              group.branchIndexes.add(branchIndex);
+            }
+            if (branchNodeId !== null) {
+              group.branchNodeIds.add(branchNodeId);
+              this.addNodeBranchIndex(context.nodeBranchIndexes, branchNodeId, branchIndex);
+              this.addNodeBranchSource(context.nodeBranchSourceNodeIds, branchNodeId, sourceNodeId);
+            }
+            if (nestedJoinNodeId !== null) {
+              group.joinNodeId = nestedJoinNodeId;
+            }
+
+            const trace = Array.isArray(rawResult['trace']) ? rawResult['trace'] : [];
+            for (const traceEntry of trace) {
+              if (!this.isRecord(traceEntry)) {
+                continue;
+              }
+              const traceNodeId = this.readNumber(traceEntry['node_id']);
+              if (traceNodeId === null) {
+                continue;
+              }
+              if (branchIndex !== null) {
+                this.addNodeBranchIndex(context.nodeBranchIndexes, traceNodeId, branchIndex);
+              }
+              this.addNodeBranchSource(context.nodeBranchSourceNodeIds, traceNodeId, sourceNodeId);
+            }
+          }
+
+          context.sourceBranchGroups.set(sourceNodeId, group);
+        }
+      }
+
+      const trace = Array.isArray(value['trace']) ? value['trace'] : [];
+      for (const traceEntry of trace) {
+        scan(traceEntry);
+      }
+    };
+
+    scan(run.state);
+    scan(run.final_state);
+
+    return context;
+  }
+
+  private addNodeBranchIndex(map: Map<number, Set<number>>, nodeId: number, branchIndex: number | null) {
+    if (branchIndex === null) {
+      return;
+    }
+    const set = map.get(nodeId) ?? new Set<number>();
+    set.add(branchIndex);
+    map.set(nodeId, set);
+  }
+
+  private addNodeBranchSource(map: Map<number, Set<number>>, nodeId: number, sourceNodeId: number | null) {
+    if (sourceNodeId === null) {
+      return;
+    }
+    const set = map.get(nodeId) ?? new Set<number>();
+    set.add(sourceNodeId);
+    map.set(nodeId, set);
+  }
+
+  private buildGraphSemanticSummary(
+    graph: GraphSnapshot,
+    nodeLookup: Map<number, GraphNodeSnapshot>,
+    runtimeContext: GraphRuntimeContextView,
+  ): GraphSemanticSummaryView {
+    const branchGroups: GraphBranchGroupView[] = [];
+    const joinGroupMap = new Map<number, GraphJoinGroupView>();
+    const unresolvedMetadataHints: string[] = [...runtimeContext.unresolvedMetadataHints];
+
+    for (const node of graph.nodes) {
+      const metadata = this.isRecord(node.metadata) ? node.metadata : {};
+      const routePolicy = this.normalizeRoutePolicy(metadata['route_policy']);
+      const joinNodeId = this.readNumber(metadata['join_node_id']);
+      const branchIndexes = [...(runtimeContext.nodeBranchIndexes.get(node.node_id) ?? new Set<number>())].sort((a, b) => a - b);
+      const branchSourceNodeIds = [...(runtimeContext.nodeBranchSourceNodeIds.get(node.node_id) ?? new Set<number>())].sort((a, b) => a - b);
+
+      if (routePolicy === 'all' || joinNodeId !== null) {
+        branchGroups.push({
+          sourceNodeId: node.node_id,
+          sourceNodeName: node.node_name,
+          joinNodeId,
+          branchIndexes,
+          branchNodeIds: branchIndexes.length || branchSourceNodeIds.length ? [...new Set([...node.next_node_ids, ...branchSourceNodeIds])] : [...node.next_node_ids],
+        });
+      }
+
+      if (joinNodeId !== null) {
+        const joinGroup = joinGroupMap.get(joinNodeId) ?? {
+          joinNodeId,
+          joinNodeName: nodeLookup.get(joinNodeId)?.node_name ?? null,
+          sourceNodeIds: [],
+          sourceNodeNames: [],
+        };
+        joinGroup.sourceNodeIds.push(node.node_id);
+        joinGroup.sourceNodeNames.push(node.node_name);
+        joinGroupMap.set(joinNodeId, joinGroup);
+      }
+
+      if (joinNodeId !== null && !nodeLookup.has(joinNodeId)) {
+        unresolvedMetadataHints.push(`Node ${node.node_id} points join_node_id=${joinNodeId}, but the target node is missing from edges/node list.`);
+      }
+    }
+
+    const summary: GraphSemanticSummaryView = {
+      entryNodeId: graph.entry_node_id,
+      exitNodeId: graph.exit_node_id,
+      branchGroups,
+      joinGroups: [...joinGroupMap.values()],
+      unresolvedMetadataHints: [...new Set(unresolvedMetadataHints)],
+    };
+
+    return summary;
+  }
+
+  private normalizeGraphNode(
+    node: GraphNodeSnapshot,
+    graph: GraphSnapshot,
+    runtimeContext: GraphRuntimeContextView,
+  ): Omit<GraphNodeView, 'status' | 'isEntry' | 'isExit'> {
+    const rawMetadata = this.isRecord(node.metadata) ? this.toJsonableRecord(node.metadata) : {};
+    const routePolicy = this.normalizeRoutePolicy(rawMetadata['route_policy']);
+    const joinNodeId = this.readNumber(rawMetadata['join_node_id']);
+    const branchIndexes = [...(runtimeContext.nodeBranchIndexes.get(node.node_id) ?? new Set<number>())].sort((left, right) => left - right);
+    const branchSourceNodeIds = [...(runtimeContext.nodeBranchSourceNodeIds.get(node.node_id) ?? new Set<number>())].sort((left, right) => left - right);
+    const skillMetadata = this.extractSkillMetadata(rawMetadata);
+    const semanticTags = this.buildGraphSemanticTags(node, graph, routePolicy, joinNodeId, branchIndexes, branchSourceNodeIds, skillMetadata);
+    const derivedRole = this.pickDerivedGraphRole(node, graph, routePolicy, joinNodeId, branchIndexes, branchSourceNodeIds);
+    const warnings = this.collectGraphNodeWarnings(node, graph, routePolicy, joinNodeId, skillMetadata, branchIndexes, branchSourceNodeIds);
+
+    return {
+      ...node,
+      rawMetadata,
+      routePolicy,
+      joinNodeId,
+      branchIndex: branchIndexes[0] ?? null,
+      branchIndexes,
+      branchSourceNodeId: branchSourceNodeIds[0] ?? null,
+      derivedRole,
+      semanticTags,
+      warnings,
+      skillMetadata,
+    };
+  }
+
+  private normalizeGraphEdges(
+    graph: GraphSnapshot,
+    nodeLookup: Map<number, GraphNodeSnapshot>,
+    currentNodeId: number | null,
+    runtimeContext: GraphRuntimeContextView,
+  ): GraphEdgeView[] {
+    const structuralEdges = graph.edges.map((edge) => ({
+      ...edge,
+      active: currentNodeId !== null && edge.from_node_id === currentNodeId,
+      derivedFromMetadata: null,
+      derivedRelation: false,
+    }));
+
+    const seen = new Set(structuralEdges.map((edge) => this.edgeSignature(edge.from_node_id, edge.to_node_id, edge.label, edge.condition, edge.priority)));
+    const derivedEdges: GraphEdgeView[] = [];
+
+    for (const node of graph.nodes) {
+      const metadata = this.isRecord(node.metadata) ? node.metadata : {};
+      const routePolicy = this.normalizeRoutePolicy(metadata['route_policy']);
+      const joinNodeId = this.readNumber(metadata['join_node_id']);
+      if (routePolicy !== 'all' || joinNodeId === null) {
+        continue;
+      }
+      if (!nodeLookup.has(joinNodeId)) {
+        continue;
+      }
+      const signature = this.edgeSignature(node.node_id, joinNodeId, 'join', 'metadata.join_node_id', 1000);
+      if (seen.has(signature)) {
+        continue;
+      }
+      seen.add(signature);
+      derivedEdges.push({
+        from_node_id: node.node_id,
+        to_node_id: joinNodeId,
+        label: 'join',
+        condition: 'metadata.join_node_id',
+        priority: 1000,
+        active: currentNodeId !== null && node.node_id === currentNodeId,
+        derivedFromMetadata: ['join_node_id'],
+        derivedRelation: true,
+      });
+    }
+
+    const runtimeEdges: GraphEdgeView[] = [];
+    runtimeContext.sourceBranchGroups.forEach((group, sourceNodeId) => {
+      if (!nodeLookup.has(sourceNodeId) || group.joinNodeId === null || !nodeLookup.has(group.joinNodeId)) {
+        return;
+      }
+      const signature = this.edgeSignature(sourceNodeId, group.joinNodeId, 'join', 'runtime.branch_join', 999);
+      if (seen.has(signature)) {
+        return;
+      }
+      seen.add(signature);
+      runtimeEdges.push({
+        from_node_id: sourceNodeId,
+        to_node_id: group.joinNodeId,
+        label: 'branch join',
+        condition: 'runtime.branch_join',
+        priority: 999,
+        active: currentNodeId !== null && sourceNodeId === currentNodeId,
+        derivedFromMetadata: ['branch_index', 'branch_source_node_id'],
+        derivedRelation: true,
+      });
+    });
+
+    return [...structuralEdges, ...derivedEdges, ...runtimeEdges].sort(
+      (left, right) =>
+        left.from_node_id - right.from_node_id ||
+        left.priority - right.priority ||
+        left.to_node_id - right.to_node_id ||
+        (left.label ?? '').localeCompare(right.label ?? '') ||
+        (left.condition ?? '').localeCompare(right.condition ?? ''),
+    );
+  }
+
+  private edgeSignature(fromNodeId: number, toNodeId: number, label: string | null | undefined, condition: string | null | undefined, priority: number) {
+    return `${fromNodeId}:${toNodeId}:${priority}:${label ?? ''}:${condition ?? ''}`;
+  }
+
+  private normalizeRoutePolicy(rawValue: unknown): 'all' | 'first' | null {
+    const text = this.safeString(rawValue)?.toLowerCase() ?? '';
+    if (text === 'all') {
+      return 'all';
+    }
+    if (text === 'first') {
+      return 'first';
+    }
+    return null;
+  }
+
+  private extractSkillMetadata(rawMetadata: Record<string, unknown>): GraphSkillMetadataView | null {
+    const skillKeys = [
+      'contract_version',
+      'capability',
+      'description',
+      'input_schema',
+      'output_schema',
+      'requires_tools',
+      'requires_skills',
+      'preconditions',
+      'postconditions',
+      'failure_policy',
+      'parallelizable',
+    ];
+    const hasAny = skillKeys.some((key) => rawMetadata[key] !== undefined);
+    if (!hasAny) {
+      return null;
+    }
+
+    const warnings: string[] = [];
+    if (rawMetadata['input_schema'] !== undefined && !this.isRecord(rawMetadata['input_schema'])) {
+      warnings.push('input_schema is present but is not a JSON object.');
+    }
+    if (rawMetadata['output_schema'] !== undefined && !this.isRecord(rawMetadata['output_schema'])) {
+      warnings.push('output_schema is present but is not a JSON object.');
+    }
+
+    return {
+      contractVersion: this.safeString(rawMetadata['contract_version']),
+      capability: this.safeString(rawMetadata['capability']),
+      description: this.safeString(rawMetadata['description']),
+      inputSchema: this.toJsonableValue(rawMetadata['input_schema']),
+      outputSchema: this.toJsonableValue(rawMetadata['output_schema']),
+      requiresTools: this.toStringList(rawMetadata['requires_tools']),
+      requiresSkills: this.toStringList(rawMetadata['requires_skills']),
+      preconditions: this.toStringList(rawMetadata['preconditions']),
+      postconditions: this.toStringList(rawMetadata['postconditions']),
+      failurePolicy: this.safeString(rawMetadata['failure_policy']),
+      parallelizable: Object.prototype.hasOwnProperty.call(rawMetadata, 'parallelizable')
+        ? typeof rawMetadata['parallelizable'] === 'boolean'
+          ? rawMetadata['parallelizable']
+          : null
+        : null,
+      rawMetadata: this.toJsonableRecord(rawMetadata),
+      warnings,
+    };
+  }
+
+  private buildGraphSemanticTags(
+    node: GraphNodeSnapshot,
+    graph: GraphSnapshot,
+    routePolicy: 'all' | 'first' | null,
+    joinNodeId: number | null,
+    branchIndexes: number[],
+    branchSourceNodeIds: number[],
+    skillMetadata: GraphSkillMetadataView | null,
+  ): string[] {
+    const tags = new Set<string>();
+    if (graph.entry_node_id === node.node_id) {
+      tags.add('entry');
+    }
+    if (graph.exit_node_id === node.node_id) {
+      tags.add('exit');
+    }
+    if (routePolicy === 'all') {
+      tags.add('branch_source');
+      tags.add('route:all');
+    } else if (routePolicy === 'first') {
+      tags.add('route:first');
+    }
+    if (joinNodeId !== null) {
+      tags.add('join_target');
+    }
+    if (branchIndexes.length) {
+      branchIndexes.forEach((index) => tags.add(`branch:${index}`));
+    }
+    if (branchSourceNodeIds.length) {
+      branchSourceNodeIds.forEach((sourceId) => tags.add(`source:${sourceId}`));
+    }
+    if (node.agent_id) {
+      tags.add('agent');
+    }
+    if (node.tool_name) {
+      tags.add('tool');
+    }
+    if (skillMetadata) {
+      tags.add('skill');
+      if (skillMetadata.capability) {
+        tags.add(`capability:${skillMetadata.capability}`);
+      }
+    }
+    return [...tags];
+  }
+
+  private pickDerivedGraphRole(
+    node: GraphNodeSnapshot,
+    graph: GraphSnapshot,
+    routePolicy: 'all' | 'first' | null,
+    joinNodeId: number | null,
+    branchIndexes: number[],
+    branchSourceNodeIds: number[],
+  ): string {
+    if (graph.entry_node_id === node.node_id) {
+      return 'entry';
+    }
+    if (graph.exit_node_id === node.node_id) {
+      return 'exit';
+    }
+    if (routePolicy === 'all' && joinNodeId !== null) {
+      return 'branch_source';
+    }
+    if (routePolicy === 'all') {
+      return 'branch_source';
+    }
+    if (joinNodeId !== null) {
+      return 'join_target';
+    }
+    if (branchIndexes.length || branchSourceNodeIds.length) {
+      return 'branch_member';
+    }
+    if (node.tool_name) {
+      return 'tool';
+    }
+    if (node.agent_id) {
+      return 'agent';
+    }
+    return 'node';
+  }
+
+  private collectGraphNodeWarnings(
+    node: GraphNodeSnapshot,
+    graph: GraphSnapshot,
+    routePolicy: 'all' | 'first' | null,
+    joinNodeId: number | null,
+    skillMetadata: GraphSkillMetadataView | null,
+    branchIndexes: number[],
+    branchSourceNodeIds: number[],
+  ): string[] {
+    const warnings: string[] = [];
+    const metadata = this.isRecord(node.metadata) ? node.metadata : {};
+    const knownKeys = new Set([
+      'route_policy',
+      'join_node_id',
+      'contract_version',
+      'capability',
+      'description',
+      'input_schema',
+      'output_schema',
+      'requires_tools',
+      'requires_skills',
+      'preconditions',
+      'postconditions',
+      'failure_policy',
+      'parallelizable',
+    ]);
+
+    for (const key of Object.keys(metadata)) {
+      if (!knownKeys.has(key)) {
+        warnings.push(`Unknown metadata key preserved: ${key}`);
+      }
+    }
+
+    if (routePolicy === null && Object.prototype.hasOwnProperty.call(metadata, 'route_policy')) {
+      warnings.push(`route_policy=${String(metadata['route_policy'])} is not recognized; default routing will be used.`);
+    }
+
+    if (joinNodeId !== null && !graph.nodes.some((item) => item.node_id === joinNodeId)) {
+      warnings.push(`join_node_id=${joinNodeId} does not point to a node in the current graph.`);
+    }
+
+    if (skillMetadata?.warnings.length) {
+      warnings.push(...skillMetadata.warnings);
+    }
+
+    if (branchIndexes.length === 0 && branchSourceNodeIds.length > 0) {
+      warnings.push('Runtime branch source metadata was observed without an explicit branch_index.');
+    }
+
+    return [...new Set(warnings)];
+  }
+
+  private toStringList(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => this.safeString(item))
+        .filter((item): item is string => Boolean(item));
+    }
+    const text = this.safeString(value);
+    return text ? [text] : [];
+  }
+
+  private toJsonableValue(value: unknown): unknown {
+    return this.cloneJsonValue(value);
+  }
+
+  private toJsonableRecord(value: Record<string, unknown>): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(JSON.stringify(value));
+      return this.isRecord(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private cloneJsonValue(value: unknown): unknown {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
+  }
+
+  private buildGraphSpectrumView(view: GraphView | null, zoom: number, layoutMode: 'horizontal' | 'vertical'): GraphSpectrumView | null {
     if (!view) {
       return null;
     }
 
     const safeZoom = this.clampGraphZoom(zoom);
-    const nodeWidth = 190;
-    const nodeHeight = 92;
-    const levelGap = 180;
-    const nodeGap = 70;
-    const padding = 56;
+    const displayScale = safeZoom * 2;
+    const horizontal = layoutMode === 'horizontal';
+    const nodeWidth = horizontal ? 176 : 122;
+    const nodeHeight = horizontal ? 44 : 58;
+    const levelGap = horizontal ? 172 : 112;
+    const nodeGap = horizontal ? 18 : 22;
+    const padding = 20;
 
-    const layout = this.layoutGraphNodes(view, nodeWidth, nodeHeight, levelGap, nodeGap, padding);
+    const layout = this.layoutGraphNodes(view, nodeWidth, nodeHeight, levelGap, nodeGap, padding, layoutMode);
     const positions = layout.positions;
-    const widestRow = Math.max(layout.widestRow, 1);
-    const width = Math.max(960, padding * 2 + widestRow * nodeWidth + Math.max(0, widestRow - 1) * nodeGap);
-    const maxLevel = Math.max(layout.maxLevel, 0);
-    const height = Math.max(560, padding * 2 + maxLevel * levelGap + nodeHeight);
+    const widestSpan = Math.max(layout.widestSpan, 1);
+    const width = horizontal
+      ? Math.max(1120, padding * 2 + layout.maxLevel * levelGap + nodeWidth)
+      : Math.max(1120, padding * 2 + widestSpan * nodeWidth + Math.max(0, widestSpan - 1) * nodeGap);
+    const height = horizontal
+      ? Math.max(180, padding * 2 + widestSpan * nodeHeight + Math.max(0, widestSpan - 1) * nodeGap)
+      : Math.max(180, padding * 2 + layout.maxLevel * levelGap + nodeHeight);
     const panX = this.graphPanX();
     const panY = this.graphPanY();
     const viewBox = `0 0 ${width} ${height}`;
@@ -782,7 +1559,7 @@ export class App implements OnDestroy {
       const y1 = source ? source.y + source.height : padding;
       const x2 = target ? target.x + target.width / 2 : padding;
       const y2 = target ? target.y : padding;
-      const midY = y1 + Math.max(54, (y2 - y1) / 2);
+      const midY = y1 + Math.max(22, (y2 - y1) / 2);
       return {
         ...edge,
         d: `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`,
@@ -794,14 +1571,19 @@ export class App implements OnDestroy {
       height,
       viewBox,
       zoom: safeZoom,
+      displayScale,
       panX,
       panY,
       panTransform: `translate(${panX} ${panY})`,
-      scaleTransform: `scale(${safeZoom})`,
+      scaleTransform: `scale(${displayScale})`,
+      branchIndex: view.branchIndex,
+      branchSourceNodeId: view.branchSourceNodeId,
+      semanticSummary: view.semanticSummary,
       nodes: layoutNodes,
       edges: layoutEdges,
       rawJson: this.prettyJson({
         zoom: safeZoom,
+        layoutMode,
         panX,
         panY,
         layout: layoutNodes.map((node) => ({
@@ -811,8 +1593,81 @@ export class App implements OnDestroy {
           width: node.width,
           height: node.height,
         })),
+        branchIndex: view.branchIndex,
+        branchSourceNodeId: view.branchSourceNodeId,
+        semanticSummary: view.semanticSummary,
       }),
     };
+  }
+
+  private buildGraphNodeDetailView(view: GraphSpectrumView | null, selectedNodeId: number | null): GraphNodeDetailView | null {
+    if (!view || selectedNodeId === null) {
+      return null;
+    }
+
+    const node = view.nodes.find((item) => item.node_id === selectedNodeId);
+    if (!node) {
+      return null;
+    }
+
+    return {
+      node,
+      summary: [
+        { key: 'status', value: node.status },
+        { key: 'type', value: node.node_type },
+        { key: 'role', value: node.derivedRole },
+        { key: 'entry', value: node.isEntry ? 'yes' : 'no' },
+        { key: 'exit', value: node.isExit ? 'yes' : 'no' },
+        { key: 'agent', value: node.agent_id ?? 'none' },
+        { key: 'tool', value: node.tool_name ?? 'none' },
+        { key: 'route policy', value: node.routePolicy ?? 'default' },
+        { key: 'join target', value: node.joinNodeId !== null ? String(node.joinNodeId) : 'none' },
+        { key: 'branch index', value: node.branchIndexes.length ? node.branchIndexes.join(', ') : 'none' },
+        { key: 'next', value: node.next_node_ids.length ? node.next_node_ids.join(', ') : 'none' },
+      ],
+      semanticChips: node.semanticTags,
+      skillChips: node.skillMetadata
+        ? [
+            node.skillMetadata.contractVersion ? `contract ${node.skillMetadata.contractVersion}` : '',
+            node.skillMetadata.capability ? `capability ${node.skillMetadata.capability}` : '',
+            node.skillMetadata.failurePolicy ? `failure ${node.skillMetadata.failurePolicy}` : '',
+            node.skillMetadata.parallelizable === true ? 'parallelizable' : node.skillMetadata.parallelizable === false ? 'serial' : '',
+          ].filter((item): item is string => Boolean(item))
+        : [],
+      runtimeChips: [
+        node.branchIndexes.length ? `branches ${node.branchIndexes.join(', ')}` : '',
+        node.branchSourceNodeId !== null ? `branch source ${node.branchSourceNodeId}` : '',
+        node.warnings.length ? `${node.warnings.length} warning${node.warnings.length === 1 ? '' : 's'}` : '',
+      ].filter((item): item is string => Boolean(item)),
+      sections: this.buildSectionsFromRecord([
+        { title: 'Semantic metadata', value: {
+          derived_role: node.derivedRole,
+          semantic_tags: node.semanticTags,
+          route_policy: node.routePolicy,
+          join_node_id: node.joinNodeId,
+          branch_index: node.branchIndexes,
+          branch_source_node_id: node.branchSourceNodeId,
+          warnings: node.warnings,
+        } },
+        { title: 'Skill metadata', value: node.skillMetadata ?? null },
+        { title: 'Metadata', value: node.metadata },
+        {
+          title: 'Prompt and Mapping',
+          value: {
+            additional_prompt: node.additional_prompt ?? null,
+            input_mapping: node.input_mapping ?? null,
+          },
+        },
+      ]),
+      rawJson: this.prettyJson({
+        ...node,
+        raw_metadata: node.rawMetadata,
+      }),
+    };
+  }
+
+  protected isCollapsibleResultSection(title: string) {
+    return title.trim().toLowerCase() === 'result';
   }
 
   private buildRunEventView(event: RunEvent): RunEventView {
@@ -860,18 +1715,7 @@ export class App implements OnDestroy {
   }
 
   private buildGraphNodeLabelLines(node: GraphNodeView): string[] {
-    const lines = [`#${node.node_id} ${node.node_name}`];
-    lines.push(node.node_type);
-    if (node.agent_id) {
-      lines.push(`agent: ${node.agent_id}`);
-    }
-    if (node.tool_name) {
-      lines.push(`tool: ${node.tool_name}`);
-    }
-    if (node.next_node_ids.length) {
-      lines.push(`next: ${node.next_node_ids.join(', ')}`);
-    }
-    return lines.slice(0, 4);
+    return [node.node_name];
   }
 
   private layoutGraphNodes(
@@ -881,7 +1725,8 @@ export class App implements OnDestroy {
     levelGap: number,
     nodeGap: number,
     padding: number,
-  ): { positions: Map<number, { x: number; y: number }>; widestRow: number; maxLevel: number } {
+    layoutMode: 'horizontal' | 'vertical',
+  ): { positions: Map<number, { x: number; y: number }>; widestSpan: number; maxLevel: number } {
     const outgoing = new Map<number, number[]>();
     const levels = new Map<number, number>();
 
@@ -935,17 +1780,29 @@ export class App implements OnDestroy {
       grouped.set(level, group);
     });
 
-    let widestRow = 1;
+    let widestSpan = 1;
     grouped.forEach((items) => {
-      widestRow = Math.max(widestRow, items.length);
+      widestSpan = Math.max(widestSpan, items.length);
     });
 
     const positions = new Map<number, { x: number; y: number }>();
     const orderedLevels = [...grouped.keys()].sort((left, right) => left - right);
     orderedLevels.forEach((level) => {
       const items = grouped.get(level) ?? [];
+      if (layoutMode === 'horizontal') {
+        const columnHeight = items.length * nodeHeight + Math.max(0, items.length - 1) * nodeGap;
+        const startY = padding + (widestSpan * nodeHeight + Math.max(0, widestSpan - 1) * nodeGap - columnHeight) / 2;
+        items.forEach((nodeId, index) => {
+          positions.set(nodeId, {
+            x: padding + level * levelGap,
+            y: startY + index * (nodeHeight + nodeGap),
+          });
+        });
+        return;
+      }
+
       const rowWidth = items.length * nodeWidth + Math.max(0, items.length - 1) * nodeGap;
-      const startX = padding + (widestRow * nodeWidth + Math.max(0, widestRow - 1) * nodeGap - rowWidth) / 2;
+      const startX = padding + (widestSpan * nodeWidth + Math.max(0, widestSpan - 1) * nodeGap - rowWidth) / 2;
       items.forEach((nodeId, index) => {
         positions.set(nodeId, {
           x: startX + index * (nodeWidth + nodeGap),
@@ -956,7 +1813,7 @@ export class App implements OnDestroy {
 
     return {
       positions,
-      widestRow,
+      widestSpan,
       maxLevel: orderedLevels[orderedLevels.length - 1] ?? 0,
     };
   }

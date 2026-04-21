@@ -192,7 +192,10 @@ button.secondary
   gap: 0.9rem
 
 .graph-spectrum-frame
+  position: relative
   border-radius: 22px
+  height: 360px
+  min-height: 360px
   background: radial-gradient(circle at top left, rgba(216, 160, 95, 0.08), transparent 34%), radial-gradient(circle at bottom right, rgba(74, 179, 168, 0.08), transparent 34%), rgba(5, 7, 10, 0.82)
   border: 1px solid rgba(233, 216, 188, 0.08)
   overflow: hidden
@@ -201,7 +204,8 @@ button.secondary
 .graph-spectrum-svg
   display: block
   width: 100%
-  min-height: 180px
+  height: 100%
+  min-height: 360px
   cursor: grab
   touch-action: none
 
@@ -219,8 +223,14 @@ button.secondary
   stroke: #d8a05f
   stroke-width: 2.8
 
+.graph-edge.derived
+  stroke: rgba(120, 215, 201, 0.72)
+  stroke-width: 2
+  stroke-dasharray: 7 6
+
 .graph-spectrum-node
   filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.34))
+  cursor: pointer
 
 .graph-spectrum-node-box
   fill: rgba(8, 10, 14, 0.9)
@@ -249,22 +259,173 @@ button.secondary
   fill: rgba(241, 104, 104, 0.14)
   stroke: rgba(241, 104, 104, 0.8)
 
+.graph-spectrum-node.selected .graph-spectrum-node-box
+  stroke: rgba(216, 160, 95, 0.95)
+  stroke-width: 1.8
+  filter: drop-shadow(0 0 0 1px rgba(216, 160, 95, 0.18))
+
 .graph-spectrum-node-text
   fill: #f6efe5
-  font-size: 12px
+  font-size: 13px
   font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif
 
-.graph-spectrum-node-text tspan
-  display: block
+.graph-spectrum-inspector
+  position: absolute
+  top: 0.75rem
+  right: 0.75rem
+  z-index: 2
+  width: min(420px, calc(100% - 1.5rem))
+  max-height: calc(100% - 1.5rem)
+  overflow: auto
+  padding: 0.85rem
+  border-radius: 18px
+  background: rgba(10, 13, 18, 0.94)
+  border: 1px solid rgba(233, 216, 188, 0.12)
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.38)
+  backdrop-filter: blur(12px)
 
-.graph-spectrum-node-status
-  fill: rgba(242, 235, 223, 0.72)
-  font-size: 10px
-  text-transform: uppercase
-  letter-spacing: 0.12em
+.graph-spectrum-inspector.empty
+  display: flex
+  flex-direction: column
+  gap: 0.4rem
+
+.graph-spectrum-inspector h4
+  margin: 0.1rem 0 0
+
+.inspector-close
+  padding: 0.5rem 0.75rem
+  border-radius: 12px
+
+.inspector-summary
+  margin: 0.75rem 0
+
+.inspector-chip-stack
+  margin-top: 0.65rem
+
+.inspector-warnings
+  margin: 0.75rem 0 0
+
+.inspector-block
+  margin-top: 0.75rem
+
+.inspector-raw
+  margin-top: 0.75rem
 
 .graph-spectrum-summary
   margin-top: 0.15rem
+
+.graph-semantic-panel
+  display: grid
+  grid-template-columns: repeat(2, minmax(0, 1fr))
+  gap: 0.85rem
+  margin-top: 0.85rem
+
+.semantic-group
+  padding: 0.95rem
+  border-radius: 18px
+  background: rgba(8, 10, 14, 0.72)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+
+.semantic-list
+  display: flex
+  flex-direction: column
+  gap: 0.6rem
+
+.semantic-row
+  display: flex
+  flex-direction: column
+  gap: 0.2rem
+  padding: 0.75rem 0.8rem
+  border-radius: 14px
+  background: rgba(255, 255, 255, 0.03)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+
+.semantic-row strong
+  color: #fff7eb
+
+.semantic-row span,
+.semantic-row small
+  color: rgba(214, 202, 184, 0.76)
+
+.chip-stack
+  display: flex
+  flex-wrap: wrap
+  gap: 0.45rem
+  margin-top: 0.7rem
+
+.chip-skill
+  background: rgba(120, 215, 201, 0.12)
+  border-color: rgba(120, 215, 201, 0.28)
+
+.chip-runtime
+  background: rgba(216, 160, 95, 0.12)
+  border-color: rgba(216, 160, 95, 0.28)
+
+.graph-legend
+  display: flex
+  flex-wrap: wrap
+  gap: 0.55rem 0.9rem
+  padding: 0.15rem 0.05rem 0
+
+.legend-item
+  display: inline-flex
+  align-items: center
+  gap: 0.45rem
+  color: rgba(242, 235, 223, 0.78)
+  font-size: 0.82rem
+
+.legend-swatch
+  display: inline-block
+  width: 0.85rem
+  height: 0.85rem
+  border-radius: 999px
+  border: 1px solid rgba(233, 216, 188, 0.2)
+  background: rgba(255, 255, 255, 0.08)
+
+.legend-swatch.entry
+  border-color: rgba(216, 160, 95, 0.8)
+  background: rgba(216, 160, 95, 0.2)
+
+.legend-swatch.running
+  border-color: rgba(216, 160, 95, 0.95)
+  background: rgba(216, 160, 95, 0.55)
+
+.legend-swatch.completed
+  border-color: rgba(74, 179, 168, 0.9)
+  background: rgba(74, 179, 168, 0.35)
+
+.legend-swatch.failed
+  border-color: rgba(241, 104, 104, 0.9)
+  background: rgba(241, 104, 104, 0.28)
+
+.legend-swatch.selected
+  border-color: rgba(216, 160, 95, 0.95)
+  background: rgba(255, 247, 237, 0.92)
+
+.legend-swatch.edge
+  width: 1.05rem
+  height: 0.35rem
+  border-radius: 999px
+  border-color: rgba(216, 160, 95, 0.7)
+  background: linear-gradient(90deg, rgba(216, 160, 95, 0.95), rgba(74, 179, 168, 0.95))
+
+.legend-swatch.derived
+  width: 1.05rem
+  height: 0.35rem
+  border-radius: 999px
+  border-color: rgba(120, 215, 201, 0.8)
+  background: linear-gradient(90deg, rgba(120, 215, 201, 0.92), rgba(120, 215, 201, 0.25))
+
+.graph-workbench-grid
+  display: grid
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr)
+  gap: 1.25rem
+  align-items: start
+  margin-top: 1.25rem
+
+.graph-workbench-grid .graph-panel,
+.graph-workbench-grid .workbench-panel
+  margin-top: 0
 
 .list
   display: flex
@@ -387,6 +548,83 @@ button.secondary
 
 .result-box h3
   margin: 0 0 0.75rem
+
+.execution-feedback
+  padding: 0.95rem 1rem
+  border-radius: 18px
+  background: rgba(8, 10, 14, 0.72)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+  margin-bottom: 0.9rem
+
+.execution-feedback.running
+  border-color: rgba(216, 160, 95, 0.34)
+  box-shadow: 0 0 0 1px rgba(216, 160, 95, 0.08) inset
+
+.execution-feedback.success
+  border-color: rgba(74, 179, 168, 0.34)
+  box-shadow: 0 0 0 1px rgba(74, 179, 168, 0.08) inset
+
+.execution-feedback.error
+  border-color: rgba(241, 104, 104, 0.34)
+  box-shadow: 0 0 0 1px rgba(241, 104, 104, 0.08) inset
+
+.execution-feedback-head
+  display: flex
+  align-items: flex-start
+  justify-content: space-between
+  gap: 0.75rem
+  margin-bottom: 0.75rem
+  flex-wrap: wrap
+
+.execution-feedback-head h3
+  margin: 0.15rem 0 0
+  font-size: 1.02rem
+
+.execution-feedback .chip
+  max-width: min(52ch, 100%)
+
+.progress-track
+  position: relative
+  height: 10px
+  border-radius: 999px
+  overflow: hidden
+  background: rgba(255, 255, 255, 0.06)
+  border: 1px solid rgba(233, 216, 188, 0.06)
+
+.progress-bar
+  height: 100%
+  border-radius: inherit
+  background: linear-gradient(90deg, #d8a05f, #4ab3a8)
+  width: 0%
+  transition: width 0.28s ease
+
+.execution-feedback.success .progress-bar
+  background: linear-gradient(90deg, #4ab3a8, #7dddcf)
+
+.execution-feedback.error .progress-bar
+  background: linear-gradient(90deg, #f16868, #f19b9b)
+
+.progress-track.indeterminate .progress-bar
+  width: 36%
+  animation: progress-indeterminate 1.25s ease-in-out infinite
+  transform-origin: left center
+
+.collapsible-result
+  padding: 0.95rem 1rem
+  cursor: default
+
+.collapsible-result > summary
+  list-style: none
+  cursor: pointer
+
+.collapsible-result > summary::-webkit-details-marker
+  display: none
+
+.collapsible-summary
+  margin-bottom: 0
+
+.collapsible-body
+  margin-top: 0.9rem
 
 .composer-grid
   display: grid
@@ -679,7 +917,11 @@ button.secondary
 @media (max-width: 1180px)
   .hero,
   .grid,
-  .lower-grid
+  .lower-grid,
+  .graph-workbench-grid
+    grid-template-columns: 1fr
+
+  .graph-semantic-panel
     grid-template-columns: 1fr
 
   .detail-grid,
@@ -722,3 +964,11 @@ button.secondary
   .swarm-item
     align-items: flex-start
     flex-direction: column
+
+@keyframes progress-indeterminate
+  0%
+    transform: translateX(-15%)
+  50%
+    transform: translateX(150%)
+  100%
+    transform: translateX(-15%)

@@ -132,7 +132,8 @@
     </section>
   </section>
 
-  <section class="card panel graph-panel">
+  <section class="graph-workbench-grid">
+    <section class="card panel graph-panel">
       <div class="panel-head">
         <div>
           <p class="eyebrow">Execution graph</p>
@@ -219,6 +220,10 @@
           <div class="panel-toolbar">
             <span class="chip">vector svg</span>
             <span class="chip">zoom {{ (graphSpectrumView()?.zoom ?? 1) | number:'1.0-1' }}x</span>
+            <div class="tab-row">
+              <button type="button" class="secondary" [class.active-tab]="graphLayout() === 'horizontal'" (click)="setGraphLayout('horizontal')">Horizontal</button>
+              <button type="button" class="secondary" [class.active-tab]="graphLayout() === 'vertical'" (click)="setGraphLayout('vertical')">Vertical</button>
+            </div>
             <div class="action-row">
               <button type="button" class="secondary" (click)="zoomGraphOut()" [disabled]="!graphSpectrumView()">Zoom out</button>
               <button type="button" class="secondary" (click)="resetGraphZoom()" [disabled]="!graphSpectrumView()">Reset</button>
@@ -229,12 +234,99 @@
 
           @if (graphSpectrumView(); as spectrum) {
             <div class="graph-spectrum-frame">
+              @if (graphNodeDetailView(); as detail) {
+                <aside class="graph-spectrum-inspector">
+                  <div class="rendered-head">
+                    <div>
+                      <p class="eyebrow">Node detail</p>
+                      <h4>{{ detail.node.node_name }}</h4>
+                    </div>
+                    <button type="button" class="secondary inspector-close" (click)="selectedGraphNodeId.set(null)">Close</button>
+                  </div>
+
+                  <div class="summary-grid compact inspector-summary">
+                    @for (item of detail.summary; track item.key) {
+                      <div class="summary-item">
+                        <span>{{ item.key }}</span>
+                        <strong>{{ item.value }}</strong>
+                      </div>
+                    }
+                  </div>
+
+                  @if (detail.semanticChips.length) {
+                    <div class="chip-stack inspector-chip-stack">
+                      @for (chip of detail.semanticChips; track chip) {
+                        <span class="chip">{{ chip }}</span>
+                      }
+                    </div>
+                  }
+
+                  @if (detail.skillChips.length) {
+                    <div class="chip-stack inspector-chip-stack">
+                      @for (chip of detail.skillChips; track chip) {
+                        <span class="chip chip-skill">{{ chip }}</span>
+                      }
+                    </div>
+                  }
+
+                  @if (detail.runtimeChips.length) {
+                    <div class="chip-stack inspector-chip-stack">
+                      @for (chip of detail.runtimeChips; track chip) {
+                        <span class="chip chip-runtime">{{ chip }}</span>
+                      }
+                    </div>
+                  }
+
+                  @if (detail.node.warnings.length) {
+                    <ul class="warning-list muted inspector-warnings">
+                      @for (warning of detail.node.warnings; track warning) {
+                        <li>{{ warning }}</li>
+                      }
+                    </ul>
+                  }
+
+                  @for (section of detail.sections; track section.title) {
+                    <article class="rendered-block inspector-block">
+                      <div class="rendered-head">
+                        <h4>{{ section.title }}</h4>
+                        <span class="chip">{{ section.facts.length }} facts</span>
+                      </div>
+
+                      @if (section.facts.length) {
+                        <dl class="fact-grid fact-grid-tight">
+                          @for (fact of section.facts; track fact.key) {
+                            <div class="fact-row">
+                              <dt>{{ fact.key }}</dt>
+                              <dd>{{ fact.value }}</dd>
+                            </div>
+                          }
+                        </dl>
+                      }
+
+                      @if (section.blocks.length) {
+                        <div class="markdown-stack">
+                          @for (block of section.blocks; track $index) {
+                            <div class="markdown-block" [innerHTML]="block.html"></div>
+                          }
+                        </div>
+                      }
+                    </article>
+                  }
+
+                  <details class="raw-details inspector-raw">
+                    <summary>Raw node JSON</summary>
+                    <pre>{{ detail.rawJson }}</pre>
+                  </details>
+                </aside>
+              }
+
               <svg
                 class="graph-spectrum-svg"
                 [class.dragging]="graphDragging()"
                 [attr.viewBox]="spectrum.viewBox"
                 role="img"
                 aria-label="Swarm execution graph"
+                (click)="clearGraphSelection()"
                 (pointerdown)="startGraphDrag($event)"
                 (pointermove)="moveGraphDrag($event)"
                 (pointerup)="endGraphDrag($event)"
@@ -253,22 +345,27 @@
                 <g [attr.transform]="spectrum.panTransform">
                   <g [attr.transform]="spectrum.scaleTransform">
                     @for (edge of spectrum.edges; track edge.from_node_id + '-' + edge.to_node_id + '-' + edge.priority) {
-                      <path class="graph-edge" [class.active]="edge.active" [attr.d]="edge.d" [attr.marker-end]="'url(#graphArrow)'"></path>
+                      <path class="graph-edge" [class.active]="edge.active" [class.derived]="edge.derivedRelation" [attr.d]="edge.d" [attr.marker-end]="'url(#graphArrow)'"></path>
                     }
-                    <g>
                     @for (node of spectrum.nodes; track node.node_id) {
-                      <g class="graph-spectrum-node" [attr.transform]="'translate(' + node.x + ',' + node.y + ')'" [class.entry]="node.isEntry" [class.exit]="node.isExit" [class.running]="node.status === 'running'" [class.completed]="node.status === 'completed'" [class.failed]="node.status === 'failed'">
+                      <g
+                        class="graph-spectrum-node"
+                        [class.selected]="selectedGraphNodeId() === node.node_id"
+                        [attr.transform]="'translate(' + node.x + ',' + node.y + ')'"
+                        [class.entry]="node.isEntry"
+                        [class.exit]="node.isExit"
+                        [class.running]="node.status === 'running'"
+                        [class.completed]="node.status === 'completed'"
+                        [class.failed]="node.status === 'failed'"
+                        (click)="selectGraphNode(node.node_id, $event)"
+                      >
                         <rect class="graph-spectrum-node-box" [attr.width]="node.width" [attr.height]="node.height" rx="18" ry="18"></rect>
                         <rect class="graph-spectrum-node-highlight" [attr.width]="node.width" [attr.height]="node.height" rx="18" ry="18"></rect>
-                        <text class="graph-spectrum-node-text" x="18" y="24">
-                          @for (line of node.labelLines; track $index) {
-                            <tspan x="18" [attr.dy]="$index === 0 ? 0 : 17">{{ line }}</tspan>
-                          }
+                        <text class="graph-spectrum-node-text" x="18" y="28">
+                          <tspan x="18">{{ node.node_name }}</tspan>
                         </text>
-                        <text class="graph-spectrum-node-status" [attr.x]="node.width - 18" [attr.y]="node.height - 18" text-anchor="end">{{ node.status }}</text>
                       </g>
                     }
-                    </g>
                   </g>
                 </g>
               </svg>
@@ -291,7 +388,89 @@
                 <span>Zoom</span>
                 <strong>{{ spectrum.zoom | number:'1.0-1' }}x</strong>
               </div>
+              <div class="summary-item">
+                <span>Branches</span>
+                <strong>{{ spectrum.semanticSummary.branchGroups.length }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>Joins</span>
+                <strong>{{ spectrum.semanticSummary.joinGroups.length }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>Hints</span>
+                <strong>{{ spectrum.semanticSummary.unresolvedMetadataHints.length }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>Branch index</span>
+                <strong>{{ spectrum.branchIndex ?? 'none' }}</strong>
+              </div>
+              <div class="summary-item">
+                <span>Branch source</span>
+                <strong>{{ spectrum.branchSourceNodeId ?? 'none' }}</strong>
+              </div>
             </div>
+
+            <div class="graph-legend" aria-label="Graph legend">
+              <span class="legend-item"><i class="legend-swatch entry"></i>Entry node</span>
+              <span class="legend-item"><i class="legend-swatch running"></i>Running node</span>
+              <span class="legend-item"><i class="legend-swatch completed"></i>Completed node</span>
+              <span class="legend-item"><i class="legend-swatch failed"></i>Failed node</span>
+              <span class="legend-item"><i class="legend-swatch selected"></i>Selected node</span>
+              <span class="legend-item"><i class="legend-swatch edge"></i>Active edge</span>
+              <span class="legend-item"><i class="legend-swatch derived"></i>Derived relation</span>
+            </div>
+
+            @if (spectrum.semanticSummary.branchGroups.length || spectrum.semanticSummary.joinGroups.length) {
+              <div class="graph-semantic-panel">
+                @if (spectrum.semanticSummary.branchGroups.length) {
+                  <article class="semantic-group">
+                    <div class="rendered-head">
+                      <h4>Branch groups</h4>
+                      <span class="chip">{{ spectrum.semanticSummary.branchGroups.length }}</span>
+                    </div>
+                    <div class="semantic-list">
+                      @for (group of spectrum.semanticSummary.branchGroups; track group.sourceNodeId) {
+                        <div class="semantic-row">
+                          <strong>#{{ group.sourceNodeId }} {{ group.sourceNodeName }}</strong>
+                          <span>role: {{ group.joinNodeId !== null ? 'branch_source' : 'branch_member' }}</span>
+                          <small>branches: {{ group.branchIndexes.length ? group.branchIndexes.join(', ') : 'n/a' }}</small>
+                          <small>branch nodes: {{ group.branchNodeIds.length ? group.branchNodeIds.join(', ') : 'n/a' }}</small>
+                        </div>
+                      }
+                    </div>
+                  </article>
+                }
+
+                @if (spectrum.semanticSummary.joinGroups.length) {
+                  <article class="semantic-group">
+                    <div class="rendered-head">
+                      <h4>Join groups</h4>
+                      <span class="chip">{{ spectrum.semanticSummary.joinGroups.length }}</span>
+                    </div>
+                    <div class="semantic-list">
+                      @for (group of spectrum.semanticSummary.joinGroups; track group.joinNodeId) {
+                        <div class="semantic-row">
+                          <strong>#{{ group.joinNodeId }} {{ group.joinNodeName }}</strong>
+                          <span>sources: {{ group.sourceNodeIds.join(', ') }}</span>
+                          <small>{{ group.sourceNodeNames.join(' · ') }}</small>
+                        </div>
+                      }
+                    </div>
+                  </article>
+                }
+              </div>
+            }
+
+            @if (spectrum.semanticSummary.unresolvedMetadataHints.length) {
+              <details class="raw-details semantic-hints">
+                <summary>Unresolved metadata hints</summary>
+                <ul class="warning-list muted">
+                  @for (hint of spectrum.semanticSummary.unresolvedMetadataHints; track hint) {
+                    <li>{{ hint }}</li>
+                  }
+                </ul>
+              </details>
+            }
 
             <details class="raw-details">
               <summary>Raw spectrum layout</summary>
@@ -325,6 +504,21 @@
           <button type="button" class="secondary" [class.active-tab]="agentPage() === 'input'" (click)="setAgentPage('input')">Input</button>
           <button type="button" class="secondary" [class.active-tab]="agentPage() === 'output'" (click)="setAgentPage('output')">Output</button>
         </div>
+
+        @if (executionFeedbackView(); as feedback) {
+          <div class="execution-feedback" [class.running]="feedback.status === 'running'" [class.success]="feedback.status === 'success'" [class.error]="feedback.status === 'error'">
+            <div class="execution-feedback-head">
+              <div>
+                <p class="eyebrow">Execution feedback</p>
+                <h3>{{ feedback.title }}</h3>
+              </div>
+              <span class="chip">{{ feedback.message }}</span>
+            </div>
+            <div class="progress-track" [class.indeterminate]="feedback.indeterminate">
+              <div class="progress-bar" [style.width.%]="feedback.progress"></div>
+            </div>
+          </div>
+        }
 
         @if (agentPage() === 'input') {
           <section class="page-card">
@@ -394,31 +588,60 @@
               </div>
 
               @for (section of view.sections; track section.title) {
-                <article class="rendered-block">
-                  <div class="rendered-head">
-                    <h4>{{ section.title }}</h4>
-                    <span class="chip">{{ section.facts.length }} facts</span>
-                  </div>
+                @if (isCollapsibleResultSection(section.title)) {
+                  <details class="rendered-block collapsible-result" open>
+                    <summary class="rendered-head collapsible-summary">
+                      <h4>{{ section.title }}</h4>
+                      <span class="chip">{{ section.facts.length }} facts</span>
+                    </summary>
+                    <div class="collapsible-body">
+                      @if (section.facts.length) {
+                        <dl class="fact-grid">
+                          @for (fact of section.facts; track fact.key) {
+                            <div class="fact-row">
+                              <dt>{{ fact.key }}</dt>
+                              <dd>{{ fact.value }}</dd>
+                            </div>
+                          }
+                        </dl>
+                      }
 
-                  @if (section.facts.length) {
-                    <dl class="fact-grid">
-                      @for (fact of section.facts; track fact.key) {
-                        <div class="fact-row">
-                          <dt>{{ fact.key }}</dt>
-                          <dd>{{ fact.value }}</dd>
+                      @if (section.blocks.length) {
+                        <div class="markdown-stack">
+                          @for (block of section.blocks; track $index) {
+                            <div class="markdown-block" [innerHTML]="block.html"></div>
+                          }
                         </div>
                       }
-                    </dl>
-                  }
-
-                  @if (section.blocks.length) {
-                    <div class="markdown-stack">
-                      @for (block of section.blocks; track $index) {
-                        <div class="markdown-block" [innerHTML]="block.html"></div>
-                      }
                     </div>
-                  }
-                </article>
+                  </details>
+                } @else {
+                  <article class="rendered-block">
+                    <div class="rendered-head">
+                      <h4>{{ section.title }}</h4>
+                      <span class="chip">{{ section.facts.length }} facts</span>
+                    </div>
+
+                    @if (section.facts.length) {
+                      <dl class="fact-grid">
+                        @for (fact of section.facts; track fact.key) {
+                          <div class="fact-row">
+                            <dt>{{ fact.key }}</dt>
+                            <dd>{{ fact.value }}</dd>
+                          </div>
+                        }
+                      </dl>
+                    }
+
+                    @if (section.blocks.length) {
+                      <div class="markdown-stack">
+                        @for (block of section.blocks; track $index) {
+                          <div class="markdown-block" [innerHTML]="block.html"></div>
+                        }
+                      </div>
+                    }
+                  </article>
+                }
               }
 
               <details class="raw-details">
@@ -435,6 +658,21 @@
           <button type="button" class="secondary" [class.active-tab]="swarmPage() === 'input'" (click)="setSwarmPage('input')">Input</button>
           <button type="button" class="secondary" [class.active-tab]="swarmPage() === 'output'" (click)="setSwarmPage('output')">Output</button>
         </div>
+
+        @if (executionFeedbackView(); as feedback) {
+          <div class="execution-feedback" [class.running]="feedback.status === 'running'" [class.success]="feedback.status === 'success'" [class.error]="feedback.status === 'error'">
+            <div class="execution-feedback-head">
+              <div>
+                <p class="eyebrow">Execution feedback</p>
+                <h3>{{ feedback.title }}</h3>
+              </div>
+              <span class="chip">{{ feedback.message }}</span>
+            </div>
+            <div class="progress-track" [class.indeterminate]="feedback.indeterminate">
+              <div class="progress-bar" [style.width.%]="feedback.progress"></div>
+            </div>
+          </div>
+        }
 
         @if (swarmPage() === 'input') {
           <section class="page-card">
@@ -652,4 +890,5 @@
         }
       }
     </section>
+  </section>
 </main>
