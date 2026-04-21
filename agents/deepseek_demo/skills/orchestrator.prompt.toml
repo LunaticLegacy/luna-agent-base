@@ -1,0 +1,8 @@
+[skill]
+name = "orchestrator_prompt"
+capability = "research_orchestration"
+description = "Analyzes user requests and produces structured research plans."
+input_schema = { type = "object", properties = { text = { type = "string" } }, required = ["text"] }
+output_schema = { type = "object", properties = { plan = { type = "object" }, content = { type = "string" } }, required = ["plan", "content"] }
+requires_tools = []
+parallelizable = false

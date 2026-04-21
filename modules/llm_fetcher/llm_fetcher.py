@@ -184,6 +184,7 @@ class LLMFetcher:
         temperature: float,
         max_tokens: int,
         stream: bool,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Any:
         """向具体后端发起补全请求。
 
@@ -193,6 +194,7 @@ class LLMFetcher:
             temperature: 采样温度。
             max_tokens: 最大输出 token 数。
             stream: 是否启用流式返回。
+            tools: 可选的 OpenAI tools schema 列表。
 
         Returns:
             后端 SDK 返回的原始响应对象或流式迭代器。
@@ -202,15 +204,19 @@ class LLMFetcher:
         """
         if backend.provider == "openai":
             client = self.openai_clients[backend.name]
-            return client.chat.completions.create(
-                model=backend.model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stream=stream,
-                timeout=backend.timeout,
-                **backend.extra,
-            )
+            kwargs: Dict[str, Any] = {
+                "model": backend.model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": stream,
+                "timeout": backend.timeout,
+            }
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+            kwargs.update(backend.extra)
+            return client.chat.completions.create(**kwargs)
 
         if backend.provider == "litellm":
             kwargs: Dict[str, Any] = {
@@ -329,6 +335,7 @@ class LLMFetcher:
         prev_messages: Optional[List[LLMContext]] = None,
         backend_name: Optional[str] = None,
         fallback_order: Optional[Sequence[str]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> ChatCompletion | Any:
         """执行一次非流式请求，并按顺序尝试后端回退。
 
@@ -340,6 +347,7 @@ class LLMFetcher:
             prev_messages: 历史上下文。
             backend_name: 显式指定的后端名称。
             fallback_order: 额外指定的回退后端顺序。
+            tools: 可选的 OpenAI tools schema 列表。
 
         Returns:
             后端 SDK 返回的原始补全响应对象。
@@ -359,6 +367,7 @@ class LLMFetcher:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=False,
+                    tools=tools,
                 )
             except Exception as exc:
                 backend_errors.append(str(self._normalize_exception(backend, exc)))
@@ -375,6 +384,7 @@ class LLMFetcher:
         output_reasoning: bool = False,
         backend_name: Optional[str] = None,
         fallback_order: Optional[Sequence[str]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[str, None]:
         """执行一次流式请求，并按顺序尝试后端回退。
 
@@ -387,6 +397,7 @@ class LLMFetcher:
             output_reasoning: 是否输出推理内容。
             backend_name: 显式指定的后端名称。
             fallback_order: 额外指定的回退后端顺序。
+            tools: 可选的 OpenAI tools schema 列表。
 
         Yields:
             标准化后的流式文本片段。
@@ -407,6 +418,7 @@ class LLMFetcher:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=True,
+                    tools=tools,
                 )
                 for text in self._iter_stream_text(response, output_reasoning=output_reasoning):
                     yielded_any = True
