@@ -679,10 +679,21 @@ export class App implements OnDestroy {
     this.activeRunEvents.update((existing) => [...existing, view].slice(-80));
     this.applyRunEvent(payload);
 
+    // Refresh graph structure if the event references a node not present in the current snapshot
+    // (e.g. dynamically inserted nodes like researcher_runtime).
+    if (payload.node_id !== undefined && payload.node_id !== null) {
+      const nodeId = Number(payload.node_id);
+      const graph = this.selectedGraph();
+      if (graph && !graph.nodes.some((n) => n.node_id === nodeId)) {
+        void this.reloadSelectedGraph();
+      }
+    }
+
     if (eventType === 'run.completed' || eventType === 'run.failed') {
       this.activeRunCompleted.set(true);
       this.swarmRunStatus.set(eventType === 'run.completed' ? 'success' : 'error');
       this.closeRunStream();
+      void this.reloadSelectedGraph();
     }
   }
 

@@ -25,7 +25,7 @@ Rules:
     "node_name": "researcher_runtime",
     "agent_id": "researcher_runtime",
     "additional_prompt": "Your specific mission: [detailed angle description]",
-    "next_node_ids": [30],
+    "next_node_ids": [5],
     "replace_existing": true
   },
   "cleanup": {
@@ -36,4 +36,5 @@ Rules:
 }
 
 - The content must be a usable research brief, not control instructions
+- CRITICAL: graph_edit.next_node_ids must be [5] because node 5 in the static graph is delete_researcher
 - The spawn/graph_edit/cleanup fields drive runtime behavior only
