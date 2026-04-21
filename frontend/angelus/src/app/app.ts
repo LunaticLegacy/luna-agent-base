@@ -2,6 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import zhCN from './i18n/zh-CN.json';
 
 import { ApiService } from './api.service';
 import {
@@ -233,6 +234,7 @@ export class App implements OnDestroy {
   private readonly api = inject(ApiService);
   private runEventSource: EventSource | null = null;
   private graphDragState: GraphDragState | null = null;
+  protected readonly text = zhCN;
   private readonly runEventTypes = [
     'run.started',
     'node.started',
@@ -245,7 +247,7 @@ export class App implements OnDestroy {
     'run.failed',
   ];
 
-  protected readonly title = signal('Angelus Swarm Console');
+  protected readonly title = signal(zhCN.app.title);
   protected readonly apiBaseUrl = signal('/api');
   protected readonly loading = signal(false);
   protected readonly executionLoading = signal(false);
@@ -278,10 +280,10 @@ export class App implements OnDestroy {
   protected readonly swarmRunStatus = signal<'idle' | 'launching' | 'running' | 'success' | 'error'>('idle');
   protected readonly agentRunOutput = signal<Record<string, unknown> | null>(null);
   protected readonly agentRunView = computed(() => this.buildAgentRunView(this.agentRunOutput()));
-  protected readonly swarmTask = signal('Draft a concise swarm summary for the selected workflow.');
-  protected readonly swarmContext = signal('Use the selected swarm as the source of truth and keep the answer grounded in its output.');
-  protected readonly swarmAudience = signal('General audience');
-  protected readonly swarmOutputFormat = signal('Markdown summary with headings and bullets.');
+  protected readonly swarmTask = signal(zhCN.swarm.placeholders.task);
+  protected readonly swarmContext = signal(zhCN.swarm.placeholders.context);
+  protected readonly swarmAudience = signal(zhCN.swarm.placeholders.audience);
+  protected readonly swarmOutputFormat = signal(zhCN.swarm.placeholders.outputFormat);
   protected readonly swarmConstraints = signal('');
   protected readonly swarmRequestPayload = computed(() => this.buildSwarmRequestPayload());
   protected readonly swarmRequestView = computed(() => this.buildPayloadView(this.swarmRequestPayload()));
@@ -318,7 +320,7 @@ export class App implements OnDestroy {
 
   protected readonly swarmRounds = signal(0);
 
-  protected readonly agentMessage = signal('Please review the latest task state and respond.');
+  protected readonly agentMessage = signal(zhCN.agent.placeholders.message);
   protected readonly agentRounds = signal(0);
   protected readonly agentAdditionalPrompt = signal('');
 
@@ -532,14 +534,14 @@ export class App implements OnDestroy {
     const name = this.selectedSwarmName();
     if (!name) {
       this.swarmRunStatus.set('error');
-      this.runError.set('Select a swarm before running it.');
+      this.runError.set(this.text.messages.selectSwarmToRun);
       return;
     }
 
     const payload = this.swarmRequestPayload();
     if (!this.safeString(payload['text'])) {
       this.swarmRunStatus.set('error');
-      this.runError.set('Task is required before starting the run.');
+      this.runError.set(this.text.messages.taskRequired);
       return;
     }
 
@@ -564,14 +566,14 @@ export class App implements OnDestroy {
     const swarm = this.selectedSwarm();
     if (!swarm) {
       this.agentRunStatus.set('error');
-      this.runError.set('Select a swarm before running an agent.');
+      this.runError.set(this.text.messages.selectSwarmToRunAgent);
       return;
     }
 
     const agentId = this.selectedAgentId();
     if (!agentId) {
       this.agentRunStatus.set('error');
-      this.runError.set('The selected swarm has no agents.');
+      this.runError.set(this.text.messages.swarmHasNoAgents);
       return;
     }
 
@@ -622,7 +624,7 @@ export class App implements OnDestroy {
     });
     eventSource.onerror = () => {
       if (this.runEventSource === eventSource && eventSource.readyState !== EventSource.CLOSED) {
-        this.runError.set('The live run stream disconnected.');
+        this.runError.set(this.text.messages.liveStreamDisconnected);
       }
     };
   }
@@ -745,6 +747,206 @@ export class App implements OnDestroy {
     this.swarmConstraints.set(value);
   }
 
+  displayHealthStatus(value: string | null) {
+    if (value === 'ok') {
+      return this.text.status.ok;
+    }
+    if (value === 'error') {
+      return this.text.status.error;
+    }
+    return this.text.status.unknown;
+  }
+
+  displayReadyStatus(value: boolean | null | undefined) {
+    return value ? this.text.status.yes : this.text.status.no;
+  }
+
+  displayBinary(value: boolean | null | undefined) {
+    return value ? this.text.status.yes : this.text.status.no;
+  }
+
+  displayRunStatus(value: string | null | undefined) {
+    switch (value?.toLowerCase()) {
+      case 'queued':
+      case 'pending':
+        return this.text.status.pending;
+      case 'launching':
+        return this.text.status.launching;
+      case 'running':
+        return this.text.status.running;
+      case 'completed':
+        return this.text.status.completed;
+      case 'failed':
+        return this.text.status.failed;
+      case 'success':
+        return this.text.status.success;
+      case 'error':
+        return this.text.status.error;
+      case 'idle':
+        return this.text.status.idle;
+      default:
+        return value ?? this.text.status.unknown;
+    }
+  }
+
+  displayNodeStatus(value: string | null | undefined) {
+    switch (value?.toLowerCase()) {
+      case 'pending':
+        return this.text.status.pending;
+      case 'running':
+        return this.text.status.running;
+      case 'completed':
+        return this.text.status.completed;
+      case 'failed':
+        return this.text.status.failed;
+      default:
+        return value ?? this.text.status.unknown;
+    }
+  }
+
+  displayRoutePolicy(value: 'all' | 'first' | null) {
+    switch (value) {
+      case 'all':
+        return this.text.graph.routePolicyAll;
+      case 'first':
+        return this.text.graph.routePolicyFirst;
+      default:
+        return this.text.graph.routePolicyDefault;
+    }
+  }
+
+  displayBranchLabel(branch: string | null | undefined) {
+    const value = branch?.trim();
+    if (!value || value === 'main') {
+      return this.text.status.mainBranch;
+    }
+    return `${this.text.status.branchPrefix} ${value}`;
+  }
+
+  displayEventStatus(value: string | null | undefined) {
+    return this.displayRunStatus(value);
+  }
+
+  displayJsonShape(value: unknown) {
+    if (Array.isArray(value)) {
+      return this.text.status.array;
+    }
+    if (value === null) {
+      return this.text.status.null;
+    }
+    switch (typeof value) {
+      case 'object':
+        return this.text.status.object;
+      case 'string':
+        return this.text.status.string;
+      case 'number':
+        return this.text.status.number;
+      case 'boolean':
+        return this.text.status.boolean;
+      default:
+        return this.text.status.unknown;
+    }
+  }
+
+  safeBinaryText(value: unknown) {
+    return this.safeBoolean(value) ? this.text.status.yes : this.text.status.no;
+  }
+
+  interpolate(template: string, values: Record<string, string>) {
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => values[key] ?? '');
+  }
+
+  translateFactKey(key: string) {
+    const map: Record<string, string> = {
+      metadata: this.text.nodeDetail.fields.metadata,
+      raw_metadata: this.text.nodeDetail.fields.rawMetadata,
+      state: this.text.nodeDetail.fields.state,
+      state_snapshot: this.text.nodeDetail.fields.stateSnapshot,
+      final_state: this.text.nodeDetail.fields.finalState,
+      input_payload: this.text.nodeDetail.fields.inputPayload,
+      output_payload: this.text.nodeDetail.fields.outputPayload,
+      payload: this.text.nodeDetail.fields.payload,
+      raw_response: this.text.nodeDetail.fields.rawResponse,
+      assistant_message: this.text.nodeDetail.fields.assistantMessage,
+      message: this.text.nodeDetail.fields.message,
+      detail: this.text.nodeDetail.fields.detail,
+      summary: this.text.nodeDetail.fields.summary,
+      branch_results: this.text.nodeDetail.fields.branchResults,
+      trace: this.text.trace.titlePrefix,
+      content: this.text.nodeDetail.fields.content,
+      status: this.text.nodeDetail.summary.status,
+      type: this.text.nodeDetail.summary.type,
+      role: this.text.nodeDetail.summary.role,
+      entry: this.text.nodeDetail.summary.entry,
+      exit: this.text.nodeDetail.summary.exit,
+      agent: this.text.nodeDetail.summary.agent,
+      tool: this.text.nodeDetail.summary.tool,
+      'route policy': this.text.nodeDetail.summary.routePolicy,
+      route_policy: this.text.nodeDetail.summary.routePolicy,
+      'join target': this.text.nodeDetail.summary.joinTarget,
+      join_node_id: this.text.nodeDetail.summary.joinTarget,
+      'branch index': this.text.nodeDetail.summary.branchIndex,
+      branch_index: this.text.nodeDetail.summary.branchIndex,
+      next: this.text.nodeDetail.summary.next,
+      next_node_ids: this.text.nodeDetail.summary.next,
+      derived_role: this.text.nodeDetail.fields.derivedRole,
+      semantic_tags: this.text.nodeDetail.fields.semanticTags,
+      branch_source_node_id: this.text.graph.summary.branchSource,
+      contract_version: this.text.nodeDetail.chips.contract,
+      capability: this.text.nodeDetail.chips.capability,
+      description: this.text.nodeDetail.fields.description,
+      input_schema: this.text.nodeDetail.fields.inputSchema,
+      output_schema: this.text.nodeDetail.fields.outputSchema,
+      requires_tools: this.text.nodeDetail.fields.requiresTools,
+      requires_skills: this.text.nodeDetail.fields.requiresSkills,
+      preconditions: this.text.nodeDetail.fields.preconditions,
+      postconditions: this.text.nodeDetail.fields.postconditions,
+      failure_policy: this.text.nodeDetail.chips.failure,
+      parallelizable: this.text.nodeDetail.chips.parallel,
+      additional_prompt: this.text.nodeDetail.fields.additionalPrompt,
+      input_mapping: this.text.nodeDetail.fields.inputMapping,
+      text: this.text.swarm.input.task,
+      context: this.text.agent.output.context,
+      audience: this.text.swarm.input.audience,
+      output_format: this.text.swarm.input.outputFormat,
+      constraints: this.text.swarm.input.constraints,
+      result: this.text.agent.output.result,
+      error: this.text.status.error,
+      branch: this.text.trace.branch,
+      node_name: this.text.nodeDetail.fields.nodeName,
+      node_type: this.text.nodeDetail.summary.type,
+      current_node_name: this.text.nodeDetail.fields.currentNodeName,
+      current_node_type: this.text.nodeDetail.fields.currentNodeType,
+      current_node_id: this.text.nodeDetail.fields.currentNodeId,
+      rounds: this.text.agent.summary.rounds,
+      run_id: this.text.labels.runId,
+      event_count: this.text.graph.summary.nodes,
+      created_at: this.text.nodeDetail.fields.createdAt,
+      started_at: this.text.nodeDetail.fields.startedAt,
+      finished_at: this.text.nodeDetail.fields.finishedAt,
+      swarm: this.text.labels.swarm,
+      agent_id: this.text.labels.agent,
+      graph_file: this.text.nodeDetail.fields.graphFile,
+      manifest_path: this.text.nodeDetail.fields.manifestPath,
+      package_path: this.text.nodeDetail.fields.packagePath,
+    };
+    return map[key] ?? key;
+  }
+
+  localizeFactPath(path: string) {
+    return path
+      .split('.')
+      .map((segment) => {
+        const match = segment.match(/^([^[\]]+)(.*)$/);
+        if (!match) {
+          return segment;
+        }
+        const base = this.translateFactKey(match[1]);
+        return `${base}${match[2] ?? ''}`;
+      })
+      .join('.');
+  }
+
   trackByFactKey(_: number, item: FactRow) {
     return item.key;
   }
@@ -774,7 +976,7 @@ export class App implements OnDestroy {
       this.selectedAgentId.set(null);
     }
     if (preferred === 'planner') {
-      this.agentMessage.set('Please inspect the current request and decide the best next actions.');
+      this.agentMessage.set(this.text.messages.inspectCurrentRequest);
     }
   }
 
@@ -785,7 +987,7 @@ export class App implements OnDestroy {
 
   private formatError(error: unknown) {
     if (error instanceof HttpErrorResponse) {
-      const statusText = error.status ? `${error.status} ${error.statusText || 'HTTP Error'}` : 'HTTP Error';
+      const statusText = error.status ? `${error.status} ${error.statusText || this.text.errors.httpError}` : this.text.errors.httpError;
       const url = error.url ? ` (${error.url})` : '';
       const payload = this.describeHttpErrorPayload(error.error);
       return `${statusText}${url}${payload ? `: ${payload}` : ''}`;
@@ -827,13 +1029,13 @@ export class App implements OnDestroy {
     }
     return {
       summary: [
-        { key: 'swarm', value: this.safeString(value['swarm']) ?? 'unknown' },
-        { key: 'agent', value: this.safeString(value['agent_id']) ?? 'unknown' },
-        { key: 'success', value: this.safeBoolean(value['success']) ? 'true' : 'false' },
+        { key: this.text.agent.summary.agent, value: this.safeString(value['agent_id']) ?? this.text.status.unknown },
+        { key: this.text.agent.summary.swarm, value: this.safeString(value['swarm']) ?? this.text.status.unknown },
+        { key: this.text.status.success, value: this.safeBinaryText(value['success']) },
       ],
       sections: this.buildSectionsFromRecord([
-        { title: 'Result', value: value['result'] },
-        { title: 'Context', value: value['context'] },
+        { title: this.text.agent.output.result, value: value['result'] },
+        { title: this.text.agent.output.context, value: value['context'] },
       ]),
       trace: [],
       rawJson: this.prettyJson(value),
@@ -852,8 +1054,8 @@ export class App implements OnDestroy {
     if (mode === 'agent') {
       if (agentStatus === 'running') {
         return {
-          title: 'Agent call in progress',
-          message: 'The direct agent request is being processed.',
+          title: this.text.feedback.agent.runningTitle,
+          message: this.text.feedback.agent.runningMessage,
           status: 'running',
           progress: 62,
           indeterminate: true,
@@ -862,8 +1064,8 @@ export class App implements OnDestroy {
       }
       if (agentStatus === 'success') {
         return {
-          title: 'Agent call complete',
-          message: 'The latest agent response is ready.',
+          title: this.text.feedback.agent.successTitle,
+          message: this.text.feedback.agent.successMessage,
           status: 'success',
           progress: 100,
           indeterminate: false,
@@ -872,8 +1074,8 @@ export class App implements OnDestroy {
       }
       if (agentStatus === 'error') {
         return {
-          title: 'Agent call failed',
-          message: runError ?? 'The direct agent request did not complete.',
+          title: this.text.feedback.agent.errorTitle,
+          message: runError ?? this.text.feedback.agent.errorMessage,
           status: 'error',
           progress: 100,
           indeterminate: false,
@@ -881,8 +1083,8 @@ export class App implements OnDestroy {
         };
       }
       return {
-        title: 'Ready for agent call',
-        message: 'Fill the input form and run a direct agent request.',
+        title: this.text.feedback.agent.idleTitle,
+        message: this.text.feedback.agent.idleMessage,
         status: 'idle',
         progress: 0,
         indeterminate: false,
@@ -892,8 +1094,8 @@ export class App implements OnDestroy {
 
     if (swarmStatus === 'launching' || (loading && !run)) {
       return {
-        title: 'Swarm run launching',
-        message: 'Submitting the async swarm run request.',
+        title: this.text.feedback.swarm.launchingTitle,
+        message: this.text.feedback.swarm.launchingMessage,
         status: 'running',
         progress: 26,
         indeterminate: true,
@@ -905,8 +1107,12 @@ export class App implements OnDestroy {
       const status = run.status?.toLowerCase() ?? 'idle';
       if (status === 'completed' || swarmStatus === 'success') {
         return {
-          title: 'Swarm run complete',
-          message: run.finished_at ? `Finished at ${new Date(run.finished_at).toLocaleString()}.` : 'The swarm finished successfully.',
+          title: this.text.feedback.swarm.successTitle,
+          message: run.finished_at
+            ? this.interpolate(this.text.feedback.swarm.finishedAtTemplate, {
+                time: new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(run.finished_at)),
+              })
+            : this.text.feedback.swarm.successMessage,
           status: 'success',
           progress: 100,
           indeterminate: false,
@@ -915,8 +1121,8 @@ export class App implements OnDestroy {
       }
       if (status === 'failed' || swarmStatus === 'error') {
         return {
-          title: 'Swarm run failed',
-          message: run.error ?? runError ?? 'The swarm run encountered an error.',
+          title: this.text.feedback.swarm.errorTitle,
+          message: run.error ?? runError ?? this.text.feedback.swarm.errorMessage,
           status: 'error',
           progress: 100,
           indeterminate: false,
@@ -925,8 +1131,10 @@ export class App implements OnDestroy {
       }
       const estimated = Math.min(92, 18 + events.length * 7);
       return {
-        title: 'Swarm run live',
-        message: events.length ? `${events.length} live event${events.length === 1 ? '' : 's'} received.` : 'Waiting for live execution events.',
+        title: this.text.feedback.swarm.liveTitle,
+        message: events.length
+          ? this.interpolate(this.text.feedback.progress.eventsReceived, { count: String(events.length) })
+          : this.text.feedback.swarm.liveMessage,
         status: 'running',
         progress: estimated,
         indeterminate: false,
@@ -936,8 +1144,8 @@ export class App implements OnDestroy {
 
     if (swarmStatus === 'error') {
       return {
-        title: 'Swarm run failed',
-        message: runError ?? 'The swarm run could not be started.',
+        title: this.text.feedback.swarm.errorTitle,
+        message: runError ?? this.text.feedback.swarm.errorMessage,
         status: 'error',
         progress: 100,
         indeterminate: false,
@@ -946,8 +1154,8 @@ export class App implements OnDestroy {
     }
 
     return {
-      title: 'Ready for swarm run',
-      message: 'Fill the swarm input form and start an async run.',
+      title: this.text.feedback.swarm.idleTitle,
+      message: this.text.feedback.swarm.idleMessage,
       status: 'idle',
       progress: 0,
       indeterminate: false,
@@ -1163,7 +1371,10 @@ export class App implements OnDestroy {
       }
 
       if (joinNodeId !== null && !nodeLookup.has(joinNodeId)) {
-        unresolvedMetadataHints.push(`Node ${node.node_id} points join_node_id=${joinNodeId}, but the target node is missing from edges/node list.`);
+        unresolvedMetadataHints.push(this.interpolate(this.text.graph.unresolvedHintTemplate, {
+          nodeId: String(node.node_id),
+          joinNodeId: String(joinNodeId),
+        }));
       }
     }
 
@@ -1242,7 +1453,7 @@ export class App implements OnDestroy {
       derivedEdges.push({
         from_node_id: node.node_id,
         to_node_id: joinNodeId,
-        label: 'join',
+        label: this.text.graph.edgeJoin,
         condition: 'metadata.join_node_id',
         priority: 1000,
         active: currentNodeId !== null && node.node_id === currentNodeId,
@@ -1264,7 +1475,7 @@ export class App implements OnDestroy {
       runtimeEdges.push({
         from_node_id: sourceNodeId,
         to_node_id: group.joinNodeId,
-        label: 'branch join',
+        label: this.text.graph.edgeBranchJoin,
         condition: 'runtime.branch_join',
         priority: 999,
         active: currentNodeId !== null && sourceNodeId === currentNodeId,
@@ -1319,10 +1530,10 @@ export class App implements OnDestroy {
 
     const warnings: string[] = [];
     if (rawMetadata['input_schema'] !== undefined && !this.isRecord(rawMetadata['input_schema'])) {
-      warnings.push('input_schema is present but is not a JSON object.');
+      warnings.push(this.text.nodeDetail.warnings.inputSchema);
     }
     if (rawMetadata['output_schema'] !== undefined && !this.isRecord(rawMetadata['output_schema'])) {
-      warnings.push('output_schema is present but is not a JSON object.');
+      warnings.push(this.text.nodeDetail.warnings.outputSchema);
     }
 
     return {
@@ -1357,36 +1568,36 @@ export class App implements OnDestroy {
   ): string[] {
     const tags = new Set<string>();
     if (graph.entry_node_id === node.node_id) {
-      tags.add('entry');
+      tags.add(this.text.labels.entry);
     }
     if (graph.exit_node_id === node.node_id) {
-      tags.add('exit');
+      tags.add(this.text.nodeDetail.summary.exit);
     }
     if (routePolicy === 'all') {
-      tags.add('branch_source');
-      tags.add('route:all');
+      tags.add(this.text.graph.semantic.branchSource);
+      tags.add(this.text.graph.routePolicyAll);
     } else if (routePolicy === 'first') {
-      tags.add('route:first');
+      tags.add(this.text.graph.routePolicyFirst);
     }
     if (joinNodeId !== null) {
-      tags.add('join_target');
+      tags.add(this.text.graph.semantic.joinTarget);
     }
     if (branchIndexes.length) {
-      branchIndexes.forEach((index) => tags.add(`branch:${index}`));
+      branchIndexes.forEach((index) => tags.add(`${this.text.status.branchPrefix} ${index}`));
     }
     if (branchSourceNodeIds.length) {
-      branchSourceNodeIds.forEach((sourceId) => tags.add(`source:${sourceId}`));
+      branchSourceNodeIds.forEach((sourceId) => tags.add(`${this.text.graph.sourcePrefix} ${sourceId}`));
     }
     if (node.agent_id) {
-      tags.add('agent');
+      tags.add(this.text.labels.agent);
     }
     if (node.tool_name) {
-      tags.add('tool');
+      tags.add(this.text.labels.tool);
     }
     if (skillMetadata) {
-      tags.add('skill');
+      tags.add(this.text.nodeDetail.chips.skill);
       if (skillMetadata.capability) {
-        tags.add(`capability:${skillMetadata.capability}`);
+        tags.add(`${this.text.nodeDetail.chips.capability}：${skillMetadata.capability}`);
       }
     }
     return [...tags];
@@ -1401,30 +1612,30 @@ export class App implements OnDestroy {
     branchSourceNodeIds: number[],
   ): string {
     if (graph.entry_node_id === node.node_id) {
-      return 'entry';
+      return this.text.labels.entry;
     }
     if (graph.exit_node_id === node.node_id) {
-      return 'exit';
+      return this.text.nodeDetail.summary.exit;
     }
     if (routePolicy === 'all' && joinNodeId !== null) {
-      return 'branch_source';
+      return this.text.graph.semantic.branchSource;
     }
     if (routePolicy === 'all') {
-      return 'branch_source';
+      return this.text.graph.semantic.branchSource;
     }
     if (joinNodeId !== null) {
-      return 'join_target';
+      return this.text.graph.semantic.joinTarget;
     }
     if (branchIndexes.length || branchSourceNodeIds.length) {
-      return 'branch_member';
+      return this.text.graph.semantic.branchMember;
     }
     if (node.tool_name) {
-      return 'tool';
+      return this.text.labels.tool;
     }
     if (node.agent_id) {
-      return 'agent';
+      return this.text.labels.agent;
     }
-    return 'node';
+    return this.text.graph.semantic.node;
   }
 
   private collectGraphNodeWarnings(
@@ -1456,16 +1667,16 @@ export class App implements OnDestroy {
 
     for (const key of Object.keys(metadata)) {
       if (!knownKeys.has(key)) {
-        warnings.push(`Unknown metadata key preserved: ${key}`);
+        warnings.push(this.interpolate(this.text.nodeDetail.warnings.unknownKey, { key }));
       }
     }
 
     if (routePolicy === null && Object.prototype.hasOwnProperty.call(metadata, 'route_policy')) {
-      warnings.push(`route_policy=${String(metadata['route_policy'])} is not recognized; default routing will be used.`);
+      warnings.push(this.interpolate(this.text.nodeDetail.warnings.routePolicy, { value: String(metadata['route_policy']) }));
     }
 
     if (joinNodeId !== null && !graph.nodes.some((item) => item.node_id === joinNodeId)) {
-      warnings.push(`join_node_id=${joinNodeId} does not point to a node in the current graph.`);
+      warnings.push(this.interpolate(this.text.nodeDetail.warnings.joinNodeMissing, { value: String(joinNodeId) }));
     }
 
     if (skillMetadata?.warnings.length) {
@@ -1473,7 +1684,7 @@ export class App implements OnDestroy {
     }
 
     if (branchIndexes.length === 0 && branchSourceNodeIds.length > 0) {
-      warnings.push('Runtime branch source metadata was observed without an explicit branch_index.');
+      warnings.push(this.text.nodeDetail.warnings.runtimeBranchSource);
     }
 
     return [...new Set(warnings)];
@@ -1613,34 +1824,38 @@ export class App implements OnDestroy {
     return {
       node,
       summary: [
-        { key: 'status', value: node.status },
-        { key: 'type', value: node.node_type },
-        { key: 'role', value: node.derivedRole },
-        { key: 'entry', value: node.isEntry ? 'yes' : 'no' },
-        { key: 'exit', value: node.isExit ? 'yes' : 'no' },
-        { key: 'agent', value: node.agent_id ?? 'none' },
-        { key: 'tool', value: node.tool_name ?? 'none' },
-        { key: 'route policy', value: node.routePolicy ?? 'default' },
-        { key: 'join target', value: node.joinNodeId !== null ? String(node.joinNodeId) : 'none' },
-        { key: 'branch index', value: node.branchIndexes.length ? node.branchIndexes.join(', ') : 'none' },
-        { key: 'next', value: node.next_node_ids.length ? node.next_node_ids.join(', ') : 'none' },
+        { key: this.text.nodeDetail.summary.status, value: this.displayNodeStatus(node.status) },
+        { key: this.text.nodeDetail.summary.type, value: node.node_type },
+        { key: this.text.nodeDetail.summary.role, value: node.derivedRole },
+        { key: this.text.nodeDetail.summary.entry, value: this.displayBinary(node.isEntry) },
+        { key: this.text.nodeDetail.summary.exit, value: this.displayBinary(node.isExit) },
+        { key: this.text.nodeDetail.summary.agent, value: node.agent_id ?? this.text.status.unknown },
+        { key: this.text.nodeDetail.summary.tool, value: node.tool_name ?? this.text.status.unknown },
+        { key: this.text.nodeDetail.summary.routePolicy, value: this.displayRoutePolicy(node.routePolicy) },
+        { key: this.text.nodeDetail.summary.joinTarget, value: node.joinNodeId !== null ? String(node.joinNodeId) : this.text.graph.none },
+        { key: this.text.nodeDetail.summary.branchIndex, value: node.branchIndexes.length ? node.branchIndexes.join(', ') : this.text.graph.none },
+        { key: this.text.nodeDetail.summary.next, value: node.next_node_ids.length ? node.next_node_ids.join(', ') : this.text.graph.none },
       ],
       semanticChips: node.semanticTags,
       skillChips: node.skillMetadata
         ? [
-            node.skillMetadata.contractVersion ? `contract ${node.skillMetadata.contractVersion}` : '',
-            node.skillMetadata.capability ? `capability ${node.skillMetadata.capability}` : '',
-            node.skillMetadata.failurePolicy ? `failure ${node.skillMetadata.failurePolicy}` : '',
-            node.skillMetadata.parallelizable === true ? 'parallelizable' : node.skillMetadata.parallelizable === false ? 'serial' : '',
+            node.skillMetadata.contractVersion ? `${this.text.nodeDetail.chips.contract} ${node.skillMetadata.contractVersion}` : '',
+            node.skillMetadata.capability ? `${this.text.nodeDetail.chips.capability} ${node.skillMetadata.capability}` : '',
+            node.skillMetadata.failurePolicy ? `${this.text.nodeDetail.chips.failure} ${node.skillMetadata.failurePolicy}` : '',
+            node.skillMetadata.parallelizable === true
+              ? this.text.nodeDetail.chips.parallel
+              : node.skillMetadata.parallelizable === false
+                ? this.text.nodeDetail.chips.serial
+                : '',
           ].filter((item): item is string => Boolean(item))
         : [],
       runtimeChips: [
-        node.branchIndexes.length ? `branches ${node.branchIndexes.join(', ')}` : '',
-        node.branchSourceNodeId !== null ? `branch source ${node.branchSourceNodeId}` : '',
-        node.warnings.length ? `${node.warnings.length} warning${node.warnings.length === 1 ? '' : 's'}` : '',
+        node.branchIndexes.length ? `${this.text.status.branchPrefix} ${node.branchIndexes.join(', ')}` : '',
+        node.branchSourceNodeId !== null ? `${this.text.graph.semantic.branchSource} ${node.branchSourceNodeId}` : '',
+        node.warnings.length ? `${node.warnings.length} ${this.text.nodeDetail.chips.warning}` : '',
       ].filter((item): item is string => Boolean(item)),
       sections: this.buildSectionsFromRecord([
-        { title: 'Semantic metadata', value: {
+        { title: this.text.nodeDetail.sections.semanticMetadata, value: {
           derived_role: node.derivedRole,
           semantic_tags: node.semanticTags,
           route_policy: node.routePolicy,
@@ -1649,10 +1864,10 @@ export class App implements OnDestroy {
           branch_source_node_id: node.branchSourceNodeId,
           warnings: node.warnings,
         } },
-        { title: 'Skill metadata', value: node.skillMetadata ?? null },
-        { title: 'Metadata', value: node.metadata },
+        { title: this.text.nodeDetail.sections.skillMetadata, value: node.skillMetadata ?? null },
+        { title: this.text.nodeDetail.sections.metadata, value: node.metadata },
         {
-          title: 'Prompt and Mapping',
+          title: this.text.nodeDetail.sections.promptAndMapping,
           value: {
             additional_prompt: node.additional_prompt ?? null,
             input_mapping: node.input_mapping ?? null,
@@ -1667,19 +1882,19 @@ export class App implements OnDestroy {
   }
 
   protected isCollapsibleResultSection(title: string) {
-    return title.trim().toLowerCase() === 'result';
+    return title.trim() === this.text.agent.output.result;
   }
 
   private buildRunEventView(event: RunEvent): RunEventView {
-    const status = this.safeString(event.status) ?? 'info';
+    const status = this.safeString(event.status) ?? this.text.status.info;
     const nodeName = this.safeString(event.node_name) ?? this.safeString(event.data['entry_node_name']) ?? 'system';
     const branch = this.safeString(event.branch) ?? 'main';
-    const timestamp = new Date(event.timestamp * 1000).toLocaleString();
+    const timestamp = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(event.timestamp * 1000));
     const summary = [
-      event.event_type,
+      this.eventTitle(event.event_type),
       nodeName,
-      branch !== 'main' ? `branch ${branch}` : '',
-      status,
+      branch !== 'main' ? this.displayBranchLabel(branch) : this.text.status.mainBranch,
+      this.displayEventStatus(status),
     ]
       .filter((item) => Boolean(item))
       .join(' · ');
@@ -1704,11 +1919,11 @@ export class App implements OnDestroy {
     const records = this.isRecord(value) ? Object.keys(value) : [];
     return {
       summary: [
-        { key: 'mode', value: 'input draft' },
-        { key: 'shape', value: Array.isArray(value) ? 'array' : typeof value },
-        { key: 'fields', value: records.length ? `${records.length} keys` : '0 keys' },
+        { key: this.text.payload.summary.mode, value: this.text.payload.mode },
+        { key: this.text.payload.summary.shape, value: this.displayJsonShape(value) },
+        { key: this.text.payload.summary.fields, value: records.length ? `${records.length} ${this.text.status.keysSuffix}` : `0 ${this.text.status.keysSuffix}` },
       ],
-      sections: this.buildSectionsFromRecord([{ title: 'Generated payload', value }]),
+      sections: this.buildSectionsFromRecord([{ title: this.text.payload.title, value }]),
       trace: [],
       rawJson: this.prettyJson(value),
     };
@@ -1885,9 +2100,9 @@ export class App implements OnDestroy {
       return null;
     }
 
-    const title = this.safeString(value['node_name']) ?? this.safeString(value['name']) ?? `Trace ${index + 1}`;
+    const title = this.safeString(value['node_name']) ?? this.safeString(value['name']) ?? `${this.text.trace.titlePrefix} ${index + 1}`;
     const nodeType = this.safeString(value['node_type']);
-    const status = this.safeString(value['status']) ?? 'unknown';
+    const status = this.safeString(value['status']) ?? this.text.status.unknown;
     const branch = this.safeString(value['branch']) ?? 'main';
     const error = this.safeString(value['error']);
     const meta: FactRow[] = [];
@@ -1898,12 +2113,12 @@ export class App implements OnDestroy {
       }
       const rendered = this.renderFlatValue(rawValue);
       if (rendered) {
-        meta.push({ key, value: rendered });
+        meta.push({ key: this.translateFactKey(key), value: rendered });
       }
     }
 
     if (nodeType) {
-      meta.unshift({ key: 'type', value: nodeType });
+      meta.unshift({ key: this.text.trace.type, value: nodeType });
     }
 
     return {
@@ -1922,17 +2137,17 @@ export class App implements OnDestroy {
 
   private flattenFacts(value: unknown, prefix = '', depth = 0): FactRow[] {
     if (value === null || value === undefined) {
-      return prefix ? [{ key: prefix, value: 'null' }] : [];
+      return prefix ? [{ key: this.localizeFactPath(prefix), value: 'null' }] : [];
     }
 
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      return prefix ? [{ key: prefix, value: String(value) }] : [];
+      return prefix ? [{ key: this.localizeFactPath(prefix), value: String(value) }] : [];
     }
 
     if (Array.isArray(value)) {
       const primitives = value.filter((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item));
       if (primitives.length && primitives.length === value.length) {
-        return prefix ? [{ key: prefix, value: primitives.map((item) => String(item)).join(', ') }] : [];
+        return prefix ? [{ key: this.localizeFactPath(prefix), value: primitives.map((item) => String(item)).join(', ') }] : [];
       }
       return value.flatMap((item, index) => this.flattenFacts(item, prefix ? `${prefix}[${index}]` : String(index), depth + 1));
     }
@@ -1945,17 +2160,17 @@ export class App implements OnDestroy {
     for (const [key, rawValue] of Object.entries(value)) {
       const nextKey = prefix ? `${prefix}.${key}` : key;
       if (rawValue === null || rawValue === undefined) {
-        rows.push({ key: nextKey, value: 'null' });
+        rows.push({ key: this.localizeFactPath(nextKey), value: 'null' });
         continue;
       }
       if (typeof rawValue === 'string' || typeof rawValue === 'number' || typeof rawValue === 'boolean') {
-        rows.push({ key: nextKey, value: String(rawValue) });
+        rows.push({ key: this.localizeFactPath(nextKey), value: String(rawValue) });
         continue;
       }
       if (Array.isArray(rawValue)) {
         const primitives = rawValue.filter((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item));
         if (primitives.length && primitives.length === rawValue.length) {
-          rows.push({ key: nextKey, value: primitives.map((item) => String(item)).join(', ') });
+          rows.push({ key: this.localizeFactPath(nextKey), value: primitives.map((item) => String(item)).join(', ') });
           continue;
         }
       }
@@ -1984,7 +2199,7 @@ export class App implements OnDestroy {
       if (primitives.length && primitives.length === value.length) {
         return primitives.map((item) => String(item)).join(', ');
       }
-      return `${value.length} items`;
+      return `${value.length} ${this.text.status.itemsSuffix}`;
     }
     if (this.isRecord(value)) {
       const text = this.extractText(value);
@@ -2316,23 +2531,23 @@ export class App implements OnDestroy {
   private eventTitle(eventType: string): string {
     switch (eventType) {
       case 'run.started':
-        return 'Run started';
+        return this.text.events.runStarted;
       case 'run.completed':
-        return 'Run completed';
+        return this.text.events.runCompleted;
       case 'run.failed':
-        return 'Run failed';
+        return this.text.events.runFailed;
       case 'node.started':
-        return 'Node started';
+        return this.text.events.nodeStarted;
       case 'node.completed':
-        return 'Node completed';
+        return this.text.events.nodeCompleted;
       case 'node.failed':
-        return 'Node failed';
+        return this.text.events.nodeFailed;
       case 'branch.started':
-        return 'Branch started';
+        return this.text.events.branchStarted;
       case 'branch.completed':
-        return 'Branch completed';
+        return this.text.events.branchCompleted;
       case 'branch.failed':
-        return 'Branch failed';
+        return this.text.events.branchFailed;
       default:
         return eventType;
     }

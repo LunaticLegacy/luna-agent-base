@@ -1,0 +1,371 @@
+{
+  "app": {
+    "title": "Angelus 编队控制台",
+    "subtitle": "查看运行状态、已加载编队、图谱执行和代理调用。"
+  },
+  "hero": {
+    "eyebrow": "Angelus 编队运行时",
+    "lede": "检查运行状态、浏览已加载编队、触发图谱执行，并直接调用代理。"
+  },
+  "status": {
+    "apiPrefix": "API",
+    "healthPrefix": "健康",
+    "readyPrefix": "就绪",
+    "loadedSwarms": "已加载编队",
+    "graphValid": "图谱有效",
+    "online": "在线",
+    "offline": "离线",
+    "ok": "正常",
+    "unknown": "未知",
+    "yes": "是",
+    "no": "否",
+    "idle": "空闲",
+    "waiting": "等待中",
+    "running": "运行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "launching": "启动中",
+    "success": "成功",
+    "error": "错误",
+    "info": "信息",
+    "pending": "待处理",
+    "mainBranch": "主分支",
+    "branchPrefix": "分支",
+    "itemsSuffix": "项",
+    "factsSuffix": "条事实",
+    "keysSuffix": "个键",
+    "countSuffix": "个",
+    "array": "数组",
+    "object": "对象",
+    "string": "字符串",
+    "number": "数字",
+    "boolean": "布尔值",
+    "null": "空值"
+  },
+  "actions": {
+    "apiBaseUrl": "API 基地址",
+    "refreshOverview": "刷新概览",
+    "reloadSwarm": "重新加载编队",
+    "refreshGraph": "刷新图谱",
+    "zoomOut": "缩小",
+    "reset": "重置",
+    "zoomIn": "放大",
+    "runAgent": "运行代理",
+    "runSwarm": "启动异步运行"
+  },
+  "overview": {
+    "loadedSwarms": "已加载编队",
+    "registry": "编队注册表",
+    "noSwarms": "当前没有加载任何编队。",
+    "noSwarmsHint": "请确认 Flask 后端已启动，并且 `agents/` 目录下的配置有效。"
+  },
+  "swarmDetail": {
+    "selected": "已选编队",
+    "noSelection": "未选择编队",
+    "agents": "代理",
+    "skills": "技能",
+    "tools": "工具",
+    "graph": "图谱文件",
+    "agentFiles": "代理文件",
+    "validation": "校验",
+    "noValidationIssues": "未发现图谱校验问题。",
+    "graphErrors": "图谱错误",
+    "graphWarnings": "图谱警告"
+  },
+  "graph": {
+    "eyebrow": "执行图谱",
+    "title": "图快照与矢量图谱",
+    "ariaLabel": "编队执行图谱",
+    "legendLabel": "图例",
+    "snapshotTab": "当前图快照",
+    "spectrumTab": "图谱视图",
+    "noGraph": "当前还没有图谱。",
+    "graph": "图谱",
+    "entry": "入口",
+    "current": "当前",
+    "status": "状态",
+    "none": "无",
+    "idle": "空闲",
+    "vectorSvg": "矢量 SVG",
+    "horizontal": "横向",
+    "vertical": "纵向",
+    "zoom": "缩放",
+    "branchGroups": "分支组",
+    "joinGroups": "汇合组",
+    "unresolvedHints": "未解析的元数据提示",
+    "rawSnapshot": "原始图谱 JSON",
+    "rawSpectrum": "原始谱布局 JSON",
+    "legend": {
+      "entry": "入口节点",
+      "running": "运行中节点",
+      "completed": "已完成节点",
+      "failed": "失败节点",
+      "selected": "选中节点",
+      "edge": "活动边",
+      "derived": "派生关系"
+    },
+    "summary": {
+      "nodes": "节点",
+      "edges": "边",
+      "branches": "分支",
+      "joins": "汇合",
+      "hints": "提示",
+      "branchIndex": "分支编号",
+      "branchSource": "分支来源",
+      "role": "角色",
+      "branchNodes": "分支节点",
+      "sources": "来源"
+    },
+    "semantic": {
+      "branchSource": "分支源",
+      "branchMember": "分支成员",
+      "joinTarget": "汇合目标",
+      "node": "节点"
+    }
+    ,
+    "routePolicyAll": "全部分支",
+    "routePolicyFirst": "默认顺序",
+    "routePolicyDefault": "默认",
+    "sourcePrefix": "来源",
+    "skillTag": "技能",
+    "edgeJoin": "汇合",
+    "edgeBranchJoin": "分支汇合",
+    "unresolvedHintTemplate": "节点 {{nodeId}} 指向 join_node_id={{joinNodeId}}，但目标节点不在当前图谱的边/节点列表中。"
+  },
+  "nodeDetail": {
+    "eyebrow": "节点详情",
+    "close": "关闭",
+    "rawJson": "原始节点 JSON",
+    "fields": {
+      "metadata": "元数据",
+      "rawMetadata": "原始元数据",
+      "state": "状态",
+      "stateSnapshot": "状态快照",
+      "finalState": "最终状态",
+      "inputPayload": "输入载荷",
+      "outputPayload": "输出载荷",
+      "payload": "载荷",
+      "rawResponse": "原始响应",
+      "assistantMessage": "助手消息",
+      "message": "消息",
+      "detail": "详情",
+      "summary": "摘要",
+      "branchResults": "分支结果",
+      "content": "内容",
+      "nodeName": "节点名称",
+      "currentNodeName": "当前节点名称",
+      "currentNodeType": "当前节点类型",
+      "manifestPath": "清单路径",
+      "packagePath": "包路径",
+      "derivedRole": "派生角色",
+      "semanticTags": "语义标签",
+      "description": "描述",
+      "inputSchema": "输入模式",
+      "outputSchema": "输出模式",
+      "requiresTools": "需要工具",
+      "requiresSkills": "需要技能",
+      "preconditions": "前置条件",
+      "postconditions": "后置条件",
+      "additionalPrompt": "额外提示",
+      "inputMapping": "输入映射",
+      "graphFile": "图谱文件",
+      "currentNodeId": "当前节点 ID",
+      "createdAt": "创建时间",
+      "startedAt": "开始时间",
+      "finishedAt": "完成时间",
+      "httpError": "HTTP 错误",
+      "node": "节点"
+    },
+    "summary": {
+      "status": "状态",
+      "type": "类型",
+      "role": "角色",
+      "entry": "入口",
+      "exit": "出口",
+      "agent": "代理",
+      "tool": "工具",
+      "routePolicy": "路由策略",
+      "joinTarget": "汇合目标",
+      "branchIndex": "分支编号",
+      "next": "下一节点"
+    },
+    "sections": {
+      "semanticMetadata": "语义元数据",
+      "skillMetadata": "技能元数据",
+      "metadata": "元数据",
+      "promptAndMapping": "提示与映射"
+    },
+    "chips": {
+      "contract": "合约",
+      "capability": "能力",
+      "failure": "失败策略",
+      "parallel": "可并行",
+      "serial": "串行",
+      "skill": "技能",
+      "branch": "分支",
+      "branchSource": "分支来源",
+      "warning": "告警"
+    },
+    "warnings": {
+      "unknownKey": "已保留未知元数据键：{{key}}",
+      "routePolicy": "route_policy={{value}} 无法识别，将使用默认路由。",
+      "joinNodeMissing": "join_node_id={{value}} 未指向当前图谱中的节点。",
+      "runtimeBranchSource": "观察到了运行期分支来源元数据，但没有显式的 branch_index。",
+      "inputSchema": "input_schema 已存在，但不是 JSON 对象。",
+      "outputSchema": "output_schema 已存在，但不是 JSON 对象。"
+    }
+  },
+  "workbench": {
+    "eyebrow": "执行工作台",
+    "title": "直接代理调用与编队运行",
+    "agentTab": "直接代理调用",
+    "swarmTab": "运行所选编队",
+    "input": "输入",
+    "output": "输出",
+    "feedback": "执行反馈"
+  },
+  "feedback": {
+    "agent": {
+      "runningTitle": "代理调用进行中",
+      "runningMessage": "正在处理直接代理请求。",
+      "successTitle": "代理调用完成",
+      "successMessage": "最新的代理响应已准备就绪。",
+      "errorTitle": "代理调用失败",
+      "errorMessage": "直接代理请求未能完成。",
+      "idleTitle": "已准备好调用代理",
+      "idleMessage": "填写输入后即可发起直接代理请求。"
+    },
+    "swarm": {
+      "launchingTitle": "编队运行启动中",
+      "launchingMessage": "正在提交异步编队运行请求。",
+      "successTitle": "编队运行完成",
+      "successMessage": "编队已成功完成。",
+      "finishedAtTemplate": "完成时间：{{time}}。",
+      "errorTitle": "编队运行失败",
+      "errorMessage": "编队运行遇到了错误。",
+      "liveTitle": "编队运行实时中",
+      "liveMessage": "正在等待实时执行事件。",
+      "idleTitle": "已准备好运行编队",
+      "idleMessage": "填写编队输入后即可启动异步运行。"
+    },
+    "progress": {
+      "eventsReceived": "已收到 {{count}} 条实时事件。"
+    }
+  },
+  "messages": {
+    "selectSwarmToRun": "请先选择一个编队再运行。",
+    "taskRequired": "开始运行前必须填写任务。",
+    "selectSwarmToRunAgent": "请先选择一个编队再运行代理。",
+    "swarmHasNoAgents": "当前选中的编队没有可用代理。",
+    "liveStreamDisconnected": "实时运行流已断开。",
+    "inspectCurrentRequest": "请检查当前请求，并决定最合适的下一步动作。"
+  },
+  "errors": {
+    "httpError": "HTTP 错误"
+  },
+  "agent": {
+    "summary": {
+      "agent": "代理",
+      "swarm": "编队",
+      "rounds": "轮次",
+      "backend": "后端",
+      "mode": "模式"
+    },
+    "mode": "输入",
+    "input": {
+      "agent": "代理",
+      "message": "消息",
+      "additionalPrompt": "额外提示",
+      "rounds": "轮次",
+      "selectedSwarm": "已选编队",
+      "run": "运行代理"
+    },
+    "output": {
+      "result": "结果",
+      "context": "上下文",
+      "rawJson": "原始代理 JSON",
+      "noRound": "暂无代理轮次。"
+    },
+    "placeholders": {
+      "message": "请简要说明你要代理做什么。",
+      "additionalPrompt": "如需补充上下文，可在这里写入。",
+      "selectedSwarm": "未选择编队"
+    }
+  },
+  "swarm": {
+    "summary": {
+      "run": "运行",
+      "status": "状态",
+      "rounds": "轮次",
+      "events": "事件"
+    },
+    "input": {
+      "task": "任务",
+      "context": "上下文",
+      "audience": "受众",
+      "outputFormat": "输出格式",
+      "constraints": "约束",
+      "primaryAgent": "主代理",
+      "rounds": "轮次",
+      "start": "启动异步运行",
+      "preview": "预览载荷 JSON"
+    },
+    "output": {
+      "currentState": "当前状态",
+      "finalState": "最终状态",
+      "liveEvents": "实时事件",
+      "rawRunJson": "原始运行 JSON",
+      "noRun": "暂无运行记录。"
+    },
+    "placeholders": {
+      "task": "编队应该做什么？",
+      "context": "背景、范围或特别说明。",
+      "audience": "普通受众",
+      "outputFormat": "包含标题与项目符号的 Markdown 总结。",
+      "constraints": "每行一条约束，例如：保持简洁"
+    }
+  },
+  "payload": {
+    "summary": {
+      "mode": "模式",
+      "shape": "结构",
+      "fields": "字段数"
+    },
+    "mode": "输入草稿",
+    "title": "生成的载荷"
+  },
+  "trace": {
+    "titlePrefix": "轨迹",
+    "rawJson": "原始轨迹 JSON",
+    "status": "状态",
+    "branch": "分支",
+    "type": "类型"
+  },
+  "events": {
+    "runStarted": "运行已开始",
+    "runCompleted": "运行已完成",
+    "runFailed": "运行失败",
+    "nodeStarted": "节点已开始",
+    "nodeCompleted": "节点已完成",
+    "nodeFailed": "节点失败",
+    "branchStarted": "分支已开始",
+    "branchCompleted": "分支已完成",
+    "branchFailed": "分支失败"
+  },
+  "labels": {
+    "health": "健康",
+    "ready": "就绪",
+    "graph": "图谱",
+    "agents": "代理",
+    "skills": "技能",
+    "tools": "工具",
+    "entry": "入口",
+    "current": "当前",
+    "status": "状态",
+    "next": "下一节点",
+    "agent": "代理",
+    "tool": "工具",
+    "runId": "运行 ID",
+    "swarm": "编队"
+  }
+}
