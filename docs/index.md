@@ -1,6 +1,6 @@
 # Docs Index
 
-这是 Angelus 项目的文档索引页。
+这是 Angelus 项目的文档索引页。英文版文档集中在 `docs/en/`。
 
 ## 总览
 
@@ -8,6 +8,8 @@
   - 当前 Flask API 的总体结构、路由、错误处理和运行时绑定关系
 - [Metadata Reference](./metadata_reference.md)
   - 图节点、运行态、Agent、Tool、Skill 的 metadata 约定
+- [英文文档索引](./en/index.md)
+  - 英文版技术文档入口
 
 ## 后端
 
@@ -39,4 +41,3 @@
 - 如果你想看“前端怎么接”，先看 `frontend_api_map.md` 和 `frontend_reference.md`
 - 如果你想看“图谱和 metadata 怎么解释”，先看 `metadata_reference.md`
 - 如果你想看“业务包怎么组织”，先看 `agent_structure.md`
-
