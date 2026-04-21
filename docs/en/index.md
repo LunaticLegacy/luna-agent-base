@@ -33,6 +33,8 @@ This page is the English documentation index for Angelus.
 
 - [Agent Structure](./agent_structure.md)
   - Directory layout and swarm package conventions
+- [Dynamic Graph Editing Protocol](./dynamic_graph_protocol.md)
+  - Dynamic graph mutation mechanism, known issues, and fix priorities
 
 ## Suggested Reading Order
 
@@ -41,4 +43,3 @@ This page is the English documentation index for Angelus.
 - If you want to understand frontend consumption, start with `frontend_api_map.md` and `frontend_reference.md`
 - If you want to understand graph metadata, start with `metadata_reference.md`
 - If you want to understand swarm packaging, start with `agent_structure.md`
-

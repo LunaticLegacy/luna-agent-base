@@ -145,13 +145,12 @@ class GraphExecutor:
                     if parsed_agent_output is not None:
                         output_payload = parsed_agent_output
                         if isinstance(parsed_agent_output, dict):
-                            metadata_patch = parsed_agent_output.get("metadata_patch")
-                            if isinstance(metadata_patch, dict):
-                                state.metadata.update(metadata_patch)
+                            self._apply_metadata_updates(state.metadata, parsed_agent_output)
                             for key, value in parsed_agent_output.items():
                                 if key in {
                                     "content",
                                     "metadata_patch",
+                                    "metadata_clear",
                                     "next_node_id",
                                     "next_node_ids",
                                     "branch",
@@ -182,9 +181,7 @@ class GraphExecutor:
                     arguments = self._build_tool_arguments(node, state.payload, state.metadata)
                     output_payload = await tool.execute(arguments, context=tool_context)
                     if isinstance(output_payload, dict):
-                        metadata_patch = output_payload.get("metadata_patch")
-                        if isinstance(metadata_patch, dict):
-                            state.metadata.update(metadata_patch)
+                        self._apply_metadata_updates(state.metadata, output_payload)
                         if "content" in output_payload:
                             state.payload = output_payload["content"]
                         else:
@@ -194,6 +191,9 @@ class GraphExecutor:
                     next_node_override = self._extract_next_node_id(output_payload)
                 else:
                     output_payload = state.payload
+
+                next_targets = self._resolve_next_targets(graph, node, state.payload, next_node_override)
+                self._validate_next_targets(graph, node.node_id, next_targets)
 
                 state.trace.append(
                     ExecutionStep(
@@ -412,7 +412,9 @@ class GraphExecutor:
                         ),
                     )
                     return state
-                current_node_id = int(join_node_id)
+                join_node_id = int(join_node_id)
+                self._ensure_node_exists(graph, join_node_id, current_node_id=node.node_id, label="join_node_id")
+                current_node_id = join_node_id
                 self._emit(
                     event_sink,
                     ExecutionEvent(
@@ -465,6 +467,24 @@ class GraphExecutor:
         if event_sink is not None:
             event_sink(event)
 
+    def _apply_metadata_updates(self, target_metadata: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        metadata_patch = payload.get("metadata_patch")
+        if isinstance(metadata_patch, dict):
+            target_metadata.update(metadata_patch)
+
+        metadata_clear = payload.get("metadata_clear")
+        for key in self._coerce_metadata_keys(metadata_clear):
+            target_metadata.pop(key, None)
+
+    def _coerce_metadata_keys(self, raw: Any) -> List[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            return [raw]
+        if isinstance(raw, list):
+            return [str(item) for item in raw if item is not None]
+        return [str(raw)]
+
     def _build_tool_arguments(self, node: ToolNode, payload: Any, runtime_metadata: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(payload, dict):
             base_arguments = dict(payload)
@@ -481,6 +501,33 @@ class GraphExecutor:
         if next_node_id is None:
             return None
         return int(next_node_id)
+
+    def _validate_next_targets(
+        self,
+        graph: ExecutionGraph,
+        current_node_id: int,
+        next_targets: List[int],
+    ) -> None:
+        for next_node_id in next_targets:
+            self._ensure_node_exists(
+                graph,
+                next_node_id,
+                current_node_id=current_node_id,
+                label="next_node_id",
+            )
+
+    def _ensure_node_exists(
+        self,
+        graph: ExecutionGraph,
+        node_id: int,
+        *,
+        current_node_id: int,
+        label: str,
+    ) -> None:
+        if node_id not in graph.nodes:
+            raise ValueError(
+                f"Node {current_node_id} resolved {label} {node_id}, but that node does not exist."
+            )
 
     def _parse_structured_agent_output(self, assistant_message: Optional[str]) -> Any:
         if not isinstance(assistant_message, str):

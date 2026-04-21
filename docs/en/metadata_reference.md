@@ -32,6 +32,13 @@ Current semantic fields:
 
 Node metadata may include arbitrary extra keys. The frontend should keep unknown keys and render them as raw JSON.
 
+### `runtime_transient`
+
+- Type: `bool`
+- Meaning:
+  - marks a node as a runtime temporary node
+  - lets the runtime treat a deleted temporary agent as an acceptable transitional state until the node itself is removed
+
 ## 2. Runtime Metadata
 
 Source:
@@ -52,6 +59,13 @@ Current runtime fields:
 - Type: `int`
 - Meaning:
   - the source node that created the branch
+
+### `metadata_clear`
+
+- Type: `array[string]` or `string`
+- Meaning:
+  - tells the executor which old control keys to remove from `state.metadata`
+  - useful in cleanup flows to remove stale `next_node_id` and `spawned_agent_*` values
 
 ## 3. Agent Context Metadata
 
@@ -164,4 +178,3 @@ Skill contracts are flattened into metadata fields:
 - Treat `branch_index` and `branch_source_node_id` as runtime grouping information
 - Render skill metadata in a details panel
 - Use `edges` for structural links and `metadata` for semantic hints
-

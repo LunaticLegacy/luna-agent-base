@@ -33,6 +33,8 @@
 
 - [Agent Structure](./agent_structure.md)
   - 当前 swarm / agent / skill / tool / graph 的目录与结构约定
+- [动态图编辑协议](./dynamic_graph_protocol.md)
+  - 动态改图机制、已知问题与修复优先级
 
 ## 使用建议
 

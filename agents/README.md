@@ -1,8 +1,8 @@
-# Swarm Package Layout
+# Swarm 包结构说明
 
-Each child directory under `agents/` is a standalone swarm package.
+`agents/` 下的每个子目录都是一个独立的 swarm 包。
 
-Example:
+示例：
 
 ```text
 agents/
@@ -15,16 +15,16 @@ agents/
       planner.prompt.md
 ```
 
-Default reusable tools live in the top-level `tools/` package.
+顶层 `tools/` 目录存放可复用的默认工具。
 
-Required manifest rules:
+## 约束规则
 
-- Exactly one `*.toml` file must exist in the package directory.
-- The manifest must define one `graph_file`.
-- The manifest must define one or more `agent_files`.
-- The manifest may define `skill_files` and `tool_files`.
+- 每个 swarm 包目录中只能有一个 `*.toml` 清单文件。
+- 清单必须定义 `graph_file`。
+- 清单必须定义一个或多个 `agent_files`。
+- 清单可以定义 `skill_files` 和 `tool_files`。
 
-Suggested `swarm.toml` shape:
+## `swarm.toml` 示例
 
 ```toml
 [swarm]
@@ -42,13 +42,15 @@ api_key = "YOUR_DEEPSEEK_API_KEY"
 model = "deepseek-reasoner"
 ```
 
-Each agent file should export one mapping:
+## Agent 文件
+
+每个 agent 文件应导出一个映射，例如：
 
 - `AGENT`
 - `AGENT_SPEC`
 - `AGENTS`
 
-Supported agent fields:
+支持的字段包括：
 
 - `agent_id`
 - `name`
@@ -62,14 +64,18 @@ Supported agent fields:
 - `model`
 - `provider`
 
-Each skill file may be:
+## Skill 文件
 
-- `.md` or `.txt` prompt content
-- `.toml` with a `[skill]` table
+每个 skill 文件可以是：
 
-Each tool module should export one of:
+- `.md` 或 `.txt` 的提示词内容
+- 带有 `[skill]` 表的 `.toml` 文件
+
+## Tool 模块
+
+每个 tool 模块应导出以下之一：
 
 - `TOOL`
 - `TOOLS`
 
-If a tool needs extra third-party dependencies, place a `tool_requirements.txt` file next to that tool module. The runtime will preinstall those requirements before loading the tool.
+如果某个 tool 依赖额外的第三方包，可以在它旁边放一个 `tool_requirements.txt` 文件，运行时会先安装这些依赖再加载该 tool。
