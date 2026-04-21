@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
+from .cognitive import CognitiveEdge, CognitiveNode, CognitiveNodeType, CognitiveRelationType
 from .policy import AgentNode, ExecutionGraph, ExecutionStep, ToolNode
 from .results import ExecutionEvent, ExecutionState
 from .toodefl import ToolContext
@@ -129,10 +130,17 @@ class GraphExecutor:
                     agent = core.get_agent(node.agent_id)
                     state.rounds += 1
                     agent_input = self._format_agent_input(state.payload, node)
+                    cognitive_prompt = self._inject_cognitive_context(core, node)
+                    combined_prompt = node.additional_prompt
+                    if cognitive_prompt:
+                        if combined_prompt:
+                            combined_prompt = f"{combined_prompt}\n\n{cognitive_prompt}"
+                        else:
+                            combined_prompt = cognitive_prompt
                     result = await agent.round_call(
                         rounds=state.rounds,
                         user_message=agent_input,
-                        additional_prompt=node.additional_prompt,
+                        additional_prompt=combined_prompt,
                     )
                     output_payload = result
                     parsed_agent_output = self._parse_structured_agent_output(result.assistant_message)
@@ -169,6 +177,19 @@ class GraphExecutor:
                             state.payload = parsed_agent_output
                     else:
                         next_node_override = self._extract_next_node_id(state.payload)
+
+                    # Merge agent's private cognitive graph into swarm shared graph
+                    core.merge_agent_cognitive_graph(node.agent_id)
+
+                    # Record execution trace in cognitive graph
+                    core.swarm_cognitive_graph.add_node(
+                        CognitiveNode(
+                            node_type=CognitiveNodeType.EXECUTION_TRACE,
+                            content=f"Agent '{node.agent_id}' executed node '{node.node_name}' (round {state.rounds})",
+                            source=node.agent_id,
+                            metadata={"execution_node_id": node.node_id, "rounds": state.rounds},
+                        )
+                    )
                 elif isinstance(node, ToolNode):
                     tool = core.get_tool(node.tool_name)
                     tool_context = ToolContext(
@@ -614,3 +635,18 @@ class GraphExecutor:
         if node.additional_prompt:
             return f"{payload}\n\n{node.additional_prompt}"
         return str(payload)
+
+    def _inject_cognitive_context(self, core: "Core", node: AgentNode) -> Optional[str]:
+        """Build an additional_prompt snippet that feeds the swarm cognitive graph into the agent."""
+        try:
+            cg_export = core.get_cognitive_graph_export(max_nodes=12)
+        except Exception:
+            return None
+        if not cg_export or cg_export.endswith("nodes=0, edges=0):"):
+            return None
+        return (
+            "## Swarm Cognitive Context\n\n"
+            "The following is a summary of what the swarm has thought about so far. "
+            "Use it to avoid redundant work and build upon existing reasoning:\n\n"
+            f"{cg_export}\n"
+        )

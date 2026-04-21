@@ -72,7 +72,15 @@ async def run_swarm(swarm_name: str):
     request_data = request.get_json(silent=True) or {}
     payload = request_data.get("input")
     rounds = int(request_data.get("rounds", 0))
-    state = await graph.run(swarm.core, payload, rounds=rounds)
+    meta_mode = bool(request_data.get("meta_mode", False))
+
+    if meta_mode:
+        from core.meta_executor import MetaExecutor
+        meta = MetaExecutor(max_iterations=5)
+        state = await meta.run(graph, swarm.core, payload, rounds=rounds)
+    else:
+        state = await graph.run(swarm.core, payload, rounds=rounds)
+
     return jsonify(
         {
             "success": True,
@@ -95,12 +103,14 @@ def start_swarm_run(swarm_name: str):
     request_data = request.get_json(silent=True) or {}
     payload = request_data.get("input")
     rounds = int(request_data.get("rounds", 0))
+    meta_mode = bool(request_data.get("meta_mode", False))
     record = _get_runs_registry().launch_run(
         swarm_name=swarm_name,
         core=swarm.core,
         graph=graph,
         initial_payload=payload,
         rounds=rounds,
+        meta_mode=meta_mode,
     )
     return jsonify(
         {
