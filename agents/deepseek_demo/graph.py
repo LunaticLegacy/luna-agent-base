@@ -37,7 +37,9 @@ def build_graph(core):
         )
     )
 
-    # 4. Insert Researcher Node: 将 researcher 插入图
+    # 4. Insert Researcher Node: 将 researcher 动态插入图
+    # 工具执行后会返回 next_node_id 指向新插入的 researcher 节点，
+    # 执行器会自动跳转到该节点。
     graph.add_node(
         ToolNode(
             node_id=4,
@@ -48,73 +50,62 @@ def build_graph(core):
         )
     )
 
-    # 5. Researcher: 执行深度搜索（带 web_search 工具）
-    graph.add_node(
-        AgentNode(
-            node_id=5,
-            node_name="researcher_runtime",
-            agent_id="researcher_runtime",
-            next_node_ids=[6],
-            metadata={"runtime_transient": True},
-        )
-    )
-
-    # 6. Delete Researcher: 清理临时 agent
+    # 5. Delete Researcher: 清理临时 agent
     graph.add_node(
         ToolNode(
-            node_id=6,
+            node_id=5,
             node_name="delete_researcher",
             tool_name="agent_manager",
             input_mapping={"action": "destroy_agent"},
+            next_node_ids=[6],
+        )
+    )
+
+    # 6. Remove Researcher Node: 从图中移除临时节点
+    graph.add_node(
+        ToolNode(
+            node_id=6,
+            node_name="remove_researcher_node",
+            tool_name="graph_editor",
+            input_mapping={"action": "remove_node"},
             next_node_ids=[7],
         )
     )
 
-    # 7. Remove Researcher Node: 从图中移除
+    # 7. Writer: 基于研究笔记撰写报告
     graph.add_node(
-        ToolNode(
+        AgentNode(
             node_id=7,
-            node_name="remove_researcher_node",
-            tool_name="graph_editor",
-            input_mapping={"action": "remove_node"},
+            node_name="writer",
+            agent_id="writer",
             next_node_ids=[8],
         )
     )
 
-    # 8. Writer: 基于研究笔记撰写报告
+    # 8. Reviewer: 审核，输出条件分支
     graph.add_node(
         AgentNode(
             node_id=8,
-            node_name="writer",
-            agent_id="writer",
-            next_node_ids=[9],
+            node_name="reviewer",
+            agent_id="reviewer",
+            next_node_ids=[9, 7],  # 9=publisher, 7=writer (revise)
         )
     )
 
-    # 9. Reviewer: 审核，输出条件分支
+    # 9. Publisher: 最终润色
     graph.add_node(
         AgentNode(
             node_id=9,
-            node_name="reviewer",
-            agent_id="reviewer",
-            next_node_ids=[10, 8],  # 10=publisher, 8=writer (revise)
-        )
-    )
-
-    # 10. Publisher: 最终润色
-    graph.add_node(
-        AgentNode(
-            node_id=10,
             node_name="publisher",
             agent_id="publisher",
-            next_node_ids=[11],
+            next_node_ids=[10],
         )
     )
 
-    # 11. File Writer: 写入文件
+    # 10. File Writer: 写入文件
     graph.add_node(
         ToolNode(
-            node_id=11,
+            node_id=10,
             node_name="file_writer",
             tool_name="file_writer",
             input_mapping={"path": "outputs/deepseek_demo_final.txt"},
@@ -125,18 +116,17 @@ def build_graph(core):
     graph.add_edge(1, 2, label="plan", priority=10)
     graph.add_edge(2, 3, label="spawn", priority=10)
     graph.add_edge(3, 4, label="insert", priority=10)
-    graph.add_edge(4, 5, label="research", priority=10)
-    graph.add_edge(5, 6, label="cleanup_agent", priority=10)
-    graph.add_edge(6, 7, label="cleanup_node", priority=10)
-    graph.add_edge(7, 8, label="write", priority=10)
-    graph.add_edge(8, 9, label="review", priority=10)
+    graph.add_edge(4, 5, label="cleanup_agent", priority=10)
+    graph.add_edge(5, 6, label="cleanup_node", priority=10)
+    graph.add_edge(6, 7, label="write", priority=10)
+    graph.add_edge(7, 8, label="review", priority=10)
 
     # Reviewer 条件边
-    graph.add_edge(9, 10, label="approve", condition="approve", priority=20)
-    graph.add_edge(9, 8, label="revise", condition="revise", priority=10)
+    graph.add_edge(8, 9, label="approve", condition="approve", priority=20)
+    graph.add_edge(8, 7, label="revise", condition="revise", priority=10)
 
-    graph.add_edge(10, 11, label="publish", priority=10)
+    graph.add_edge(9, 10, label="publish", priority=10)
 
     graph.set_entry(1)
-    graph.set_exit(11)
+    graph.set_exit(10)
     return graph
