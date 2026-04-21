@@ -320,7 +320,7 @@ class LLMFetcher:
         if in_thinking:
             yield "\n<<<THINK_END>>>\n"
 
-    def fetch(
+    async def fetch(
         self,
         msg: str,
         system_prompt: Optional[str] = None,
@@ -352,7 +352,8 @@ class LLMFetcher:
 
         for backend in self._resolve_backends(backend_name, fallback_order):
             try:
-                return self._create_completion(
+                return await asyncio.to_thread(
+                    self._create_completion,
                     backend,
                     messages=messages,
                     temperature=temperature,

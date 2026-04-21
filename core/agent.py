@@ -77,7 +77,7 @@ class Agent:
         system_prompt = self._build_system_prompt(additional_prompt)
         prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages[:-1]]
 
-        raw_response = self.llm_handler.fetch(
+        raw_response = await self.llm_handler.fetch(
             msg=user_message,
             system_prompt=system_prompt or None,
             prev_messages=prev_messages or None,
