@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from modules.llm_fetcher import LLMContext, LLMFetcher
 
-from .types import AgentContextSnapshot, AgentRoundResult
+from .results import AgentContextSnapshot, AgentRoundResult
 
 
 @dataclass

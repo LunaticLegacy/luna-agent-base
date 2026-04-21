@@ -5,8 +5,11 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 from modules.llm_fetcher import LLMFetcher
 
 from .agent import Agent
+from .config import AgentConfig
 from .toodefl import ToolDefinition
-from .types import AgentConfig, AgentLike, GraphValidationResult
+from .skills import SkillAsset
+from .protocols import AgentLike
+from .results import GraphValidationResult
 
 if TYPE_CHECKING:
     from .policy import ExecutionGraph
@@ -24,6 +27,7 @@ class Core:
         self.agent_config = agent_config
         self.agents: Dict[str, AgentLike] = {}
         self.tools: Dict[str, ToolDefinition] = {}
+        self.skills: Dict[str, SkillAsset] = {}
         self._execution_graph: Optional["ExecutionGraph"] = None
 
     async def init(self) -> None:
@@ -68,7 +72,7 @@ class Core:
             agent.reset_context()
 
     def destroy_agent(self, agent_id: str) -> None:
-        """Alias for removing an agent."""
+        """Alias for method `remove_agent`."""
         self.remove_agent(agent_id)
 
     def get_agent(self, agent_id: str) -> AgentLike:
@@ -88,6 +92,23 @@ class Core:
         if tool.tool_name in self.tools:
             raise ValueError(f"Duplicate tool_name: {tool.tool_name}")
         self.tools[tool.tool_name] = tool
+
+    def register_skill(self, skill: SkillAsset) -> None:
+        """Register a runtime skill asset."""
+        if skill.name in self.skills:
+            raise ValueError(f"Duplicate skill name: {skill.name}")
+        self.skills[skill.name] = skill
+
+    def get_skill(self, skill_name: str) -> SkillAsset:
+        """Fetch a registered skill by name."""
+        try:
+            return self.skills[skill_name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown skill_name: {skill_name}") from exc
+
+    def list_skills(self) -> List[SkillAsset]:
+        """Return the registered skills in insertion order."""
+        return list(self.skills.values())
 
     def remove_tool(self, tool_name: str) -> None:
         """Remove a tool from the runtime registry."""

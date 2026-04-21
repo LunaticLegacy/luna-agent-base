@@ -1,0 +1,13 @@
+[swarm]
+name = "deepseek_demo"
+graph_file = "graph.py"
+agent_files = ["agents/planner.py"]
+skill_files = ["skills/planner.prompt.md"]
+tool_files = ["tools.echo_tool", "tools.file_writer_tool"]
+
+[llm.default]
+name = "deepseek"
+provider = "openai"
+api_url = "https://api.deepseek.com"
+api_key = "YOUR_DEEPSEEK_API_KEY"
+model = "deepseek-reasoner"

@@ -2,3 +2,4 @@ openai
 litellm
 redis
 asyncpg
+Flask[async]
