@@ -79,6 +79,40 @@ interface GraphView {
   rawJson: string;
 }
 
+interface GraphSpectrumNodeView extends GraphNodeView {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  labelLines: string[];
+}
+
+interface GraphSpectrumEdgeView extends GraphEdgeView {
+  d: string;
+}
+
+interface GraphSpectrumView {
+  width: number;
+  height: number;
+  viewBox: string;
+  zoom: number;
+  panX: number;
+  panY: number;
+  panTransform: string;
+  scaleTransform: string;
+  nodes: GraphSpectrumNodeView[];
+  edges: GraphSpectrumEdgeView[];
+  rawJson: string;
+}
+
+interface GraphDragState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  originPanX: number;
+  originPanY: number;
+}
+
 interface RunEventView {
   eventType: string;
   title: string;
@@ -107,6 +141,7 @@ interface RunLiveView {
 export class App implements OnDestroy {
   private readonly api = inject(ApiService);
   private runEventSource: EventSource | null = null;
+  private graphDragState: GraphDragState | null = null;
   private readonly runEventTypes = [
     'run.started',
     'node.started',
@@ -135,6 +170,14 @@ export class App implements OnDestroy {
   protected readonly selectedSwarm = signal<SwarmDetails | null>(null);
   protected readonly selectedGraph = signal<GraphSnapshot | null>(null);
   protected readonly selectedAgentId = signal<string | null>(null);
+  protected readonly graphTab = signal<'snapshot' | 'spectrum'>('spectrum');
+  protected readonly controlMode = signal<'agent' | 'swarm'>('agent');
+  protected readonly agentPage = signal<'input' | 'output'>('input');
+  protected readonly swarmPage = signal<'input' | 'output'>('input');
+  protected readonly graphZoom = signal(1);
+  protected readonly graphPanX = signal(0);
+  protected readonly graphPanY = signal(0);
+  protected readonly graphDragging = signal(false);
   protected readonly activeRun = signal<RunSnapshot | null>(null);
   protected readonly activeRunEvents = signal<RunEventView[]>([]);
   protected readonly activeRunCompleted = signal(false);
@@ -148,6 +191,7 @@ export class App implements OnDestroy {
   protected readonly swarmRequestPayload = computed(() => this.buildSwarmRequestPayload());
   protected readonly swarmRequestView = computed(() => this.buildPayloadView(this.swarmRequestPayload()));
   protected readonly graphView = computed(() => this.buildGraphView(this.selectedGraph(), this.activeRun()));
+  protected readonly graphSpectrumView = computed(() => this.buildGraphSpectrumView(this.graphView(), this.graphZoom()));
   protected readonly liveRunView = computed(() => this.buildRunLiveView(this.activeRun(), this.activeRunEvents()));
 
   protected readonly availableAgentIds = computed(() => {
@@ -215,6 +259,15 @@ export class App implements OnDestroy {
     this.activeRunCompleted.set(false);
     this.runError.set(null);
     this.graphError.set(null);
+    this.graphZoom.set(1);
+    this.graphPanX.set(0);
+    this.graphPanY.set(0);
+    this.graphDragging.set(false);
+    this.graphDragState = null;
+    this.graphTab.set('spectrum');
+    this.controlMode.set('agent');
+    this.agentPage.set('input');
+    this.swarmPage.set('input');
     this.selectedSwarmName.set(swarmName);
     await this.reloadSelectedSwarm();
     await this.reloadSelectedGraph();
@@ -251,6 +304,89 @@ export class App implements OnDestroy {
       this.graphError.set(this.formatError(error));
       this.selectedGraph.set(null);
     }
+  }
+
+  setGraphTab(value: 'snapshot' | 'spectrum') {
+    this.graphTab.set(value);
+  }
+
+  setControlMode(value: 'agent' | 'swarm') {
+    this.controlMode.set(value);
+  }
+
+  setAgentPage(value: 'input' | 'output') {
+    this.agentPage.set(value);
+  }
+
+  setSwarmPage(value: 'input' | 'output') {
+    this.swarmPage.set(value);
+  }
+
+  zoomGraphIn() {
+    this.graphZoom.set(this.clampGraphZoom(this.graphZoom() + 0.2));
+  }
+
+  zoomGraphOut() {
+    this.graphZoom.set(this.clampGraphZoom(this.graphZoom() - 0.2));
+  }
+
+  resetGraphZoom() {
+    this.graphZoom.set(1);
+    this.graphPanX.set(0);
+    this.graphPanY.set(0);
+    this.graphDragging.set(false);
+    this.graphDragState = null;
+  }
+
+  startGraphDrag(event: PointerEvent) {
+    if (!this.graphSpectrumView()) {
+      return;
+    }
+
+    const target = event.target as Element | null;
+    if (target?.closest('button, a, input, textarea, select, summary, details')) {
+      return;
+    }
+
+    const currentTarget = event.currentTarget as SVGSVGElement | null;
+    event.preventDefault();
+    currentTarget?.setPointerCapture(event.pointerId);
+    this.graphDragging.set(true);
+    this.graphDragState = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      originPanX: this.graphPanX(),
+      originPanY: this.graphPanY(),
+    };
+  }
+
+  moveGraphDrag(event: PointerEvent) {
+    const drag = this.graphDragState;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const zoom = this.graphSpectrumView()?.zoom ?? this.graphZoom();
+    const deltaX = (event.clientX - drag.startClientX) / zoom;
+    const deltaY = (event.clientY - drag.startClientY) / zoom;
+    this.graphPanX.set(drag.originPanX + deltaX);
+    this.graphPanY.set(drag.originPanY + deltaY);
+  }
+
+  endGraphDrag(event: PointerEvent) {
+    const drag = this.graphDragState;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const currentTarget = event.currentTarget as SVGSVGElement | null;
+    if (currentTarget?.hasPointerCapture(event.pointerId)) {
+      currentTarget.releasePointerCapture(event.pointerId);
+    }
+    this.graphDragging.set(false);
+    this.graphDragState = null;
   }
 
   async runSwarm() {
@@ -602,6 +738,83 @@ export class App implements OnDestroy {
     };
   }
 
+  private buildGraphSpectrumView(view: GraphView | null, zoom: number): GraphSpectrumView | null {
+    if (!view) {
+      return null;
+    }
+
+    const safeZoom = this.clampGraphZoom(zoom);
+    const nodeWidth = 190;
+    const nodeHeight = 92;
+    const levelGap = 180;
+    const nodeGap = 70;
+    const padding = 56;
+
+    const layout = this.layoutGraphNodes(view, nodeWidth, nodeHeight, levelGap, nodeGap, padding);
+    const positions = layout.positions;
+    const widestRow = Math.max(layout.widestRow, 1);
+    const width = Math.max(960, padding * 2 + widestRow * nodeWidth + Math.max(0, widestRow - 1) * nodeGap);
+    const maxLevel = Math.max(layout.maxLevel, 0);
+    const height = Math.max(560, padding * 2 + maxLevel * levelGap + nodeHeight);
+    const panX = this.graphPanX();
+    const panY = this.graphPanY();
+    const viewBox = `0 0 ${width} ${height}`;
+
+    const layoutNodes = view.nodes.map((node) => {
+      const position = positions.get(node.node_id) ?? { x: padding, y: padding };
+      return {
+        ...node,
+        x: position.x,
+        y: position.y,
+        width: nodeWidth,
+        height: nodeHeight,
+        labelLines: this.buildGraphNodeLabelLines(node),
+      };
+    });
+
+    const nodeLookup = new Map<number, GraphSpectrumNodeView>();
+    layoutNodes.forEach((node) => nodeLookup.set(node.node_id, node));
+
+    const layoutEdges = view.edges.map((edge) => {
+      const source = nodeLookup.get(edge.from_node_id);
+      const target = nodeLookup.get(edge.to_node_id);
+      const x1 = source ? source.x + source.width / 2 : padding;
+      const y1 = source ? source.y + source.height : padding;
+      const x2 = target ? target.x + target.width / 2 : padding;
+      const y2 = target ? target.y : padding;
+      const midY = y1 + Math.max(54, (y2 - y1) / 2);
+      return {
+        ...edge,
+        d: `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`,
+      };
+    });
+
+    return {
+      width,
+      height,
+      viewBox,
+      zoom: safeZoom,
+      panX,
+      panY,
+      panTransform: `translate(${panX} ${panY})`,
+      scaleTransform: `scale(${safeZoom})`,
+      nodes: layoutNodes,
+      edges: layoutEdges,
+      rawJson: this.prettyJson({
+        zoom: safeZoom,
+        panX,
+        panY,
+        layout: layoutNodes.map((node) => ({
+          node_id: node.node_id,
+          x: node.x,
+          y: node.y,
+          width: node.width,
+          height: node.height,
+        })),
+      }),
+    };
+  }
+
   private buildRunEventView(event: RunEvent): RunEventView {
     const status = this.safeString(event.status) ?? 'info';
     const nodeName = this.safeString(event.node_name) ?? this.safeString(event.data['entry_node_name']) ?? 'system';
@@ -644,6 +857,112 @@ export class App implements OnDestroy {
       trace: [],
       rawJson: this.prettyJson(value),
     };
+  }
+
+  private buildGraphNodeLabelLines(node: GraphNodeView): string[] {
+    const lines = [`#${node.node_id} ${node.node_name}`];
+    lines.push(node.node_type);
+    if (node.agent_id) {
+      lines.push(`agent: ${node.agent_id}`);
+    }
+    if (node.tool_name) {
+      lines.push(`tool: ${node.tool_name}`);
+    }
+    if (node.next_node_ids.length) {
+      lines.push(`next: ${node.next_node_ids.join(', ')}`);
+    }
+    return lines.slice(0, 4);
+  }
+
+  private layoutGraphNodes(
+    view: GraphView,
+    nodeWidth: number,
+    nodeHeight: number,
+    levelGap: number,
+    nodeGap: number,
+    padding: number,
+  ): { positions: Map<number, { x: number; y: number }>; widestRow: number; maxLevel: number } {
+    const outgoing = new Map<number, number[]>();
+    const levels = new Map<number, number>();
+
+    view.nodes.forEach((node) => {
+      outgoing.set(node.node_id, []);
+      levels.set(node.node_id, Number.POSITIVE_INFINITY);
+    });
+
+    view.edges.forEach((edge) => {
+      const list = outgoing.get(edge.from_node_id);
+      if (list) {
+        list.push(edge.to_node_id);
+      }
+    });
+
+    const entryId = view.entryNodeId ?? view.nodes[0]?.node_id ?? null;
+    if (entryId !== null) {
+      const queue: number[] = [entryId];
+      levels.set(entryId, 0);
+      while (queue.length) {
+        const current = queue.shift() ?? entryId;
+        const nextLevel = (levels.get(current) ?? 0) + 1;
+        for (const nextId of outgoing.get(current) ?? []) {
+          if (nextLevel < (levels.get(nextId) ?? Number.POSITIVE_INFINITY)) {
+            levels.set(nextId, nextLevel);
+            queue.push(nextId);
+          }
+        }
+      }
+    }
+
+    const fallbackLevels = [...view.nodes]
+      .sort((left, right) => left.node_id - right.node_id)
+      .map((node, index) => ({
+        nodeId: node.node_id,
+        level: Number.isFinite(levels.get(node.node_id) ?? Number.POSITIVE_INFINITY)
+          ? (levels.get(node.node_id) ?? 0)
+          : index,
+      }));
+    fallbackLevels.forEach(({ nodeId, level }) => {
+      if (!Number.isFinite(levels.get(nodeId) ?? Number.POSITIVE_INFINITY)) {
+        levels.set(nodeId, level);
+      }
+    });
+
+    const grouped = new Map<number, number[]>();
+    view.nodes.forEach((node) => {
+      const level = levels.get(node.node_id) ?? 0;
+      const group = grouped.get(level) ?? [];
+      group.push(node.node_id);
+      grouped.set(level, group);
+    });
+
+    let widestRow = 1;
+    grouped.forEach((items) => {
+      widestRow = Math.max(widestRow, items.length);
+    });
+
+    const positions = new Map<number, { x: number; y: number }>();
+    const orderedLevels = [...grouped.keys()].sort((left, right) => left - right);
+    orderedLevels.forEach((level) => {
+      const items = grouped.get(level) ?? [];
+      const rowWidth = items.length * nodeWidth + Math.max(0, items.length - 1) * nodeGap;
+      const startX = padding + (widestRow * nodeWidth + Math.max(0, widestRow - 1) * nodeGap - rowWidth) / 2;
+      items.forEach((nodeId, index) => {
+        positions.set(nodeId, {
+          x: startX + index * (nodeWidth + nodeGap),
+          y: padding + level * levelGap,
+        });
+      });
+    });
+
+    return {
+      positions,
+      widestRow,
+      maxLevel: orderedLevels[orderedLevels.length - 1] ?? 0,
+    };
+  }
+
+  private clampGraphZoom(value: number) {
+    return Math.min(2.4, Math.max(0.7, Number.isFinite(value) ? value : 1));
   }
 
   private buildSwarmRequestPayload(): Record<string, unknown> {

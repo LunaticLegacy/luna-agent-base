@@ -149,10 +149,122 @@ button.secondary
   align-items: flex-start
   gap: 1rem
   margin-bottom: 1rem
+  flex-wrap: wrap
 
 .panel h2
   margin: 0.2rem 0 0
   font-size: 1.35rem
+
+.tab-row,
+.page-switch
+  display: inline-flex
+  flex-wrap: wrap
+  gap: 0.5rem
+
+.tab-row button,
+.page-switch button
+  background: rgba(255, 255, 255, 0.04)
+  color: #f4ede1
+  border: 1px solid rgba(233, 216, 188, 0.12)
+
+.tab-row button.active-tab,
+.page-switch button.active-tab
+  background: rgba(216, 160, 95, 0.16)
+  border-color: rgba(216, 160, 95, 0.48)
+  color: #fff8ee
+
+.page-card
+  display: flex
+  flex-direction: column
+  gap: 0.95rem
+
+.panel-toolbar
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  justify-content: space-between
+  gap: 0.75rem
+  margin-bottom: 0.9rem
+
+.graph-spectrum-shell
+  display: flex
+  flex-direction: column
+  gap: 0.9rem
+
+.graph-spectrum-frame
+  border-radius: 22px
+  background: radial-gradient(circle at top left, rgba(216, 160, 95, 0.08), transparent 34%), radial-gradient(circle at bottom right, rgba(74, 179, 168, 0.08), transparent 34%), rgba(5, 7, 10, 0.82)
+  border: 1px solid rgba(233, 216, 188, 0.08)
+  overflow: hidden
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03)
+
+.graph-spectrum-svg
+  display: block
+  width: 100%
+  min-height: 180px
+  cursor: grab
+  touch-action: none
+
+.graph-spectrum-svg.dragging
+  cursor: grabbing
+
+.graph-edge
+  fill: none
+  stroke: rgba(233, 216, 188, 0.25)
+  stroke-width: 2.2
+  stroke-linecap: round
+  stroke-linejoin: round
+
+.graph-edge.active
+  stroke: #d8a05f
+  stroke-width: 2.8
+
+.graph-spectrum-node
+  filter: drop-shadow(0 14px 24px rgba(0, 0, 0, 0.34))
+
+.graph-spectrum-node-box
+  fill: rgba(8, 10, 14, 0.9)
+  stroke: rgba(233, 216, 188, 0.1)
+  stroke-width: 1.2
+
+.graph-spectrum-node-highlight
+  fill: transparent
+  stroke: transparent
+
+.graph-spectrum-node.entry .graph-spectrum-node-box
+  stroke: rgba(216, 160, 95, 0.72)
+
+.graph-spectrum-node.exit .graph-spectrum-node-box
+  stroke: rgba(74, 179, 168, 0.72)
+
+.graph-spectrum-node.running .graph-spectrum-node-box
+  fill: rgba(216, 160, 95, 0.18)
+  stroke: rgba(216, 160, 95, 0.9)
+
+.graph-spectrum-node.completed .graph-spectrum-node-box
+  fill: rgba(74, 179, 168, 0.14)
+  stroke: rgba(74, 179, 168, 0.72)
+
+.graph-spectrum-node.failed .graph-spectrum-node-box
+  fill: rgba(241, 104, 104, 0.14)
+  stroke: rgba(241, 104, 104, 0.8)
+
+.graph-spectrum-node-text
+  fill: #f6efe5
+  font-size: 12px
+  font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif
+
+.graph-spectrum-node-text tspan
+  display: block
+
+.graph-spectrum-node-status
+  fill: rgba(242, 235, 223, 0.72)
+  font-size: 10px
+  text-transform: uppercase
+  letter-spacing: 0.12em
+
+.graph-spectrum-summary
+  margin-top: 0.15rem
 
 .list
   display: flex
@@ -252,6 +364,9 @@ button.secondary
   grid-template-columns: 1fr 1fr
 
 .agent-panel
+  margin-top: 1.25rem
+
+.workbench-panel
   margin-top: 1.25rem
 
 .two-col
