@@ -13,6 +13,8 @@ class ToolContext:
     node_id: Optional[int] = None
     rounds: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
+    core: Optional[Any] = None
+    graph: Optional[Any] = None
 
 
 class ToolDefinition(ABC):

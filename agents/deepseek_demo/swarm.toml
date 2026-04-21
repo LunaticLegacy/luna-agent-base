@@ -1,9 +1,21 @@
 [swarm]
 name = "deepseek_demo"
 graph_file = "graph.py"
-agent_files = ["agents/planner.py"]
-skill_files = ["skills/planner.prompt.md"]
-tool_files = ["tools.echo_tool", "tools.file_writer_tool"]
+agent_files = [
+  "agents/planner.py",
+  "agents/researcher.py",
+  "agents/writer.py",
+  "agents/reviewer.py",
+  "agents/publisher.py",
+]
+skill_files = [
+  "skills/planner.prompt.md",
+  "skills/researcher.prompt.md",
+  "skills/writer.prompt.md",
+  "skills/reviewer.prompt.md",
+  "skills/publisher.prompt.md",
+]
+tool_files = ["tools.graph_editor_tool", "tools.echo_tool", "tools.file_writer_tool"]
 
 [llm.default]
 name = "deepseek"

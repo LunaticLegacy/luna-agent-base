@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,17 @@ class ExecutionState:
     rounds: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
     trace: List[Dict[str, Any]] = field(default_factory=list)
+    branch_results: Dict[str, Any] = field(default_factory=dict)
+
+    def clone(self) -> "ExecutionState":
+        """Create a detached copy of the execution state."""
+        return ExecutionState(
+            payload=copy.deepcopy(self.payload),
+            rounds=self.rounds,
+            metadata=copy.deepcopy(self.metadata),
+            trace=[dict(item) for item in self.trace],
+            branch_results=copy.deepcopy(self.branch_results),
+        )
 
 
 @dataclass

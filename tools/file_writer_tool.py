@@ -22,7 +22,10 @@ class FileWriterTool(ToolDefinition):
         if not path_value:
             raise ValueError("file_writer requires a non-empty 'path'.")
         target_path = Path(path_value)
-        content = str(arguments.get("content", ""))
+        content_value = arguments.get("content")
+        if content_value is None:
+            content_value = arguments.get("input", "")
+        content = str(content_value)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(content, encoding="utf-8")
         return {

@@ -1,0 +1,14 @@
+[skill]
+name = "planner_prompt"
+version = "1.0"
+capability = "task_planning"
+description = "Plan and branch a request into parallel work streams."
+content_file = "planner.prompt.md"
+input_schema = { input = "string" }
+output_schema = { objective = "string", branch_intent = "string", next_steps = "array" }
+requires_tools = []
+requires_skills = []
+preconditions = ["A user request is available."]
+postconditions = ["The work is split into at least one actionable plan."]
+failure_policy = "retry"
+parallelizable = true

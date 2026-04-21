@@ -3,8 +3,8 @@ from .config import AgentConfig
 from .core import Core
 from .executor import GraphExecutor
 from .protocols import AgentLike
-from .policy import AgentNode, ExecutionGraph, Node, ToolNode
-from .skills import SkillAsset
+from .policy import AgentNode, Edge, ExecutionGraph, Node, ToolNode
+from .skills import SkillAsset, SkillContract
 from .toodefl import ToolContext, ToolDefinition
 from .results import AgentContextSnapshot, AgentRoundResult, ExecutionState, GraphValidationResult
 
@@ -15,10 +15,12 @@ __all__ = [
     "Node",
     "AgentNode",
     "ToolNode",
+    "Edge",
     "ExecutionGraph",
     "ToolDefinition",
     "ToolContext",
     "SkillAsset",
+    "SkillContract",
     "AgentConfig",
     "AgentContextSnapshot",
     "AgentRoundResult",
