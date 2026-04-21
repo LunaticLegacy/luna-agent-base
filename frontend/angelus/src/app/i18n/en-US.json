@@ -1,0 +1,375 @@
+{
+  "app": {
+    "title": "Angelus Swarm Console",
+    "subtitle": "Inspect runtime status, loaded swarms, graph execution, and direct agent calls."
+  },
+  "hero": {
+    "eyebrow": "Angelus runtime",
+    "lede": "Check runtime status, browse loaded swarms, trigger graph execution, and call agents directly."
+  },
+  "locale": {
+    "label": "Language",
+    "zhCN": "Chinese",
+    "enUS": "English"
+  },
+  "status": {
+    "apiPrefix": "API",
+    "healthPrefix": "Health",
+    "readyPrefix": "Ready",
+    "loadedSwarms": "loaded swarms",
+    "graphValid": "Graph valid",
+    "online": "Online",
+    "offline": "Offline",
+    "ok": "OK",
+    "unknown": "Unknown",
+    "yes": "Yes",
+    "no": "No",
+    "idle": "Idle",
+    "waiting": "Waiting",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "launching": "Launching",
+    "success": "Success",
+    "error": "Error",
+    "info": "Info",
+    "pending": "Pending",
+    "mainBranch": "Main branch",
+    "branchPrefix": "Branch",
+    "itemsSuffix": "items",
+    "factsSuffix": "facts",
+    "keysSuffix": "keys",
+    "countSuffix": "items",
+    "array": "Array",
+    "object": "Object",
+    "string": "String",
+    "number": "Number",
+    "boolean": "Boolean",
+    "null": "Null"
+  },
+  "actions": {
+    "apiBaseUrl": "API base URL",
+    "refreshOverview": "Refresh overview",
+    "reloadSwarm": "Reload swarm",
+    "refreshGraph": "Refresh graph",
+    "zoomOut": "Zoom out",
+    "reset": "Reset",
+    "zoomIn": "Zoom in",
+    "runAgent": "Run agent",
+    "runSwarm": "Start async run"
+  },
+  "overview": {
+    "loadedSwarms": "Loaded swarms",
+    "registry": "Swarm registry",
+    "noSwarms": "No swarms are loaded yet.",
+    "noSwarmsHint": "Make sure the Flask backend is running and the configs under `agents/` are valid."
+  },
+  "swarmDetail": {
+    "selected": "Selected swarm",
+    "noSelection": "No swarm selected",
+    "agents": "agents",
+    "skills": "skills",
+    "tools": "tools",
+    "graph": "graph file",
+    "agentFiles": "Agent files",
+    "validation": "Validation",
+    "noValidationIssues": "No graph validation issues found.",
+    "graphErrors": "Graph errors",
+    "graphWarnings": "Graph warnings"
+  },
+  "graph": {
+    "eyebrow": "Execution graph",
+    "title": "Snapshot and vector graph",
+    "ariaLabel": "Swarm execution graph",
+    "legendLabel": "Legend",
+    "snapshotTab": "Current graph snapshot",
+    "spectrumTab": "Graph spectrum",
+    "noGraph": "No graph is available yet.",
+    "graph": "Graph",
+    "entry": "Entry",
+    "current": "Current",
+    "status": "Status",
+    "none": "None",
+    "idle": "Idle",
+    "vectorSvg": "Vector SVG",
+    "horizontal": "Horizontal",
+    "vertical": "Vertical",
+    "zoom": "Zoom",
+    "branchGroups": "Branch groups",
+    "joinGroups": "Join groups",
+    "unresolvedHints": "Unresolved metadata hints",
+    "rawSnapshot": "Raw graph JSON",
+    "rawSpectrum": "Raw spectrum JSON",
+    "legend": {
+      "entry": "Entry node",
+      "running": "Running node",
+      "completed": "Completed node",
+      "failed": "Failed node",
+      "selected": "Selected node",
+      "edge": "Active edge",
+      "derived": "Derived relation"
+    },
+    "summary": {
+      "nodes": "nodes",
+      "edges": "edges",
+      "branches": "branches",
+      "joins": "joins",
+      "hints": "hints",
+      "branchIndex": "Branch index",
+      "branchSource": "Branch source",
+      "role": "Role",
+      "branchNodes": "Branch nodes",
+      "sources": "Sources"
+    },
+    "semantic": {
+      "branchSource": "Branch source",
+      "branchMember": "Branch member",
+      "joinTarget": "Join target",
+      "node": "Node"
+    },
+    "routePolicyAll": "Route all",
+    "routePolicyFirst": "Sequential",
+    "routePolicyDefault": "Default",
+    "sourcePrefix": "Source",
+    "skillTag": "Skill",
+    "edgeJoin": "Join",
+    "edgeBranchJoin": "Branch join",
+    "unresolvedHintTemplate": "Node {{nodeId}} points to join_node_id={{joinNodeId}}, but the target is not present in the current graph nodes or edges."
+  },
+  "nodeDetail": {
+    "eyebrow": "Node detail",
+    "close": "Close",
+    "rawJson": "Raw node JSON",
+    "fields": {
+      "metadata": "Metadata",
+      "rawMetadata": "Raw metadata",
+      "state": "State",
+      "stateSnapshot": "State snapshot",
+      "finalState": "Final state",
+      "inputPayload": "Input payload",
+      "outputPayload": "Output payload",
+      "payload": "Payload",
+      "rawResponse": "Raw response",
+      "assistantMessage": "Assistant message",
+      "message": "Message",
+      "detail": "Detail",
+      "summary": "Summary",
+      "branchResults": "Branch results",
+      "content": "Content",
+      "nodeName": "Node name",
+      "currentNodeName": "Current node name",
+      "currentNodeType": "Current node type",
+      "manifestPath": "Manifest path",
+      "packagePath": "Package path",
+      "derivedRole": "Derived role",
+      "semanticTags": "Semantic tags",
+      "description": "Description",
+      "inputSchema": "Input schema",
+      "outputSchema": "Output schema",
+      "requiresTools": "Requires tools",
+      "requiresSkills": "Requires skills",
+      "preconditions": "Preconditions",
+      "postconditions": "Postconditions",
+      "additionalPrompt": "Additional prompt",
+      "inputMapping": "Input mapping",
+      "graphFile": "Graph file",
+      "currentNodeId": "Current node ID",
+      "createdAt": "Created at",
+      "startedAt": "Started at",
+      "finishedAt": "Finished at",
+      "httpError": "HTTP error",
+      "node": "Node"
+    },
+    "summary": {
+      "status": "Status",
+      "type": "Type",
+      "role": "Role",
+      "entry": "Entry",
+      "exit": "Exit",
+      "agent": "Agent",
+      "tool": "Tool",
+      "routePolicy": "Route policy",
+      "joinTarget": "Join target",
+      "branchIndex": "Branch index",
+      "next": "Next nodes"
+    },
+    "sections": {
+      "semanticMetadata": "Semantic metadata",
+      "skillMetadata": "Skill metadata",
+      "metadata": "Metadata",
+      "promptAndMapping": "Prompt and mapping"
+    },
+    "chips": {
+      "contract": "Contract",
+      "capability": "Capability",
+      "failure": "Failure policy",
+      "parallel": "Parallel",
+      "serial": "Serial",
+      "skill": "Skill",
+      "branch": "Branch",
+      "branchSource": "Branch source",
+      "warning": "Warning"
+    },
+    "warnings": {
+      "unknownKey": "Unknown metadata key preserved: {{key}}",
+      "routePolicy": "route_policy={{value}} is not recognized; default routing will be used.",
+      "joinNodeMissing": "join_node_id={{value}} does not point to a node in the current graph.",
+      "runtimeBranchSource": "Runtime branch-source metadata was observed, but no explicit branch_index was present.",
+      "inputSchema": "input_schema exists, but it is not a JSON object.",
+      "outputSchema": "output_schema exists, but it is not a JSON object."
+    }
+  },
+  "workbench": {
+    "eyebrow": "Execution workbench",
+    "title": "Direct agent call and swarm run",
+    "agentTab": "Direct agent call",
+    "swarmTab": "Run selected swarm",
+    "input": "Input",
+    "output": "Output",
+    "feedback": "Execution feedback"
+  },
+  "feedback": {
+    "agent": {
+      "runningTitle": "Agent call in progress",
+      "runningMessage": "Processing the direct agent request.",
+      "successTitle": "Agent call completed",
+      "successMessage": "The latest agent response is ready.",
+      "errorTitle": "Agent call failed",
+      "errorMessage": "The direct agent request could not be completed.",
+      "idleTitle": "Ready to call agent",
+      "idleMessage": "Fill in the input to start a direct agent request."
+    },
+    "swarm": {
+      "launchingTitle": "Swarm run launching",
+      "launchingMessage": "Submitting the async swarm run request.",
+      "successTitle": "Swarm run completed",
+      "successMessage": "The swarm completed successfully.",
+      "finishedAtTemplate": "Finished at: {{time}}.",
+      "errorTitle": "Swarm run failed",
+      "errorMessage": "The swarm run encountered an error.",
+      "liveTitle": "Swarm run live",
+      "liveMessage": "Waiting for live execution events.",
+      "idleTitle": "Ready to run swarm",
+      "idleMessage": "Fill in the swarm input to start an async run."
+    },
+    "progress": {
+      "eventsReceived": "Received {{count}} live events."
+    }
+  },
+  "messages": {
+    "selectSwarmToRun": "Please select a swarm before running.",
+    "taskRequired": "A task is required before starting a run.",
+    "selectSwarmToRunAgent": "Please select a swarm before running an agent.",
+    "swarmHasNoAgents": "The selected swarm has no available agents.",
+    "liveStreamDisconnected": "The live run stream has disconnected.",
+    "inspectCurrentRequest": "Please inspect the current request and decide the most appropriate next action."
+  },
+  "errors": {
+    "httpError": "HTTP error"
+  },
+  "agent": {
+    "summary": {
+      "agent": "Agent",
+      "swarm": "Swarm",
+      "rounds": "Rounds",
+      "backend": "Backend",
+      "mode": "Mode"
+    },
+    "mode": "Input",
+    "input": {
+      "agent": "Agent",
+      "message": "Message",
+      "additionalPrompt": "Additional prompt",
+      "rounds": "Rounds",
+      "selectedSwarm": "Selected swarm",
+      "run": "Run agent"
+    },
+    "output": {
+      "result": "Result",
+      "context": "Context",
+      "rawJson": "Raw agent JSON",
+      "noRound": "No agent rounds yet."
+    },
+    "placeholders": {
+      "message": "Briefly describe what you want the agent to do.",
+      "additionalPrompt": "Add any extra context here if needed.",
+      "selectedSwarm": "No swarm selected"
+    }
+  },
+  "swarm": {
+    "summary": {
+      "run": "Run",
+      "status": "Status",
+      "rounds": "Rounds",
+      "events": "Events"
+    },
+    "input": {
+      "task": "Task",
+      "context": "Context",
+      "audience": "Audience",
+      "outputFormat": "Output format",
+      "constraints": "Constraints",
+      "primaryAgent": "Primary agent",
+      "rounds": "Rounds",
+      "start": "Start async run",
+      "preview": "Payload preview JSON"
+    },
+    "output": {
+      "currentState": "Current state",
+      "finalState": "Final state",
+      "liveEvents": "Live events",
+      "rawRunJson": "Raw run JSON",
+      "noRun": "No run records yet."
+    },
+    "placeholders": {
+      "task": "What should the swarm do?",
+      "context": "Background, scope, or special notes.",
+      "audience": "General audience",
+      "outputFormat": "A Markdown summary with headings and bullet points.",
+      "constraints": "One constraint per line, for example: keep it concise"
+    }
+  },
+  "payload": {
+    "summary": {
+      "mode": "Mode",
+      "shape": "Shape",
+      "fields": "Fields"
+    },
+    "mode": "Input draft",
+    "title": "Generated payload"
+  },
+  "trace": {
+    "titlePrefix": "Trace",
+    "rawJson": "Raw trace JSON",
+    "status": "Status",
+    "branch": "Branch",
+    "type": "Type"
+  },
+  "events": {
+    "runStarted": "Run started",
+    "runCompleted": "Run completed",
+    "runFailed": "Run failed",
+    "nodeStarted": "Node started",
+    "nodeCompleted": "Node completed",
+    "nodeFailed": "Node failed",
+    "branchStarted": "Branch started",
+    "branchCompleted": "Branch completed",
+    "branchFailed": "Branch failed"
+  },
+  "labels": {
+    "health": "Health",
+    "ready": "Ready",
+    "graph": "Graph",
+    "agents": "Agents",
+    "skills": "Skills",
+    "tools": "Tools",
+    "entry": "Entry",
+    "current": "Current",
+    "status": "Status",
+    "next": "Next",
+    "agent": "Agent",
+    "tool": "Tool",
+    "runId": "Run ID",
+    "swarm": "Swarm"
+  }
+}
