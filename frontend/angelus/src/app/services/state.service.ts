@@ -4,13 +4,16 @@ import { ApiService } from '../api.service';
 import type {
   AgentCatalogItem,
   ApiIndexResponse,
+  EventCatalogItem,
   GraphSnapshot,
   HealthResponse,
+  LogCatalogItem,
   TaskCatalogItem,
   ReadyResponse,
   RunSnapshot,
   SwarmDetails,
   SwarmSummary,
+  SwarmStatsResponse,
   ToolCatalogItem,
 } from '../api.types';
 import { asJsonValue, normalizeJsonValue, valuePreview } from '../json-utils';
@@ -204,6 +207,12 @@ export class StateService {
   readonly tasksLoaded = signal(false);
   readonly tools = signal<ToolItem[]>([]);
   readonly toolsLoaded = signal(false);
+  readonly swarmStats = signal<SwarmStatsResponse | null>(null);
+  readonly swarmStatsLoaded = signal(false);
+  readonly events = signal<EventItem[]>([]);
+  readonly eventsLoaded = signal(false);
+  readonly logs = signal<LogItem[]>([]);
+  readonly logsLoaded = signal(false);
 
   private readonly feedId = signal(0);
   private eventSource: EventSource | null = null;
@@ -330,6 +339,7 @@ export class StateService {
   });
 
   readonly derivedEvents = computed<EventItem[]>(() => {
+    if (this.eventsLoaded()) return this.events();
     const feed = this.responseFeed();
     const live = this.liveEvents();
     const all = [...live, ...feed];
@@ -355,6 +365,7 @@ export class StateService {
   });
 
   readonly derivedLogs = computed<LogItem[]>(() => {
+    if (this.logsLoaded()) return this.logs();
     return this.responseFeed().map(item => ({
       id: `log-${item.id}`,
       time: item.timestamp,
@@ -454,6 +465,15 @@ export class StateService {
   });
 
   readonly swarmMgmtStats = computed(() => {
+    const stats = this.swarmStats();
+    if (this.swarmStatsLoaded() && stats) {
+      return {
+        successRate: Math.round(stats.success_rate),
+        throughput: stats.throughput,
+        tokenUsage: `${Math.round(stats.token_usage / 1000)}K`,
+        taskCount: stats.task_distribution.completed + stats.task_distribution.running + stats.task_distribution.pending,
+      };
+    }
     const run = this.activeRun();
     return {
       successRate: run?.status === 'completed' ? 100 : run?.status === 'failed' ? 0 : 98,
@@ -537,6 +557,28 @@ export class StateService {
     };
   }
 
+  private mapEventCatalogItem(item: EventCatalogItem): EventItem {
+    return {
+      id: item.id,
+      time: item.time,
+      level: item.level,
+      source: item.source,
+      event: item.event,
+      detail: item.detail,
+      data: item.data,
+    };
+  }
+
+  private mapLogCatalogItem(item: LogCatalogItem): LogItem {
+    return {
+      id: item.id,
+      time: item.time,
+      level: item.level,
+      service: item.service,
+      message: item.message,
+    };
+  }
+
   constructor(private readonly apiService: ApiService) {}
 
   init(destroyRef: DestroyRef): void {
@@ -606,6 +648,10 @@ export class StateService {
           this.selectedSwarmName.set(swarmResult.value.swarms[0]?.swarm_name ?? null);
         }
       } else { issues.push(errorSummary(swarmResult.reason)); }
+      await Promise.allSettled([
+        this.loadEvents(),
+        this.loadLogs(),
+      ]);
       if (this.selectedSwarmName()) {
         await this.reloadSelectedSwarm({ clearError: false });
       } else {
@@ -617,6 +663,8 @@ export class StateService {
         this.tasksLoaded.set(true);
         this.tools.set([]);
         this.toolsLoaded.set(true);
+        this.swarmStats.set(null);
+        this.swarmStatsLoaded.set(false);
       }
       if (issues.length > 0) this.error.set({ summary: issues.join(' · '), message: issues.join('\n'), timestamp: new Date().toISOString() });
     } catch (error) { this.error.set(formatErrorDetail(error)); }
@@ -634,6 +682,8 @@ export class StateService {
       this.tasksLoaded.set(true);
       this.tools.set([]);
       this.toolsLoaded.set(true);
+      this.swarmStats.set(null);
+      this.swarmStatsLoaded.set(false);
       return;
     }
     this.loadingDetails.set(true);
@@ -649,6 +699,7 @@ export class StateService {
         this.loadAgents(),
         this.loadTasks(),
         this.loadTools(),
+        this.loadSwarmStats(),
       ]);
     } catch (error) { this.error.set(formatErrorDetail(error)); this.selectedSwarm.set(null); this.selectedGraph.set(null); }
     finally { this.loadingDetails.set(false); }
@@ -721,6 +772,48 @@ export class StateService {
     } catch (error) {
       this.error.set(formatErrorDetail(error));
       this.pushFeed('Tools 列表失败', 'GET', `${this.baseUrl()}/tools`, 'error', { error: errorSummary(error) });
+    }
+  }
+
+  async loadSwarmStats(): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.swarmStats.set(null);
+      this.swarmStatsLoaded.set(false);
+      return;
+    }
+    try {
+      const response = await this.apiService.getSwarmStats(this.baseUrl(), swarmName);
+      this.swarmStats.set(response);
+      this.swarmStatsLoaded.set(true);
+      this.pushFeed(`Swarm 统计 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'info', response);
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`Swarm 统计失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'error', { error: errorSummary(error) });
+    }
+  }
+
+  async loadEvents(): Promise<void> {
+    try {
+      const response = await this.apiService.listEvents(this.baseUrl(), { page: 1, limit: 200 });
+      this.events.set(response.items.map((item) => this.mapEventCatalogItem(item)));
+      this.eventsLoaded.set(true);
+      this.pushFeed('事件列表', 'GET', `${this.baseUrl()}/events`, 'info', response);
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('事件列表失败', 'GET', `${this.baseUrl()}/events`, 'error', { error: errorSummary(error) });
+    }
+  }
+
+  async loadLogs(): Promise<void> {
+    try {
+      const response = await this.apiService.listLogs(this.baseUrl(), { page: 1, limit: 200 });
+      this.logs.set(response.items.map((item) => this.mapLogCatalogItem(item)));
+      this.logsLoaded.set(true);
+      this.pushFeed('日志列表', 'GET', `${this.baseUrl()}/logs`, 'info', response);
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('日志列表失败', 'GET', `${this.baseUrl()}/logs`, 'error', { error: errorSummary(error) });
     }
   }
 
