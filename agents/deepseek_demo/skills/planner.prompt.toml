@@ -2,11 +2,11 @@
 name = "planner_prompt"
 version = "1.0"
 capability = "runtime_orchestration_planning"
-description = "Produce a JSON control plan for content preservation, agent spawning, and live graph surgery."
+description = "Produce a compact mission brief and branch plan for the demo swarm."
 content_file = "planner.prompt.md"
 input_schema = { input = "string" }
-output_schema = { content = "string", spawn = "object", graph_edit = "object", cleanup = "object" }
-requires_tools = ["agent_manager", "graph_editor"]
+output_schema = { content = "string", plan = "object" }
+requires_tools = []
 requires_skills = []
 preconditions = ["A user request is available.", "The runtime graph is loaded."]
 postconditions = ["A structured control plan is ready for runtime execution."]

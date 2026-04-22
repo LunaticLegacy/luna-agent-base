@@ -2,13 +2,13 @@
 name = "reviewer_prompt"
 version = "1.0"
 capability = "review_and_route"
-description = "Review the draft and emit a graph edit instruction."
+description = "Review the draft and emit a routing decision for the demo workflow."
 content_file = "reviewer.prompt.md"
 input_schema = { input = "string" }
-output_schema = { action = "string", from_node_id = "int", to_node_ids = "array", next_node_id = "int", reason = "string" }
-requires_tools = ["graph_editor"]
+output_schema = { verdict = "string", branch = "string", feedback = "string", content = "string", next_node_ids = "array" }
+requires_tools = []
 requires_skills = ["writer_prompt"]
 preconditions = ["A draft or merged branch payload is available."]
-postconditions = ["The graph editor can apply the routing instruction."]
+postconditions = ["The executor can follow the routing instruction."]
 failure_policy = "retry"
 parallelizable = false
