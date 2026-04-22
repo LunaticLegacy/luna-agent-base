@@ -10,8 +10,6 @@ To start a local development server, run:
 ng serve
 ```
 
-The Angular dev server proxies `/api` to the Flask backend at `http://127.0.0.1:5000`. The backend also exposes its API under `/api`, so the UI and backend share the same API root.
-
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
 
 ## Code scaffolding
