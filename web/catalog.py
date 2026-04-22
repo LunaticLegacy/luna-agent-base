@@ -156,6 +156,13 @@ def _tool_schema(tool: Any) -> Dict[str, Any]:
     return to_jsonable(schema or {})
 
 
+def _tool_source_mtime(tool: Any) -> str:
+    try:
+        return _file_mtime_iso(Path(inspect.getfile(tool.__class__)))
+    except Exception:
+        return datetime.now(timezone.utc).isoformat()
+
+
 def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str, Any]]:
     index: Dict[Tuple[str, int], Dict[str, Any]] = defaultdict(
         lambda: {
@@ -250,14 +257,23 @@ def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str
     return index
 
 
+def _entry_active_run_ids(entry: Dict[str, Any]) -> set[Any]:
+    active = entry.get("active_run_ids")
+    if isinstance(active, set):
+        return active
+    if isinstance(active, list):
+        return set(active)
+    return set()
+
+
 def _node_status(entry: Dict[str, Any]) -> str:
-    if entry["active_run_ids"]:
+    if _entry_active_run_ids(entry):
         return "running"
-    if entry["failed"] > 0 and entry["completed"] == 0:
+    if int(entry.get("failed", 0) or 0) > 0 and int(entry.get("completed", 0) or 0) == 0:
         return "failed"
-    if entry["completed"] > 0:
+    if int(entry.get("completed", 0) or 0) > 0:
         return "success"
-    if entry["executions"] == 0:
+    if int(entry.get("executions", 0) or 0) == 0:
         return "pending"
     return "pending"
 
@@ -492,13 +508,14 @@ def build_agent_catalog(swarm, runs: Iterable[Any]) -> tuple[List[Dict[str, Any]
         executions = int(entry.get("executions", 0) or 0)
         completed = int(entry.get("completed", 0) or 0)
         failed = int(entry.get("failed", 0) or 0)
+        active_run_ids = _entry_active_run_ids(entry)
         avg_response_time_ms = 0
         if completed > 0:
             avg_response_time_ms = int(round(float(entry.get("total_duration_ms", 0.0)) / completed))
         elif node is not None:
             avg_response_time_ms = 300 + len(_agent_capabilities(agent_id, node, agent)) * 25
         success_rate = 100.0 if executions == 0 else round((completed / max(executions, 1)) * 100.0, 1)
-        status = "busy" if entry.get("active_run_ids") else ("error" if failed and not completed else ("offline" if executions == 0 else "online"))
+        status = "busy" if active_run_ids else ("error" if failed and not completed else ("offline" if executions == 0 else "online"))
         token_usage = _estimate_token_usage(agent) + (executions * 1200)
         last_activity = entry.get("last_seen") or graph_mtime
         role = _agent_role(agent_id, node)
@@ -543,16 +560,17 @@ def _build_task_item(
     executions = int(entry.get("executions", 0) or 0)
     completed = int(entry.get("completed", 0) or 0)
     failed = int(entry.get("failed", 0) or 0)
+    active_run_ids = _entry_active_run_ids(entry)
     status = _node_status(entry)
-    if isinstance(node, AgentNode) and entry.get("active_run_ids"):
+    if isinstance(node, AgentNode) and active_run_ids:
         status = "running"
-    elif isinstance(node, AgentNode) and executions == 0 and not entry.get("active_run_ids"):
+    elif isinstance(node, AgentNode) and executions == 0 and not active_run_ids:
         status = "pending"
 
     avg_duration_ms = 0
     if completed > 0:
         avg_duration_ms = int(round(float(entry.get("total_duration_ms", 0.0)) / completed))
-    elif entry.get("active_run_ids") and entry.get("last_started"):
+    elif active_run_ids and entry.get("last_started"):
         started = _parse_iso_timestamp(entry.get("last_started"))
         if started is not None:
             avg_duration_ms = int(max(0.0, (datetime.now(timezone.utc) - started).total_seconds() * 1000.0))
@@ -727,7 +745,7 @@ def build_tool_catalog(
                 avg_ms = 80 + executions * 5
             tool_type = _tool_type(tool)
             status_value = "online" if failed == 0 else "error"
-            last_call = entry.get("last_seen") or _file_mtime_iso(Path(inspect.getfile(tool.__class__)))
+            last_call = entry.get("last_seen") or _tool_source_mtime(tool)
             item = {
                 "id": f"{loaded_swarm.manifest.swarm_name}:{tool_name}",
                 "name": getattr(tool, "tool_name", tool_name),
@@ -740,7 +758,7 @@ def build_tool_catalog(
                 "last_call": last_call,
                 "success_rate": 100.0 if executions == 0 else round((completed / max(executions, 1)) * 100.0, 1),
                 "error_rate": 0.0 if executions == 0 else round((failed / max(executions, 1)) * 100.0, 1),
-                "created_at": _file_mtime_iso(Path(inspect.getfile(tool.__class__))),
+                "created_at": _tool_source_mtime(tool),
                 "schema": _tool_schema(tool),
             }
             if normalized_type and item["type"].lower() != normalized_type:

@@ -54,11 +54,53 @@ def _parse_bool(raw, default: bool = False) -> bool:
     return default
 
 
-@swarms_bp.get("/")
-def list_swarms():
-    registry = _get_runtime_registry()
-    payload = [_serialize_swarm_with_runtime(swarm) for swarm in registry.swarms.values()]
-    return jsonify({"success": True, "swarms": payload})
+async def _execute_swarm_run(swarm_name: str, *, use_background: bool = False):
+    swarm = _get_swarm_or_404(swarm_name)
+    graph = swarm.core.get_execution_graph()
+    if graph is None:
+        raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
+
+    request_data = request.get_json(silent=True) or {}
+    payload = request_data.get("input")
+    rounds = int(request_data.get("rounds", 0))
+    meta_mode = bool(request_data.get("meta_mode", False))
+
+    if use_background:
+        record = _get_runs_registry().launch_run(
+            swarm_name=swarm_name,
+            core=swarm.core,
+            graph=graph,
+            initial_payload=payload,
+            rounds=rounds,
+            meta_mode=meta_mode,
+        )
+        return jsonify(
+            {
+                "success": True,
+                "status": "started",
+                "swarm": swarm_name,
+                "run": record.snapshot(),
+            }
+        ), 202
+
+    if meta_mode:
+        from core.meta_executor import MetaExecutor
+
+        meta = MetaExecutor(max_iterations=5)
+        state = await meta.run(graph, swarm.core, payload, rounds=rounds)
+    else:
+        state = await graph.run(swarm.core, payload, rounds=rounds)
+
+    return jsonify(
+        {
+            "success": True,
+            "swarm": swarm_name,
+            "rounds": state.rounds,
+            "output": to_jsonable(state.payload),
+            "trace": to_jsonable(state.trace),
+            "metadata": to_jsonable(state.metadata),
+        }
+    )
 
 
 @swarms_bp.post("/load")
@@ -97,63 +139,22 @@ def get_swarm_graph(swarm_name: str):
 
 @swarms_bp.post("/<string:swarm_name>/run")
 async def run_swarm(swarm_name: str):
-    swarm = _get_swarm_or_404(swarm_name)
-    graph = swarm.core.get_execution_graph()
-    if graph is None:
-        raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
+    return await _execute_swarm_run(swarm_name)
 
-    request_data = request.get_json(silent=True) or {}
-    payload = request_data.get("input")
-    rounds = int(request_data.get("rounds", 0))
-    meta_mode = bool(request_data.get("meta_mode", False))
 
-    if meta_mode:
-        from core.meta_executor import MetaExecutor
-
-        meta = MetaExecutor(max_iterations=5)
-        state = await meta.run(graph, swarm.core, payload, rounds=rounds)
-    else:
-        state = await graph.run(swarm.core, payload, rounds=rounds)
-
-    return jsonify(
-        {
-            "success": True,
-            "swarm": swarm_name,
-            "rounds": state.rounds,
-            "output": to_jsonable(state.payload),
-            "trace": to_jsonable(state.trace),
-            "metadata": to_jsonable(state.metadata),
-        }
-    )
+@swarms_bp.post("/<string:swarm_name>/start")
+async def start_swarm(swarm_name: str):
+    return await _execute_swarm_run(swarm_name)
 
 
 @swarms_bp.post("/<string:swarm_name>/runs")
-def start_swarm_run(swarm_name: str):
-    swarm = _get_swarm_or_404(swarm_name)
-    graph = swarm.core.get_execution_graph()
-    if graph is None:
-        raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
+async def start_swarm_run(swarm_name: str):
+    return await _execute_swarm_run(swarm_name, use_background=True)
 
-    request_data = request.get_json(silent=True) or {}
-    payload = request_data.get("input")
-    rounds = int(request_data.get("rounds", 0))
-    meta_mode = bool(request_data.get("meta_mode", False))
-    record = _get_runs_registry().launch_run(
-        swarm_name=swarm_name,
-        core=swarm.core,
-        graph=graph,
-        initial_payload=payload,
-        rounds=rounds,
-        meta_mode=meta_mode,
-    )
-    return jsonify(
-        {
-            "success": True,
-            "status": "started",
-            "swarm": swarm_name,
-            "run": record.snapshot(),
-        }
-    ), 202
+
+@swarms_bp.post("/<string:swarm_name>/start/background")
+async def start_swarm_background(swarm_name: str):
+    return await _execute_swarm_run(swarm_name, use_background=True)
 
 
 @swarms_bp.get("/runs/<string:run_id>")
