@@ -37,8 +37,8 @@ import { GraphViewerComponent } from '../graph-viewer.component';
               </div>
             }
           </div>
-          <button class="btn btn-danger" (click)="state.activeRun() && state.runSwarmSync()" [disabled]="!state.activeRun()">
-            停止 Swarm
+          <button class="btn btn-secondary" (click)="state.activeRun() && state.startSwarmStructure()" [disabled]="!state.activeRun()">
+            重新启动结构
           </button>
         </div>
       </div>
@@ -84,6 +84,26 @@ import { GraphViewerComponent } from '../graph-viewer.component';
         }
       </div>
 
+      @switch (activeTab()) {
+        @case ('概览') {
+
+      <!-- Topology Canvas -->
+      <div class="panel-card topology-canvas">
+        <div class="panel-header">
+          <h3>Swarm 拓扑</h3>
+          <div class="panel-actions">
+            <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
+          </div>
+        </div>
+        <div class="topology-graph">
+          @if (state.resolvedGraph()) {
+            <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
+          } @else {
+            <div class="empty-state">暂无拓扑数据</div>
+          }
+        </div>
+      </div>
+
       <!-- Main Content Grid -->
       <div class="main-grid">
         <!-- Left: Node Type Legend -->
@@ -92,50 +112,18 @@ import { GraphViewerComponent } from '../graph-viewer.component';
             <h3>节点图例</h3>
           </div>
           <div class="legend-list">
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#8B5CF6"></span>
-              <span class="legend-name">Coordinator</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#10B981"></span>
-              <span class="legend-name">Worker</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#3b82f6"></span>
-              <span class="legend-name">Specialist</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#f59e0b"></span>
-              <span class="legend-name">Reviewer</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#ef4444"></span>
-              <span class="legend-name">Fallback</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-line"></span>
-              <span class="legend-name">数据流</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-line dashed"></span>
-              <span class="legend-name">控制流</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Center: Topology -->
-        <div class="panel-card topology-panel">
-          <div class="panel-header">
-            <h3>Swarm 拓扑</h3>
-            <div class="panel-actions">
-              <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
-            </div>
-          </div>
-          <div class="topology-graph">
-            @if (state.selectedGraph()) {
-              <app-graph-viewer [graph]="state.selectedGraph()"></app-graph-viewer>
-            } @else {
-              <div class="empty-state">暂无拓扑数据</div>
+            @for (item of state.topologyLegendItems(); track item.label) {
+              <div class="legend-item">
+                @if (item.kind === 'dot') {
+                  <span class="legend-dot" [style.background]="item.color"></span>
+                } @else if (item.kind === 'dashed') {
+                  <span class="legend-line dashed" [style.background]="item.color"></span>
+                } @else {
+                  <span class="legend-line" [style.background]="item.color"></span>
+                }
+                <span class="legend-name">{{ item.label }}</span>
+                <span class="legend-detail">{{ item.detail }}</span>
+              </div>
             }
           </div>
         </div>
@@ -181,21 +169,13 @@ import { GraphViewerComponent } from '../graph-viewer.component';
               <h3>资源使用趋势</h3>
             </div>
             <div class="chart-body">
-              <div class="mini-spark">
-                <div class="mini-label">CPU</div>
-                <div class="mini-bar"><div class="mini-fill" [style.width.%]="35"></div></div>
-                <div class="mini-val">35%</div>
-              </div>
-              <div class="mini-spark">
-                <div class="mini-label">内存</div>
-                <div class="mini-bar"><div class="mini-fill success" [style.width.%]="52"></div></div>
-                <div class="mini-val">52%</div>
-              </div>
-              <div class="mini-spark">
-                <div class="mini-label">网络</div>
-                <div class="mini-bar"><div class="mini-fill" [style.width.%]="18"></div></div>
-                <div class="mini-val">18%</div>
-              </div>
+              @for (item of state.swarmMgmtResourceTrends(); track item.label) {
+                <div class="mini-spark">
+                  <div class="mini-label">{{ item.label }}</div>
+                  <div class="mini-bar"><div class="mini-fill" [style.width.%]="item.fill" [style.background]="item.color"></div></div>
+                  <div class="mini-val">{{ item.value }}</div>
+                </div>
+              }
             </div>
           </div>
 
@@ -204,14 +184,17 @@ import { GraphViewerComponent } from '../graph-viewer.component';
               <h3>任务状态分布</h3>
             </div>
             <div class="donut-body">
-              <div class="donut-chart">
+              <div class="donut-chart" [style.background]="state.swarmMgmtTaskGradient()">
                 <div class="donut-ring"></div>
                 <div class="donut-center">{{ state.swarmMgmtStats().taskCount }}</div>
               </div>
               <div class="donut-legend">
-                <div class="dl-item"><span class="dl-dot" style="background:#10B981"></span>成功 65%</div>
-                <div class="dl-item"><span class="dl-dot" style="background:#f59e0b"></span>运行中 25%</div>
-                <div class="dl-item"><span class="dl-dot" style="background:#ef4444"></span>失败 10%</div>
+                @for (slice of state.swarmMgmtTaskSlices(); track slice.label) {
+                  <div class="dl-item">
+                    <span class="dl-dot" [style.background]="slice.color"></span>
+                    {{ slice.label }} {{ slice.percentage }}%
+                  </div>
+                }
               </div>
             </div>
           </div>
@@ -248,7 +231,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
                     </td>
                     <td>{{ state.activeRun()?.started_at || '刚刚' }}</td>
                     <td>
-                      <button class="btn btn-sm" (click)="state.runSwarmSync()">查看</button>
+                      <button class="btn btn-sm" (click)="state.startSwarmStructure()">启动结构</button>
                     </td>
                   </tr>
                 } @else {
@@ -283,6 +266,132 @@ import { GraphViewerComponent } from '../graph-viewer.component';
           </div>
         </div>
       </div>
+        }
+        @case ('拓扑视图') {
+          <div class="panel-card topology-canvas topology-fullscreen">
+            <div class="panel-header">
+              <h3>Swarm 拓扑</h3>
+              <div class="panel-actions">
+                <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
+              </div>
+            </div>
+            <div class="topology-graph">
+              @if (state.resolvedGraph()) {
+                <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
+              } @else {
+                <div class="empty-state">暂无拓扑数据</div>
+              }
+            </div>
+          </div>
+        }
+        @case ('Agents') {
+          <div class="tab-content">
+            <div class="panel-card">
+              <div class="panel-header"><h3>Agent 列表</h3><span class="badge">{{ state.derivedAgents().length }}</span></div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>ID</th><th>状态</th><th>类型</th><th>任务执行</th><th>成功率</th><th>响应时间</th><th>最后活动</th></tr></thead>
+                  <tbody>
+                    @for (agent of state.derivedAgents(); track agent.id) {
+                      <tr><td class="mono">{{ agent.id }}</td>
+                      <td><span class="pill" [class.online]="agent.status==='online'" [class.busy]="agent.status==='busy'" [class.error]="agent.status==='error'">{{ agent.status }}</span></td>
+                      <td>{{ agent.type }}</td><td>{{ agent.tasksExecuted }}</td><td>{{ agent.successRate }}%</td><td>{{ agent.avgResponseTime }}</td><td>{{ agent.lastActivity }}</td></tr>
+                    } @empty { <tr><td colspan="7" class="empty-cell">暂无 Agent</td></tr> }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        }
+        @case ('任务') {
+          <div class="tab-content">
+            <div class="panel-card">
+              <div class="panel-header"><h3>任务列表</h3><span class="badge">{{ state.derivedTasks().length }}</span></div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>优先级</th><th>执行者</th><th>耗时</th></tr></thead>
+                  <tbody>
+                    @for (task of state.derivedTasks(); track task.id) {
+                      <tr><td class="mono">{{ task.id }}</td><td>{{ task.name }}</td>
+                      <td><span class="pill" [class.running]="task.status==='running'" [class.success]="task.status==='success'" [class.failed]="task.status==='failed'">{{ task.status }}</span></td>
+                      <td>{{ task.priority }}</td><td>{{ task.executor }}</td><td>{{ task.duration }}</td></tr>
+                    } @empty { <tr><td colspan="6" class="empty-cell">暂无任务</td></tr> }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        }
+        @case ('活动') {
+          <div class="tab-content">
+            <div class="panel-card">
+              <div class="panel-header"><h3>活动记录</h3><span class="badge">{{ state.derivedEvents().length }}</span></div>
+              <div class="activity-list">
+                @for (ev of state.derivedEvents(); track ev.id) {
+                  <div class="activity-item">
+                    <div class="activity-icon" [class.success]="ev.level==='info'" [class.error]="ev.level==='error'">{{ ev.level.charAt(0).toUpperCase() }}</div>
+                    <div class="activity-body">
+                      <div class="activity-title">{{ ev.source }} — {{ ev.event }}</div>
+                      <div class="activity-desc">{{ ev.detail }}</div>
+                      <div class="activity-time">{{ ev.time }}</div>
+                    </div>
+                  </div>
+                } @empty { <div class="empty-state">暂无活动记录</div> }
+              </div>
+            </div>
+          </div>
+        }
+        @case ('知识') {
+          <div class="tab-content">
+            <div class="panel-card">
+              <div class="panel-header"><h3>知识条目</h3><span class="badge">{{ state.derivedKnowledge().length }}</span></div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>ID</th><th>标题</th><th>类型</th><th>来源</th><th>状态</th></tr></thead>
+                  <tbody>
+                    @for (entry of state.derivedKnowledge(); track entry.id) {
+                      <tr><td class="mono">{{ entry.id }}</td><td>{{ entry.title }}</td><td>{{ entry.type }}</td><td>{{ entry.source }}</td><td><span class="pill active">{{ entry.status }}</span></td></tr>
+                    } @empty { <tr><td colspan="5" class="empty-cell">暂无知识条目</td></tr> }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        }
+        @case ('记忆') {
+          <div class="tab-content">
+            <div class="panel-card">
+              <div class="panel-header"><h3>记忆列表</h3><span class="badge">{{ state.derivedMemories().length }}</span></div>
+              <div class="activity-list">
+                @for (mem of state.derivedMemories(); track mem.id) {
+                  <div class="activity-item">
+                    <div class="activity-body">
+                      <div class="activity-title">{{ mem.summary }}</div>
+                      <div class="activity-desc">{{ mem.content.slice(0, 120) }}...</div>
+                      <div class="activity-time">{{ mem.timestamp }} · {{ mem.type }} · 重要性 {{ mem.importance }}</div>
+                    </div>
+                  </div>
+                } @empty { <div class="empty-state">暂无记忆</div> }
+              </div>
+            </div>
+          </div>
+        }
+        @case ('设置') {
+          <div class="tab-content">
+            <div class="panel-card">
+              <div class="panel-header"><h3>Swarm 设置</h3></div>
+              <div class="info-body">
+                <div class="info-row"><span class="info-key">Swarm 名称</span><span class="info-val">{{ state.selectedSwarmName() || '—' }}</span></div>
+                <div class="info-row"><span class="info-key">Graph 文件</span><span class="info-val mono">{{ state.selectedSwarm()?.graph_file || '—' }}</span></div>
+                <div class="info-row"><span class="info-key">Agent 数量</span><span class="info-val">{{ state.selectedSwarm()?.agent_count ?? 0 }}</span></div>
+                <div class="info-row"><span class="info-key">技能数量</span><span class="info-val">{{ state.selectedSwarm()?.skill_count ?? 0 }}</span></div>
+                <div class="info-row"><span class="info-key">工具数量</span><span class="info-val">{{ state.selectedSwarm()?.tool_count ?? 0 }}</span></div>
+                <div class="info-row"><span class="info-key">Graph 有效</span><span class="info-val">{{ state.selectedSwarm()?.graph_valid ? '是' : '否' }}</span></div>
+              </div>
+            </div>
+          </div>
+        }
+      }
     </div>
   `,
   styles: [`
@@ -424,8 +533,8 @@ import { GraphViewerComponent } from '../graph-viewer.component';
     }
     .main-grid {
       display: grid;
-      grid-template-columns: 200px 1fr 280px;
-      gap: 16px;
+      grid-template-columns: 240px 1fr;
+      gap: 24px;
       margin-bottom: 20px;
     }
     .panel-card {
@@ -465,6 +574,15 @@ import { GraphViewerComponent } from '../graph-viewer.component';
       font-size: 13px;
       color: #cbd5e1;
     }
+    .legend-name {
+      flex: 0 0 auto;
+    }
+    .legend-detail {
+      margin-left: auto;
+      color: #94a3b8;
+      font-size: 12px;
+      white-space: nowrap;
+    }
     .legend-dot {
       width: 12px;
       height: 12px;
@@ -481,14 +599,41 @@ import { GraphViewerComponent } from '../graph-viewer.component';
       background: repeating-linear-gradient(90deg, #94a3b8, #94a3b8 4px, transparent 4px, transparent 8px);
       height: 2px;
     }
-    .topology-panel { display: flex; flex-direction: column; }
+    .topology-canvas {
+      display: flex;
+      flex-direction: column;
+      height: 600px;
+      margin-bottom: 18px;
+      background: #131827;
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .topology-canvas .panel-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid rgba(148,163,184,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
     .topology-graph {
       flex: 1;
-      min-height: 320px;
-      background: #0f1525;
+      background: #0a0e1a;
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
+      min-height: 0;
+      padding: 12px;
+    }
+    .topology-graph app-graph-viewer {
+      width: 100%;
+      height: 100%;
+      display: block;
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
     }
     .right-stack { display: flex; flex-direction: column; gap: 16px; }
     .info-body { padding: 12px 18px; }
@@ -603,6 +748,8 @@ import { GraphViewerComponent } from '../graph-viewer.component';
     }
     .data-table tr:hover td { background: rgba(148,163,184,0.03); }
     .mono { font-family: monospace; font-size: 12px; }
+    .tab-content { padding: 16px 0; }
+    .topology-fullscreen { height: calc(100vh - 220px); min-height: 480px; }
     .pill {
       display: inline-block;
       padding: 2px 8px;
@@ -612,6 +759,11 @@ import { GraphViewerComponent } from '../graph-viewer.component';
     }
     .pill.running { background: rgba(245,158,11,0.15); color: #f59e0b; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
+    .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
+    .pill.busy { background: rgba(139,92,246,0.15); color: #a78bfa; }
+    .pill.error { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .pill.failed { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .pill.active { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .progress-bar {
       width: 80px;
       height: 6px;

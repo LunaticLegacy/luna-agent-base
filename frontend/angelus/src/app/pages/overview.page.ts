@@ -49,7 +49,7 @@ import { MiniChartComponent } from '../components/mini-chart.component';
         </div>
         <div class="stat-card">
           <div class="stat-label">Graph状态</div>
-          <div class="stat-value" [class.success]="!!state.selectedGraph()">{{ state.selectedGraph() ? '已加载' : '未加载' }}</div>
+          <div class="stat-value" [class.success]="!!state.resolvedGraph()">{{ state.resolvedGraph() ? '已加载' : '未加载' }}</div>
           <div class="stat-sub">{{ state.graphSummary() || '—' }}</div>
         </div>
         <div class="stat-card">
@@ -97,11 +97,11 @@ import { MiniChartComponent } from '../components/mini-chart.component';
                 <div class="swarm-meta">{{ state.swarmOverview() || '选择一个 Swarm 查看详情' }}</div>
               </div>
               <div class="run-buttons">
-                <button class="btn btn-secondary" (click)="state.runSwarmSync()" [disabled]="state.loading() || !state.selectedSwarm()">
-                  同步运行
+                <button class="btn btn-secondary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
+                  启动结构
                 </button>
-                <button class="btn btn-primary" (click)="state.startBackgroundRun()" [disabled]="state.loading() || !state.selectedSwarm()">
-                  后台运行
+                <button class="btn btn-primary" (click)="state.startSwarmBackground()" [disabled]="state.loading() || !state.selectedSwarm()">
+                  后台启动
                 </button>
               </div>
             </div>
@@ -109,8 +109,8 @@ import { MiniChartComponent } from '../components/mini-chart.component';
             <div class="topology-section">
               <h4>拓扑视图</h4>
               <div class="graph-container">
-                @if (state.selectedGraph()) {
-                  <app-graph-viewer [graph]="state.selectedGraph()"></app-graph-viewer>
+                @if (state.resolvedGraph()) {
+                  <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
                 } @else {
                   <div class="empty-state">加载 Graph 中...</div>
                 }
@@ -139,57 +139,120 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       <div class="panel-card execution-console">
         <div class="panel-header">
           <h3>执行控制台</h3>
-          <div class="console-hints">{{ state.selectedRunHint() }}</div>
+          <div class="console-hints">{{ state.selectedRunHint() }} · {{ state.swarmExecutionTemplateLabel() }}</div>
         </div>
         <div class="console-body">
-          <div class="console-field">
-            <label>JSON 输入</label>
-            <textarea
-              class="console-textarea"
-              rows="4"
-              [value]="state.payloadText()"
-              (input)="state.setSwarmPayloadText($any($event).target.value)"
-              placeholder="输入 JSON payload..."
-            ></textarea>
-          </div>
-          <div class="console-row">
-            <div class="console-field">
-              <label>轮次</label>
-              <input
-                type="number"
-                class="console-input"
-                [value]="state.agentRounds()"
-                (input)="state.setAgentRounds($any($event).target.value)"
-                min="1"
-              />
+          <div class="console-section">
+            <div class="console-section-header">
+              <h4>Swarm 运行</h4>
+              <span class="console-note">填写自然语言任务，前端会自动组装请求体</span>
+            </div>
+            <div class="console-row">
+              <div class="console-field">
+                <label>任务模板</label>
+                <select class="console-select" [value]="state.swarmExecutionTemplate()" (change)="state.setSwarmExecutionTemplate($any($event).target.value)">
+                  <option value="summary">系统概览</option>
+                  <option value="analysis">状态分析</option>
+                  <option value="debug">排障建议</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </div>
+              <div class="console-field">
+                <label>轮次</label>
+                <input
+                  type="number"
+                  class="console-input"
+                  [value]="state.swarmRounds()"
+                  (input)="state.setSwarmRounds($any($event).target.value)"
+                  min="0"
+                />
+              </div>
+              <div class="console-field">
+                <label>输出风格</label>
+                <select class="console-select" [value]="state.swarmExecutionOutputStyle()" (change)="state.setSwarmExecutionOutputStyle($any($event).target.value)">
+                  <option value="markdown">Markdown</option>
+                  <option value="bullet">要点列表</option>
+                  <option value="brief">简短回答</option>
+                </select>
+              </div>
+              <label class="console-toggle">
+                <input type="checkbox" [checked]="state.metaMode()" (change)="state.setMetaMode($any($event).target.checked)" />
+                <span>Meta 模式</span>
+              </label>
             </div>
             <div class="console-field">
-              <label>选择 Agent</label>
-              <select class="console-select" [value]="state.selectedAgentId()" (change)="state.setSelectedAgentId($any($event).target.value)">
-                <option value="">自动选择</option>
-                @for (choice of state.agentChoices(); track choice) {
-                  <option [value]="choice">{{ choice }}</option>
-                }
-              </select>
+              <label>执行目标</label>
+              <textarea
+                class="console-textarea"
+                rows="4"
+                [value]="state.swarmExecutionPrompt()"
+                (input)="state.setSwarmExecutionPrompt($any($event).target.value)"
+                placeholder="例如：总结系统当前可用的 swarm 与 graph 状态。"
+              ></textarea>
             </div>
-            <div class="console-field flex-grow">
-              <label>消息</label>
-              <input
-                type="text"
-                class="console-input"
-                [value]="state.agentMessage()"
-                (input)="state.setAgentMessage($any($event).target.value)"
-                placeholder="输入消息..."
-              />
+            <div class="console-field">
+              <label>补充上下文</label>
+              <textarea
+                class="console-textarea"
+                rows="3"
+                [value]="state.swarmExecutionContext()"
+                (input)="state.setSwarmExecutionContext($any($event).target.value)"
+                placeholder="填写额外背景、约束或输出要求..."
+              ></textarea>
+            </div>
+            <div class="console-actions">
+              <button class="btn btn-primary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
+                启动结构
+              </button>
+              <button class="btn btn-secondary" (click)="state.startSwarmBackground()" [disabled]="state.loading() || !state.selectedSwarm()">
+                后台启动
+              </button>
             </div>
           </div>
-          <div class="console-actions">
-            <button class="btn btn-primary" (click)="state.runAgentRound()" [disabled]="state.loading()">
-              运行 Agent 轮次
-            </button>
-            <button class="btn btn-secondary" (click)="state.runSwarmSync()" [disabled]="state.loading() || !state.selectedSwarm()">
-              同步运行
-            </button>
+
+          <div class="console-divider"></div>
+
+          <div class="console-section">
+            <div class="console-section-header">
+              <h4>Agent 调试</h4>
+              <span class="console-note">直接驱动单个 Agent 执行一轮</span>
+            </div>
+            <div class="console-row">
+              <div class="console-field">
+                <label>轮次</label>
+                <input
+                  type="number"
+                  class="console-input"
+                  [value]="state.agentRounds()"
+                  (input)="state.setAgentRounds($any($event).target.value)"
+                  min="1"
+                />
+              </div>
+              <div class="console-field">
+                <label>选择 Agent</label>
+                <select class="console-select" [value]="state.selectedAgentId()" (change)="state.setSelectedAgentId($any($event).target.value)">
+                  <option value="">自动选择</option>
+                  @for (choice of state.agentChoices(); track choice) {
+                    <option [value]="choice">{{ choice }}</option>
+                  }
+                </select>
+              </div>
+              <div class="console-field flex-grow">
+                <label>消息</label>
+                <input
+                  type="text"
+                  class="console-input"
+                  [value]="state.agentMessage()"
+                  (input)="state.setAgentMessage($any($event).target.value)"
+                  placeholder="输入消息..."
+                />
+              </div>
+            </div>
+            <div class="console-actions">
+              <button class="btn btn-primary" (click)="state.runAgentRound()" [disabled]="state.loading()">
+                Agent 调试
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -467,6 +530,14 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       align-items: center;
       justify-content: center;
     }
+    .graph-container app-graph-viewer {
+      width: 100%;
+      height: 100%;
+      display: block;
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+    }
     .live-activity {
       padding: 16px 20px;
     }
@@ -519,10 +590,32 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       flex-direction: column;
       gap: 12px;
     }
+    .console-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .console-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .console-section-header h4 {
+      margin: 0;
+      font-size: 14px;
+      color: #e2e8f0;
+    }
+    .console-note {
+      font-size: 12px;
+      color: #64748b;
+    }
     .console-row {
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
+      align-items: flex-end;
     }
     .console-field {
       display: flex;
@@ -549,7 +642,7 @@ import { MiniChartComponent } from '../components/mini-chart.component';
     .console-textarea {
       width: 100%;
       resize: vertical;
-      font-family: 'SF Mono', monospace;
+      font-family: inherit;
     }
     .console-input {
       width: 120px;
@@ -557,6 +650,23 @@ import { MiniChartComponent } from '../components/mini-chart.component';
     .console-select {
       width: 160px;
       cursor: pointer;
+    }
+    .console-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 8px;
+      font-size: 13px;
+      color: #cbd5e1;
+      user-select: none;
+    }
+    .console-toggle input {
+      accent-color: #8B5CF6;
+    }
+    .console-divider {
+      height: 1px;
+      background: rgba(148,163,184,0.08);
+      margin: 2px 0;
     }
     .flex-grow {
       flex: 1;
