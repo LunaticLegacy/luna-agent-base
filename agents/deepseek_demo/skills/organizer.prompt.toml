@@ -1,0 +1,14 @@
+[skill]
+name = "organizer_prompt"
+version = "1.0"
+capability = "adaptive_architecture_control"
+description = "Inspect the current runtime state and adjust the live graph architecture."
+content_file = "organizer.prompt.md"
+input_schema = { input = "string" }
+output_schema = { decision = "string", content = "string", next_node_ids = "array", graph_edit = "object" }
+requires_tools = ["graph_editor", "agent_manager"]
+requires_skills = ["planner_prompt", "researcher_prompt"]
+preconditions = ["A runtime state is available."]
+postconditions = ["The graph architecture has been evaluated and optionally adjusted."]
+failure_policy = "retry"
+parallelizable = false

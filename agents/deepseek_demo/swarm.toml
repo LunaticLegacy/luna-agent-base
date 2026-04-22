@@ -3,6 +3,7 @@ name = "deepseek_demo"
 graph_file = "graph.py"
 agent_files = [
   "agents/orchestrator.py",
+  "agents/organizer.py",
   "agents/planner.py",
   "agents/researcher.py",
   "agents/writer.py",
@@ -11,6 +12,7 @@ agent_files = [
 ]
 skill_files = [
   "skills/orchestrator.prompt.md",
+  "skills/organizer.prompt.md",
   "skills/planner.prompt.md",
   "skills/researcher.prompt.md",
   "skills/writer.prompt.md",
