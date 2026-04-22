@@ -7,7 +7,9 @@ import type {
   EventCatalogItem,
   GraphSnapshot,
   HealthResponse,
+  KnowledgeCatalogItem,
   LogCatalogItem,
+  MemoryCatalogItem,
   TaskCatalogItem,
   ReadyResponse,
   RunSnapshot,
@@ -213,6 +215,10 @@ export class StateService {
   readonly eventsLoaded = signal(false);
   readonly logs = signal<LogItem[]>([]);
   readonly logsLoaded = signal(false);
+  readonly knowledge = signal<KnowledgeEntry[]>([]);
+  readonly knowledgeLoaded = signal(false);
+  readonly memories = signal<MemoryItem[]>([]);
+  readonly memoriesLoaded = signal(false);
 
   private readonly feedId = signal(0);
   private eventSource: EventSource | null = null;
@@ -387,6 +393,7 @@ export class StateService {
   });
 
   readonly derivedKnowledge = computed<KnowledgeEntry[]>(() => {
+    if (this.knowledgeLoaded()) return this.knowledge();
     const graph = this.selectedGraph();
     if (!graph) return [];
     return graph.nodes
@@ -411,16 +418,23 @@ export class StateService {
 
   readonly knowledgeStats = computed(() => {
     const entries = this.derivedKnowledge();
+    const now = Date.now();
+    const recentWindowMs = 30 * 24 * 60 * 60 * 1000;
     return {
       total: entries.length,
       documents: entries.filter(e => e.type === 'document').length,
       vectors: entries.filter(e => e.type === 'vector').length,
       citations: entries.reduce((s, e) => s + e.citations, 0),
-      recentUpdates: entries.length,
+      recentUpdates: entries.filter((entry) => {
+        const raw = entry.meta?.updatedAt || entry.createdAt;
+        const parsed = Date.parse(raw);
+        return Number.isFinite(parsed) && now - parsed <= recentWindowMs;
+      }).length,
     };
   });
 
   readonly derivedMemories = computed<MemoryItem[]>(() => {
+    if (this.memoriesLoaded()) return this.memories();
     const run = this.activeRun();
     const feed = this.responseFeed();
     const memories: MemoryItem[] = [];
@@ -455,9 +469,14 @@ export class StateService {
 
   readonly memoryStats = computed(() => {
     const memories = this.derivedMemories();
+    const now = Date.now();
+    const activeWindowMs = 24 * 60 * 60 * 1000;
     return {
       total: memories.length,
-      active: memories.filter(m => m.type === 'working').length,
+      active: memories.filter(m => {
+        const parsed = Date.parse(m.timestamp);
+        return m.type === 'working' || (Number.isFinite(parsed) && now - parsed <= activeWindowMs);
+      }).length,
       avgImportance: memories.length ? (memories.reduce((s, m) => s + m.importance, 0) / memories.length / 100).toFixed(2) : '0',
       longTerm: memories.filter(m => m.type === 'episodic' || m.type === 'semantic').length,
       working: memories.filter(m => m.type === 'working').length,
@@ -579,6 +598,41 @@ export class StateService {
     };
   }
 
+  private mapKnowledgeCatalogItem(item: KnowledgeCatalogItem): KnowledgeEntry {
+    return {
+      id: item.id,
+      title: item.title,
+      type: item.type as KnowledgeEntry['type'],
+      source: item.source,
+      tags: [...(item.tags ?? [])],
+      status: item.status as KnowledgeEntry['status'],
+      citations: item.citations ?? 0,
+      createdAt: item.created_at,
+      content: item.content,
+      meta: {
+        author: item.meta?.author ?? 'System',
+        version: item.meta?.version ?? '1.0',
+        updatedAt: item.meta?.updated_at ?? item.created_at,
+        size: item.meta?.size ?? '-',
+      },
+      related: [...(item.related ?? [])],
+    };
+  }
+
+  private mapMemoryCatalogItem(item: MemoryCatalogItem): MemoryItem {
+    return {
+      id: item.id,
+      summary: item.summary,
+      content: item.content,
+      timestamp: item.timestamp,
+      type: item.type as MemoryItem['type'],
+      source: item.source,
+      sentiment: item.sentiment ?? 0,
+      importance: item.importance ?? 0,
+      relatedIds: [...(item.related_ids ?? [])],
+    };
+  }
+
   constructor(private readonly apiService: ApiService) {}
 
   init(destroyRef: DestroyRef): void {
@@ -651,6 +705,8 @@ export class StateService {
       await Promise.allSettled([
         this.loadEvents(),
         this.loadLogs(),
+        this.loadKnowledge(),
+        this.loadMemory(),
       ]);
       if (this.selectedSwarmName()) {
         await this.reloadSelectedSwarm({ clearError: false });
@@ -814,6 +870,32 @@ export class StateService {
     } catch (error) {
       this.error.set(formatErrorDetail(error));
       this.pushFeed('日志列表失败', 'GET', `${this.baseUrl()}/logs`, 'error', { error: errorSummary(error) });
+    }
+  }
+
+  async loadKnowledge(): Promise<void> {
+    try {
+      const response = await this.apiService.listKnowledge(this.baseUrl(), { page: 1, limit: 500 });
+      this.knowledge.set(response.items.map((item) => this.mapKnowledgeCatalogItem(item)));
+      this.knowledgeLoaded.set(true);
+      this.pushFeed('知识库列表', 'GET', `${this.baseUrl()}/knowledge`, 'info', response);
+    } catch (error) {
+      this.knowledgeLoaded.set(false);
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('知识库列表失败', 'GET', `${this.baseUrl()}/knowledge`, 'error', { error: errorSummary(error) });
+    }
+  }
+
+  async loadMemory(): Promise<void> {
+    try {
+      const response = await this.apiService.listMemory(this.baseUrl(), { page: 1, limit: 500 });
+      this.memories.set(response.items.map((item) => this.mapMemoryCatalogItem(item)));
+      this.memoriesLoaded.set(true);
+      this.pushFeed('记忆库列表', 'GET', `${this.baseUrl()}/memory`, 'info', response);
+    } catch (error) {
+      this.memoriesLoaded.set(false);
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('记忆库列表失败', 'GET', `${this.baseUrl()}/memory`, 'error', { error: errorSummary(error) });
     }
   }
 

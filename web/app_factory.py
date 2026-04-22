@@ -5,10 +5,11 @@ from pathlib import Path
 from flask import Flask, jsonify
 
 from core.swarm_loader import SwarmLoaderError
+from web.content_store import ContentStore
 from web.runtime import RuntimeRegistry
 
 from .errors import register_error_handlers
-from .routes import catalog_bp, health_bp, swarms_bp
+from .routes import catalog_bp, content_bp, health_bp, swarms_bp
 
 
 def create_app(config_path: str | Path = "config.toml") -> Flask:
@@ -19,7 +20,7 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
     @app.after_request
     def add_cors_headers(response):
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         return response
 
@@ -38,10 +39,15 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
         )
 
     app.extensions["angelus_runtime"] = runtime_registry
+    app.extensions["angelus_content"] = ContentStore.from_runtime_registry(
+        data_dir=config_path.parent / "data",
+        runtime_registry=runtime_registry,
+    )
 
     register_error_handlers(app)
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(catalog_bp, url_prefix="/api")
+    app.register_blueprint(content_bp, url_prefix="/api")
     app.register_blueprint(swarms_bp, url_prefix="/api")
 
     @app.get("/")

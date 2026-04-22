@@ -118,6 +118,8 @@ python app.py
 - 异步 run session
 - SSE 事件流
 - 单 agent round 调用
+- 知识库 CRUD
+- 记忆库 CRUD
 
 ### 🖥️ Angular 控制台
 

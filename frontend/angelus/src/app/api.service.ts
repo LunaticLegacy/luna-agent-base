@@ -9,7 +9,11 @@ import type {
   EventListResponse,
   GraphSnapshot,
   HealthResponse,
+  KnowledgeCatalogItem,
+  KnowledgeListResponse,
   LogListResponse,
+  MemoryListResponse,
+  MemoryCatalogItem,
   TaskListResponse,
   ReadyResponse,
   RunSnapshot,
@@ -126,6 +130,77 @@ export class ApiService {
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<LogListResponse> {
     return firstValueFrom(this.http.get<LogListResponse>(joinUrlWithQuery(baseUrl, '/logs', query)));
+  }
+
+  listKnowledge(
+    baseUrl: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<KnowledgeListResponse> {
+    return firstValueFrom(this.http.get<KnowledgeListResponse>(joinUrlWithQuery(baseUrl, '/knowledge', query)));
+  }
+
+  getKnowledge(baseUrl: string, knowledgeId: string): Promise<{ success: boolean; knowledge: KnowledgeCatalogItem }> {
+    return firstValueFrom(
+      this.http.get<{ success: boolean; knowledge: KnowledgeCatalogItem }>(
+        joinUrl(baseUrl, `/knowledge/${encodeURIComponent(knowledgeId)}`)
+      )
+    );
+  }
+
+  createKnowledge(baseUrl: string, body: Record<string, unknown>): Promise<{ success: boolean; knowledge: KnowledgeCatalogItem }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; knowledge: KnowledgeCatalogItem }>(joinUrl(baseUrl, '/knowledge'), body)
+    );
+  }
+
+  updateKnowledge(
+    baseUrl: string,
+    knowledgeId: string,
+    body: Record<string, unknown>
+  ): Promise<{ success: boolean; knowledge: KnowledgeCatalogItem }> {
+    return firstValueFrom(
+      this.http.put<{ success: boolean; knowledge: KnowledgeCatalogItem }>(
+        joinUrl(baseUrl, `/knowledge/${encodeURIComponent(knowledgeId)}`),
+        body
+      )
+    );
+  }
+
+  deleteKnowledge(baseUrl: string, knowledgeId: string): Promise<{ success: boolean; knowledge: KnowledgeCatalogItem }> {
+    return firstValueFrom(
+      this.http.delete<{ success: boolean; knowledge: KnowledgeCatalogItem }>(
+        joinUrl(baseUrl, `/knowledge/${encodeURIComponent(knowledgeId)}`)
+      )
+    );
+  }
+
+  listMemory(
+    baseUrl: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<MemoryListResponse> {
+    return firstValueFrom(this.http.get<MemoryListResponse>(joinUrlWithQuery(baseUrl, '/memory', query)));
+  }
+
+  getMemory(baseUrl: string, memoryId: string): Promise<{ success: boolean; memory: MemoryCatalogItem }> {
+    return firstValueFrom(
+      this.http.get<{ success: boolean; memory: MemoryCatalogItem }>(
+        joinUrl(baseUrl, `/memory/${encodeURIComponent(memoryId)}`)
+      )
+    );
+  }
+
+  createMemory(baseUrl: string, body: Record<string, unknown>): Promise<{ success: boolean; memory: MemoryCatalogItem }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; memory: MemoryCatalogItem }>(joinUrl(baseUrl, '/memory'), body)
+    );
+  }
+
+  deleteMemory(baseUrl: string, memoryId: string): Promise<{ success: boolean; memory: MemoryCatalogItem }> {
+    return firstValueFrom(
+      this.http.delete<{ success: boolean; memory: MemoryCatalogItem }>(
+        joinUrl(baseUrl, `/memory/${encodeURIComponent(memoryId)}`)
+      )
+    );
   }
 
   getGraph(baseUrl: string, swarmName: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot }> {

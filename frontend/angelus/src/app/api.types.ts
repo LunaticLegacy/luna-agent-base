@@ -244,6 +244,70 @@ export interface ToolListResponse {
   stats: ToolCatalogStats;
 }
 
+export interface KnowledgeCatalogItem {
+  id: string;
+  title: string;
+  type: 'document' | 'vector' | 'rule' | 'snippet' | string;
+  source: string;
+  tags: string[];
+  status: 'active' | 'draft' | 'archived' | string;
+  citations: number;
+  created_at: string;
+  content: string;
+  meta: {
+    author: string;
+    version: string;
+    updated_at: string;
+    size: string;
+  };
+  related: string[];
+}
+
+export interface KnowledgeCatalogStats {
+  total: number;
+  documents: number;
+  vectors: number;
+  rules: number;
+}
+
+export interface KnowledgeListResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  limit: number;
+  items: KnowledgeCatalogItem[];
+  stats: KnowledgeCatalogStats;
+}
+
+export interface MemoryCatalogItem {
+  id: string;
+  summary: string;
+  content: string;
+  timestamp: string;
+  type: 'episodic' | 'semantic' | 'procedural' | 'working' | string;
+  source: string;
+  sentiment: number;
+  importance: number;
+  related_ids: string[];
+}
+
+export interface MemoryCatalogStats {
+  total: number;
+  active: number;
+  avg_importance: number;
+  long_term: number;
+  working: number;
+}
+
+export interface MemoryListResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  limit: number;
+  items: MemoryCatalogItem[];
+  stats: MemoryCatalogStats;
+}
+
 export interface SwarmStatsResponse {
   success: boolean;
   success_rate: number;
