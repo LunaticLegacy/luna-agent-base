@@ -243,3 +243,75 @@ export interface ToolListResponse {
   tools: ToolCatalogItem[];
   stats: ToolCatalogStats;
 }
+
+export interface SwarmStatsResponse {
+  success: boolean;
+  success_rate: number;
+  throughput: number;
+  token_usage: number;
+  task_distribution: {
+    pending: number;
+    running: number;
+    completed: number;
+    failed: number;
+    avg_duration_ms: number;
+  };
+  resource_usage: {
+    cpu_percent: number[];
+    memory_mb: number[];
+  };
+  run_count: number;
+  active_runs: number;
+  agent_count: number;
+  tool_count: number;
+}
+
+export interface EventCatalogItem {
+  id: string;
+  time: string;
+  level: 'info' | 'warn' | 'error';
+  source: string;
+  event: string;
+  detail: string;
+  data: JsonValue;
+}
+
+export interface EventCatalogStats {
+  today: number;
+  errors: number;
+  warnings: number;
+  infos: number;
+}
+
+export interface EventListResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  limit: number;
+  items: EventCatalogItem[];
+  stats: EventCatalogStats;
+}
+
+export interface LogCatalogItem {
+  id: string;
+  time: string;
+  level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
+  service: string;
+  message: string;
+}
+
+export interface LogCatalogStats {
+  error: number;
+  warn: number;
+  info: number;
+  debug: number;
+}
+
+export interface LogListResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  limit: number;
+  items: LogCatalogItem[];
+  stats: LogCatalogStats;
+}

@@ -6,8 +6,10 @@ import type {
   AgentRoundRequest,
   AgentRoundResponse,
   ApiIndexResponse,
+  EventListResponse,
   GraphSnapshot,
   HealthResponse,
+  LogListResponse,
   TaskListResponse,
   ReadyResponse,
   RunSnapshot,
@@ -16,6 +18,7 @@ import type {
   RunSwarmResponse,
   SwarmDetailResponse,
   SwarmListResponse,
+  SwarmStatsResponse,
   ToolListResponse,
 } from './api.types';
 
@@ -103,6 +106,26 @@ export class ApiService {
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<ToolListResponse> {
     return firstValueFrom(this.http.get<ToolListResponse>(joinUrlWithQuery(baseUrl, '/tools', query)));
+  }
+
+  getSwarmStats(baseUrl: string, swarmName: string): Promise<SwarmStatsResponse> {
+    return firstValueFrom(
+      this.http.get<SwarmStatsResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/stats`))
+    );
+  }
+
+  listEvents(
+    baseUrl: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<EventListResponse> {
+    return firstValueFrom(this.http.get<EventListResponse>(joinUrlWithQuery(baseUrl, '/events', query)));
+  }
+
+  listLogs(
+    baseUrl: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<LogListResponse> {
+    return firstValueFrom(this.http.get<LogListResponse>(joinUrlWithQuery(baseUrl, '/logs', query)));
   }
 
   getGraph(baseUrl: string, swarmName: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot }> {
