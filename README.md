@@ -88,6 +88,8 @@ python app.py
 ### 🔄 动态图编排
 
 - 支持运行时改图
+- 运行时改图会回写到 `agents/<swarm_name>/graph.py`
+- 初始图会自动备份为 `agents/<swarm_name>/graph_init.py`
 - 支持添加边、删边、改 entry / exit
 - 支持把临时 agent 插进当前执行图
 - 支持把临时 agent 从图里删除
