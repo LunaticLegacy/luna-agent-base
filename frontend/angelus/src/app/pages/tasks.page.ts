@@ -1,139 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { StateService } from '../services/state.service';
-
-interface Task {
-  id: string;
-  name: string;
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  executor: string;
-  duration: string;
-  createdAt: string;
-  detail: {
-    description: string;
-    input: unknown;
-    output: unknown;
-    logs: { time: string; level: 'info' | 'warn' | 'error' | 'success'; message: string }[];
-  };
-}
-
-const MOCK_TASKS: Task[] = [
-  {
-    id: 'task-001',
-    name: '数据清洗与预处理',
-    status: 'running',
-    priority: 'high',
-    executor: 'DataAgent',
-    duration: '2m 14s',
-    createdAt: '2026-04-22 10:30',
-    detail: {
-      description: '对原始用户行为数据进行清洗、去重和格式标准化。',
-      input: { source: 'raw_events_2026_04.csv', schema: 'v2' },
-      output: null,
-      logs: [
-        { time: '10:30:05', level: 'info', message: '任务已创建并加入队列' },
-        { time: '10:30:12', level: 'success', message: '数据文件加载完成，共 1.2M 条记录' },
-        { time: '10:31:45', level: 'info', message: '去重处理中...' },
-        { time: '10:32:14', level: 'warn', message: '发现 3,400 条异常格式记录，已隔离' },
-      ],
-    },
-  },
-  {
-    id: 'task-002',
-    name: 'Swarm 拓扑分析',
-    status: 'success',
-    priority: 'medium',
-    executor: 'PlannerAgent',
-    duration: '45s',
-    createdAt: '2026-04-22 09:15',
-    detail: {
-      description: '分析当前 Swarm 的图拓扑结构，计算中心性指标。',
-      input: { swarm: 'core_swarm', depth: 3 },
-      output: { centrality: { planner: 0.92, executor: 0.78 }, nodes: 12, edges: 18 },
-      logs: [
-        { time: '09:15:00', level: 'info', message: '任务已创建' },
-        { time: '09:15:10', level: 'success', message: '图数据加载完成' },
-        { time: '09:15:45', level: 'success', message: '分析完成，结果已写入知识库' },
-      ],
-    },
-  },
-  {
-    id: 'task-003',
-    name: '模型评估与基准测试',
-    status: 'failed',
-    priority: 'urgent',
-    executor: 'EvalAgent',
-    duration: '5m 02s',
-    createdAt: '2026-04-22 08:00',
-    detail: {
-      description: '对最新微调模型进行基准测试，对比生产基线。',
-      input: { model: 'ft-v3-20260421', dataset: 'benchmark_v2' },
-      output: { error: 'CUDA out of memory during batch evaluation' },
-      logs: [
-        { time: '08:00:00', level: 'info', message: '任务已创建' },
-        { time: '08:01:20', level: 'info', message: '模型加载成功' },
-        { time: '08:03:45', level: 'warn', message: 'GPU 内存使用率 92%' },
-        { time: '08:05:02', level: 'error', message: 'CUDA out of memory during batch evaluation' },
-      ],
-    },
-  },
-  {
-    id: 'task-004',
-    name: '知识库增量更新',
-    status: 'pending',
-    priority: 'low',
-    executor: 'KnowledgeAgent',
-    duration: '-',
-    createdAt: '2026-04-22 11:00',
-    detail: {
-      description: '将新审批通过的文档向量化并写入向量数据库。',
-      input: { docs: ['doc_0442', 'doc_0443'], strategy: 'incremental' },
-      output: null,
-      logs: [
-        { time: '11:00:00', level: 'info', message: '任务已创建，等待调度' },
-      ],
-    },
-  },
-  {
-    id: 'task-005',
-    name: '实时日志聚合',
-    status: 'success',
-    priority: 'medium',
-    executor: 'LogAgent',
-    duration: '12s',
-    createdAt: '2026-04-22 09:45',
-    detail: {
-      description: '聚合过去 1 小时的系统日志并生成摘要。',
-      input: { window: '1h', sources: ['api', 'worker', 'scheduler'] },
-      output: { summary: '正常', warnings: 2, errors: 0 },
-      logs: [
-        { time: '09:45:00', level: 'info', message: '任务已创建' },
-        { time: '09:45:05', level: 'success', message: '日志收集完成' },
-        { time: '09:45:12', level: 'success', message: '摘要已推送' },
-      ],
-    },
-  },
-  {
-    id: 'task-006',
-    name: '用户反馈情感分析',
-    status: 'cancelled',
-    priority: 'high',
-    executor: 'NLPAgent',
-    duration: '1m 30s',
-    createdAt: '2026-04-22 07:30',
-    detail: {
-      description: '分析过去 7 天用户反馈的情感倾向。',
-      input: { period: '7d', channels: ['appstore', 'email', 'slack'] },
-      output: null,
-      logs: [
-        { time: '07:30:00', level: 'info', message: '任务已创建' },
-        { time: '07:30:20', level: 'info', message: '数据拉取中...' },
-        { time: '07:31:30', level: 'warn', message: '任务被手动取消' },
-      ],
-    },
-  },
-];
+import { StateService, TaskItem } from '../services/state.service';
 
 @Component({
   selector: 'app-tasks-page',
@@ -156,7 +23,7 @@ const MOCK_TASKS: Task[] = [
       <div class="stat-cards-row">
         <div class="stat-card">
           <div class="stat-label">总任务数</div>
-          <div class="stat-value">{{ tasks().length }}</div>
+          <div class="stat-value">{{ state.derivedTasks().length }}</div>
           <div class="stat-sub">累计创建</div>
         </div>
         <div class="stat-card">
@@ -730,29 +597,20 @@ const MOCK_TASKS: Task[] = [
 export class TasksPageComponent {
   readonly state = inject(StateService);
 
-  readonly tasks = signal<Task[]>(MOCK_TASKS);
-  readonly selectedTask = signal<Task | null>(null);
+  readonly selectedTask = signal<TaskItem | null>(null);
   readonly searchQuery = signal('');
   readonly filterStatus = signal('');
   readonly filterPriority = signal('');
   readonly filterDateRange = signal('');
   readonly sortBy = signal('createdDesc');
 
-  readonly runningCount = computed(() => this.tasks().filter(t => t.status === 'running').length);
-  readonly pendingCount = computed(() => this.tasks().filter(t => t.status === 'pending').length);
-  readonly successRate = computed(() => {
-    const done = this.tasks().filter(t => t.status === 'success' || t.status === 'failed');
-    if (!done.length) return 0;
-    return Math.round((done.filter(t => t.status === 'success').length / done.length) * 100);
-  });
-  readonly avgDuration = computed(() => {
-    const done = this.tasks().filter(t => t.status === 'success' && t.duration !== '-');
-    if (!done.length) return '-';
-    return '~2m';
-  });
+  readonly runningCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'running').length);
+  readonly pendingCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'pending').length);
+  readonly successRate = computed(() => this.state.taskStats().successRate);
+  readonly avgDuration = computed(() => this.state.taskStats().avgDuration);
 
   readonly filteredTasks = computed(() => {
-    let list = [...this.tasks()];
+    let list = [...this.state.derivedTasks()];
     const q = this.searchQuery().trim().toLowerCase();
     if (q) list = list.filter(t => t.name.toLowerCase().includes(q) || t.id.toLowerCase().includes(q));
     if (this.filterStatus()) list = list.filter(t => t.status === this.filterStatus());
@@ -768,7 +626,7 @@ export class TasksPageComponent {
     return list;
   });
 
-  selectTask(task: Task): void {
+  selectTask(task: TaskItem): void {
     this.selectedTask.set(task);
   }
 
@@ -780,16 +638,16 @@ export class TasksPageComponent {
     alert('创建任务功能待实现');
   }
 
-  retryTask(task: Task): void {
-    this.tasks.update(list => list.map(t => t.id === task.id ? { ...t, status: 'pending' as const, duration: '-' } : t));
+  retryTask(task: TaskItem): void {
+    console.log('Retry', task.id);
   }
 
-  statusLabel(status: Task['status']): string {
+  statusLabel(status: TaskItem['status']): string {
     const map: Record<string, string> = { pending: '待处理', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消' };
     return map[status] ?? status;
   }
 
-  priorityLabel(priority: Task['priority']): string {
+  priorityLabel(priority: TaskItem['priority']): string {
     const map: Record<string, string> = { low: '低', medium: '中', high: '高', urgent: '紧急' };
     return map[priority] ?? priority;
   }

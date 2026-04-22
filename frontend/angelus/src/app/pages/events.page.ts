@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { StateService } from '../services/state.service';
+import { StateService, EventItem } from '../services/state.service';
 
 @Component({
   selector: 'app-events-page',
@@ -20,10 +20,10 @@ import { StateService } from '../services/state.service';
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card"><div class="stat-label">今日事件</div><div class="stat-value">{{ stats().today }}</div><div class="stat-sub">条记录</div></div>
-      <div class="stat-card"><div class="stat-label">错误事件</div><div class="stat-value stat-red">{{ stats().errors }}</div><div class="stat-sub">需关注</div></div>
-      <div class="stat-card"><div class="stat-label">警告事件</div><div class="stat-value stat-amber">{{ stats().warnings }}</div><div class="stat-sub">提醒</div></div>
-      <div class="stat-card"><div class="stat-label">信息事件</div><div class="stat-value stat-green">{{ stats().infos }}</div><div class="stat-sub">正常</div></div>
+      <div class="stat-card"><div class="stat-label">今日事件</div><div class="stat-value">{{ state.eventStats().today }}</div><div class="stat-sub">条记录</div></div>
+      <div class="stat-card"><div class="stat-label">错误事件</div><div class="stat-value stat-red">{{ state.eventStats().errors }}</div><div class="stat-sub">需关注</div></div>
+      <div class="stat-card"><div class="stat-label">警告事件</div><div class="stat-value stat-amber">{{ state.eventStats().warnings }}</div><div class="stat-sub">提醒</div></div>
+      <div class="stat-card"><div class="stat-label">信息事件</div><div class="stat-value stat-green">{{ state.eventStats().infos }}</div><div class="stat-sub">正常</div></div>
       <div class="stat-card"><div class="stat-label">实时流</div><div class="stat-value stat-purple">{{ state.streamState() || '空闲' }}</div><div class="stat-sub">{{ state.liveEvents().length }} 条缓存</div></div>
     </div>
 
@@ -151,18 +151,8 @@ export class EventsPage {
   searchText = '';
   expandedEvent = signal<EventItem | null>(null);
 
-  stats = signal({ today: 128, errors: 3, warnings: 12, infos: 113 });
-
-  events = signal<EventItem[]>([
-    { id: '1', time: '12:34:56', level: 'info', source: '系统', event: 'Swarm 初始化完成', detail: 'deepseek_demo swarm loaded successfully', data: { swarm: 'deepseek_demo' } },
-    { id: '2', time: '12:35:01', level: 'info', source: 'Swarm', event: 'Graph 构建完成', detail: '12 nodes, 18 edges', data: { nodes: 12, edges: 18 } },
-    { id: '3', time: '12:35:12', level: 'warn', source: 'Agent', event: '工具调用超时', detail: 'web_search timed out after 30s', data: { agent: 'researcher', tool: 'web_search' } },
-    { id: '4', time: '12:36:45', level: 'info', source: 'Agent', event: '任务执行完成', detail: 'Round 3 completed', data: { round: 3 } },
-    { id: '5', time: '12:37:02', level: 'error', source: '系统', event: '数据库连接失败', detail: 'Connection refused to localhost:6379', data: { host: 'localhost:6379' } },
-  ]);
-
   filteredEvents() {
-    let list = this.events();
+    let list = this.state.derivedEvents();
     if (this.tab() !== 'all') {
       list = list.filter(e => e.level === this.tab());
     }
@@ -186,7 +176,4 @@ export class EventsPage {
   }
 }
 
-interface EventItem {
-  id: string; time: string; level: string; source: string;
-  event: string; detail: string; data: unknown;
-}
+

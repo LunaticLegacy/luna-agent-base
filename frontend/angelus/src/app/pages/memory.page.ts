@@ -1,87 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { StateService } from '../services/state.service';
-
-interface Memory {
-  id: string;
-  summary: string;
-  content: string;
-  timestamp: string;
-  type: 'episodic' | 'semantic' | 'procedural' | 'working';
-  source: string;
-  sentiment: number; // -1 to 1
-  importance: number; // 0 to 100
-  relatedIds: string[];
-}
-
-const MOCK_MEMORIES: Memory[] = [
-  {
-    id: 'mem-001',
-    summary: 'PlannerAgent 成功分解复杂任务',
-    content: 'PlannerAgent 在面对包含 7 个子任务的复杂工作流时，使用了层级分解策略。首先识别关键路径，然后为每个子任务分配最合适的执行者，最终整体执行时间比预期缩短 18%。',
-    timestamp: '2026-04-22 11:30',
-    type: 'semantic',
-    source: 'PlannerAgent',
-    sentiment: 0.72,
-    importance: 92,
-    relatedIds: ['mem-002', 'mem-005'],
-  },
-  {
-    id: 'mem-002',
-    summary: 'DataAgent 报告数据异常模式',
-    content: 'DataAgent 在例行巡检中发现用户行为数据出现非预期的双峰分布。进一步排查后确认为新上线的 A/B 测试导致，建议调整采样窗口。',
-    timestamp: '2026-04-22 10:15',
-    type: 'episodic',
-    source: 'DataAgent',
-    sentiment: -0.15,
-    importance: 78,
-    relatedIds: ['mem-001'],
-  },
-  {
-    id: 'mem-003',
-    summary: 'API 限流策略优化记录',
-    content: '基于过去 72 小时的流量模式，系统记忆更新了 API 限流参数：burst 从 100 调整到 150，rate 从 10r/s 调整到 12r/s。新参数在峰值时段表现更稳定。',
-    timestamp: '2026-04-21 18:00',
-    type: 'procedural',
-    source: 'System',
-    sentiment: 0.45,
-    importance: 85,
-    relatedIds: [],
-  },
-  {
-    id: 'mem-004',
-    summary: 'EvalAgent 模型评估失败',
-    content: 'EvalAgent 在执行基准测试时因 GPU OOM 中断。已记录失败上下文，建议后续任务采用更小的 batch size 或启用梯度检查点。',
-    timestamp: '2026-04-21 14:20',
-    type: 'episodic',
-    source: 'EvalAgent',
-    sentiment: -0.68,
-    importance: 88,
-    relatedIds: ['mem-005'],
-  },
-  {
-    id: 'mem-005',
-    summary: '资源调度算法改进',
-    content: 'Worker 节点负载均衡器引入了基于记忆权重的动态调度策略，优先将高重要性记忆关联的任务调度到性能更好的节点。',
-    timestamp: '2026-04-20 09:00',
-    type: 'semantic',
-    source: 'Scheduler',
-    sentiment: 0.60,
-    importance: 95,
-    relatedIds: ['mem-001', 'mem-004'],
-  },
-  {
-    id: 'mem-006',
-    summary: '临时工作记忆：当前 Swarm 状态',
-    content: '活跃 Swarm：core_swarm（6 agents）。当前运行：后台运行 #run-0422-001，状态 running，已处理 34 个事件。流状态：open。',
-    timestamp: '2026-04-22 12:00',
-    type: 'working',
-    source: 'System',
-    sentiment: 0.10,
-    importance: 60,
-    relatedIds: [],
-  },
-];
+import { StateService, MemoryItem } from '../services/state.service';
 
 @Component({
   selector: 'app-memory-page',
@@ -708,10 +627,10 @@ const MOCK_MEMORIES: Memory[] = [
 export class MemoryPageComponent {
   readonly state = inject(StateService);
 
-  readonly memories = signal<Memory[]>(MOCK_MEMORIES);
-  readonly selectedMemory = signal<Memory | null>(null);
+  readonly selectedMemory = signal<MemoryItem | null>(null);
   readonly searchQuery = signal('');
   readonly filterType = signal('');
+  readonly memories = computed(() => this.state.derivedMemories());
 
   readonly activeMemories = computed(() => this.memories().filter(m => m.timestamp.startsWith('2026-04-22')).length);
   readonly avgImportance = computed(() => {
@@ -770,7 +689,7 @@ export class MemoryPageComponent {
     return this.memories().filter(m => current.relatedIds.includes(m.id));
   });
 
-  selectMemory(mem: Memory): void {
+  selectMemory(mem: MemoryItem): void {
     this.selectedMemory.set(mem);
   }
 
@@ -781,7 +700,7 @@ export class MemoryPageComponent {
     return '#10B981';
   }
 
-  typeLabel(type: Memory['type']): string {
+  typeLabel(type: MemoryItem['type']): string {
     const map: Record<string, string> = { episodic: '情景', semantic: '语义', procedural: '程序', working: '工作' };
     return map[type.trim()] ?? type;
   }

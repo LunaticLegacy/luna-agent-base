@@ -1,20 +1,6 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { StateService } from '../services/state.service';
-
-interface AgentRow {
-  id: string;
-  name: string;
-  status: 'online' | 'offline' | 'busy' | 'error';
-  type: string;
-  capabilities: string[];
-  tags: string[];
-  tasksExecuted: number;
-  successRate: number;
-  avgResponseTime: string;
-  tokenUsage: number;
-  lastActivity: string;
-}
+import { StateService, AgentRow } from '../services/state.service';
 
 @Component({
   selector: 'app-agents-page',
@@ -31,22 +17,22 @@ interface AgentRow {
         </div>
         <div class="stat-card">
           <div class="stat-label">活跃 Agents</div>
-          <div class="stat-value success">{{ activeAgentsCount() }}</div>
+          <div class="stat-value success">{{ state.agentStats().active }}</div>
           <div class="stat-sub">在线运行中</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">总任务执行</div>
-          <div class="stat-value">{{ totalTasksExecuted() }}</div>
+          <div class="stat-value">{{ state.agentStats().totalTasks }}</div>
           <div class="stat-sub">累计</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">平均响应时间</div>
-          <div class="stat-value">{{ avgResponseTime() }}</div>
+          <div class="stat-value">{{ state.agentStats().avgResponseTime }}</div>
           <div class="stat-sub">毫秒</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">总 Token 消耗</div>
-          <div class="stat-value">{{ totalTokenUsage() }}</div>
+          <div class="stat-value">{{ state.agentStats().totalTokenUsage | number }}</div>
           <div class="stat-sub">累计</div>
         </div>
       </div>
@@ -617,40 +603,12 @@ export class AgentsPageComponent {
   readonly selectedAgent = signal<AgentRow | null>(null);
 
   // Mock agents data based on swarm overview / total agents
-  readonly mockAgents = computed<AgentRow[]>(() => {
-    const count = this.state.totalAgents() || 5;
-    const types = ['coordinator', 'worker', 'specialist', 'reviewer'];
-    const statuses: Array<'online' | 'offline' | 'busy' | 'error'> = ['online', 'online', 'online', 'busy', 'offline', 'error'];
-    const caps = ['llm', 'tool', 'memory', 'planning'];
-    const tags = ['core', 'production', 'experimental'];
-    return Array.from({ length: count }, (_, i) => ({
-      id: `agent-${String(i + 1).padStart(3, '0')}`,
-      name: `Agent ${i + 1}`,
-      status: statuses[i % statuses.length],
-      type: types[i % types.length],
-      capabilities: [caps[i % caps.length], caps[(i + 1) % caps.length]],
-      tags: [tags[i % tags.length]],
-      tasksExecuted: Math.floor(Math.random() * 500) + 10,
-      successRate: Math.floor(Math.random() * 30) + 70,
-      avgResponseTime: `${Math.floor(Math.random() * 300) + 50}ms`,
-      tokenUsage: Math.floor(Math.random() * 50000) + 1000,
-      lastActivity: `${Math.floor(Math.random() * 59) + 1}分钟前`
-    }));
-  });
 
-  readonly activeAgentsCount = computed(() => this.mockAgents().filter(a => a.status === 'online').length);
-  readonly totalTasksExecuted = computed(() => this.mockAgents().reduce((s, a) => s + a.tasksExecuted, 0));
-  readonly totalTokenUsage = computed(() => this.mockAgents().reduce((s, a) => s + a.tokenUsage, 0).toLocaleString());
-  readonly avgResponseTime = computed(() => {
-    const vals = this.mockAgents().map(a => parseInt(a.avgResponseTime));
-    if (!vals.length) return '—';
-    return `${Math.floor(vals.reduce((s, v) => s + v, 0) / vals.length)}ms`;
-  });
 
   readonly sparkHeights = computed(() => [35, 55, 42, 70, 48, 60, 38, 65, 50, 72, 45, 58]);
 
   readonly filteredAgents = computed(() => {
-    let list = this.mockAgents();
+    let list = this.state.derivedAgents();
     const q = this.searchQuery().toLowerCase();
     if (q) list = list.filter(a => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
     if (this.filterStatus()) list = list.filter(a => a.status === this.filterStatus());

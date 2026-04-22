@@ -59,15 +59,15 @@ import { GraphViewerComponent } from '../graph-viewer.component';
         </div>
         <div class="stat-card">
           <div class="stat-label">成功率</div>
-          <div class="stat-value success">{{ mockStats().successRate }}%</div>
+          <div class="stat-value success">{{ state.swarmMgmtStats().successRate }}%</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">任务吞吐量</div>
-          <div class="stat-value">{{ mockStats().throughput }}</div>
+          <div class="stat-value">{{ state.swarmMgmtStats().throughput }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Token 使用</div>
-          <div class="stat-value">{{ mockStats().tokenUsage }}</div>
+          <div class="stat-value">{{ state.swarmMgmtStats().tokenUsage }}</div>
         </div>
       </div>
 
@@ -206,7 +206,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
             <div class="donut-body">
               <div class="donut-chart">
                 <div class="donut-ring"></div>
-                <div class="donut-center">{{ mockStats().taskCount }}</div>
+                <div class="donut-center">{{ state.swarmMgmtStats().taskCount }}</div>
               </div>
               <div class="donut-legend">
                 <div class="dl-item"><span class="dl-dot" style="background:#10B981"></span>成功 65%</div>
@@ -680,5 +680,5 @@ export class SwarmManagementPageComponent {
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
   readonly tabs = ['概览', '拓扑视图', 'Agents', '任务', '活动', '知识', '记忆', '设置'];
-  readonly mockStats = signal({ successRate: 98.5, throughput: 124, tokenUsage: '2.4M', taskCount: 8, description: '' });
+
 }

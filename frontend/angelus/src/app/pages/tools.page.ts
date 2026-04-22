@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { StateService } from '../services/state.service';
+import { StateService, ToolItem } from '../services/state.service';
 import { StatusBadgeComponent } from '../components/status-badge.component';
 
 @Component({
@@ -22,11 +22,11 @@ import { StatusBadgeComponent } from '../components/status-badge.component';
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card"><div class="stat-label">总工具数</div><div class="stat-value">{{ toolStats().total }}</div><div class="stat-sub">已注册</div></div>
-      <div class="stat-card"><div class="stat-label">可用工具</div><div class="stat-value stat-green">{{ toolStats().available }}</div><div class="stat-sub">正常运行</div></div>
-      <div class="stat-card"><div class="stat-label">API 工具</div><div class="stat-value stat-purple">{{ toolStats().api }}</div><div class="stat-sub">外部接口</div></div>
-      <div class="stat-card"><div class="stat-label">本地技能</div><div class="stat-value stat-amber">{{ toolStats().local }}</div><div class="stat-sub">内置函数</div></div>
-      <div class="stat-card"><div class="stat-label">今日调用</div><div class="stat-value">{{ toolStats().calls }}</div><div class="stat-sub">次执行</div></div>
+      <div class="stat-card"><div class="stat-label">总工具数</div><div class="stat-value">{{ state.toolStats().total }}</div><div class="stat-sub">已注册</div></div>
+      <div class="stat-card"><div class="stat-label">可用工具</div><div class="stat-value stat-green">{{ state.toolStats().available }}</div><div class="stat-sub">正常运行</div></div>
+      <div class="stat-card"><div class="stat-label">API 工具</div><div class="stat-value stat-purple">{{ state.toolStats().api }}</div><div class="stat-sub">外部接口</div></div>
+      <div class="stat-card"><div class="stat-label">本地技能</div><div class="stat-value stat-amber">{{ state.toolStats().local }}</div><div class="stat-sub">内置函数</div></div>
+      <div class="stat-card"><div class="stat-label">今日调用</div><div class="stat-value">{{ state.toolStats().calls | number }}</div><div class="stat-sub">次执行</div></div>
     </div>
 
     <div class="card">
@@ -46,7 +46,7 @@ import { StatusBadgeComponent } from '../components/status-badge.component';
       <table class="data-table">
         <thead><tr><th>工具名称</th><th>类型</th><th>状态</th><th>描述</th><th>调用次数</th><th>平均耗时</th><th>最后调用</th><th>操作</th></tr></thead>
         <tbody>
-          @for (tool of tools(); track tool.id) {
+          @for (tool of state.derivedTools(); track tool.id) {
             <tr (click)="selectTool(tool)" [class.active]="selectedTool()?.id === tool.id">
               <td><div class="tool-name"><div class="tool-icon">{{ tool.icon }}</div><div><div class="name">{{ tool.name }}</div><div class="id">{{ tool.id }}</div></div></div></td>
               <td><span class="tag" [class.tag-purple]="tool.type==='API'" [class.tag-blue]="tool.type==='本地'">{{ tool.type }}</span></td>
@@ -149,22 +149,8 @@ export class ToolsPage {
 
   selectedTool = signal<ToolItem | null>(null);
 
-  toolStats = signal({ total: 12, available: 10, api: 5, local: 7, calls: 2847 });
-
-  tools = signal<ToolItem[]>([
-    { id: 'web_search', name: '网页搜索', icon: '🔍', type: 'API', status: 'online', desc: '使用搜索引擎查询实时信息', calls: 1245, avgMs: 320, lastCall: '2分钟前', successRate: 98.2, errorRate: 1.8, created: '2024-01-15', schema: { query: 'string', limit: 'number' } },
-    { id: 'file_reader', name: '文件读取', icon: '📄', type: '本地', status: 'online', desc: '读取本地文件内容', calls: 892, avgMs: 45, lastCall: '5分钟前', successRate: 99.5, errorRate: 0.5, created: '2024-01-10', schema: { path: 'string', encoding: 'string' } },
-    { id: 'code_exec', name: '代码执行', icon: '💻', type: '本地', status: 'busy', desc: '在安全沙箱中执行Python代码', calls: 456, avgMs: 1200, lastCall: '1分钟前', successRate: 92.1, errorRate: 7.9, created: '2024-02-01', schema: { code: 'string', timeout: 'number' } },
-    { id: 'db_query', name: '数据库查询', icon: '🗃️', type: 'API', status: 'warning', desc: '执行SQL查询', calls: 234, avgMs: 85, lastCall: '10分钟前', successRate: 95.3, errorRate: 4.7, created: '2024-01-20', schema: { sql: 'string', params: 'array' } },
-  ]);
-
   selectTool(tool: ToolItem) {
     this.selectedTool.set(tool);
   }
 }
 
-interface ToolItem {
-  id: string; name: string; icon: string; type: string; status: string; desc: string;
-  calls: number; avgMs: number; lastCall: string; successRate: number; errorRate: number;
-  created: string; schema: Record<string, string>;
-}

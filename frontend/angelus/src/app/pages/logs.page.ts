@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { StateService } from '../services/state.service';
+import { StateService, LogItem } from '../services/state.service';
 
 @Component({
   selector: 'app-logs-page',
@@ -22,11 +22,11 @@ import { StateService } from '../services/state.service';
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card"><div class="stat-label">总日志数</div><div class="stat-value">{{ stats().total }}</div><div class="stat-sub">条记录</div></div>
-      <div class="stat-card"><div class="stat-label">ERROR</div><div class="stat-value stat-red">{{ stats().error }}</div><div class="stat-sub">严重</div></div>
-      <div class="stat-card"><div class="stat-label">WARN</div><div class="stat-value stat-amber">{{ stats().warn }}</div><div class="stat-sub">警告</div></div>
-      <div class="stat-card"><div class="stat-label">INFO</div><div class="stat-value stat-green">{{ stats().info }}</div><div class="stat-sub">信息</div></div>
-      <div class="stat-card"><div class="stat-label">DEBUG</div><div class="stat-value stat-blue">{{ stats().debug }}</div><div class="stat-sub">调试</div></div>
+      <div class="stat-card"><div class="stat-label">总日志数</div><div class="stat-value">{{ state.logStats().total }}</div><div class="stat-sub">条记录</div></div>
+      <div class="stat-card"><div class="stat-label">ERROR</div><div class="stat-value stat-red">{{ state.logStats().error }}</div><div class="stat-sub">严重</div></div>
+      <div class="stat-card"><div class="stat-label">WARN</div><div class="stat-value stat-amber">{{ state.logStats().warn }}</div><div class="stat-sub">警告</div></div>
+      <div class="stat-card"><div class="stat-label">INFO</div><div class="stat-value stat-green">{{ state.logStats().info }}</div><div class="stat-sub">信息</div></div>
+      <div class="stat-card"><div class="stat-label">DEBUG</div><div class="stat-value stat-blue">{{ state.logStats().debug }}</div><div class="stat-sub">调试</div></div>
     </div>
 
     <div class="card">
@@ -106,23 +106,8 @@ export class LogsPage {
   searchText = '';
   autoScroll = signal(true);
 
-  stats = signal({ total: 1247, error: 3, warn: 23, info: 892, debug: 329 });
-
-  logs = signal<LogItem[]>([
-    { id: '1', time: '12:34:56', level: 'INFO', service: 'backend', message: 'Application startup complete' },
-    { id: '2', time: '12:34:57', level: 'INFO', service: 'agent', message: 'Swarm deepseek_demo loaded: 12 agents' },
-    { id: '3', time: '12:35:01', level: 'DEBUG', service: 'graph', message: 'Building execution graph from 12 nodes' },
-    { id: '4', time: '12:35:02', level: 'INFO', service: 'backend', message: 'Graph built: 12 nodes, 18 edges' },
-    { id: '5', time: '12:35:12', level: 'WARN', service: 'agent', message: 'Tool web_search timeout after 30000ms' },
-    { id: '6', time: '12:35:13', level: 'DEBUG', service: 'agent', message: 'Retrying with fallback search engine' },
-    { id: '7', time: '12:36:45', level: 'INFO', service: 'agent', message: 'Round 3 completed: 4 messages processed' },
-    { id: '8', time: '12:37:02', level: 'ERROR', service: 'backend', message: 'Redis connection failed: Connection refused' },
-    { id: '9', time: '12:37:03', level: 'WARN', service: 'backend', message: 'Falling back to in-memory cache' },
-    { id: '10', time: '12:38:10', level: 'INFO', service: 'system', message: 'Health check passed: all systems operational' },
-  ]);
-
   filteredLogs() {
-    let list = this.logs();
+    let list = this.state.derivedLogs();
     if (this.levelFilter() !== 'all') {
       list = list.filter(l => l.level === this.levelFilter());
     }
@@ -131,8 +116,4 @@ export class LogsPage {
     }
     return list;
   }
-}
-
-interface LogItem {
-  id: string; time: string; level: string; service: string; message: string;
 }

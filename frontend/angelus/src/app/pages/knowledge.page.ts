@@ -1,106 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { StateService } from '../services/state.service';
-
-interface KnowledgeEntry {
-  id: string;
-  title: string;
-  type: 'document' | 'vector' | 'rule' | 'snippet';
-  source: string;
-  tags: string[];
-  status: 'active' | 'draft' | 'archived';
-  citations: number;
-  createdAt: string;
-  content: string;
-  meta: {
-    author: string;
-    version: string;
-    updatedAt: string;
-    size: string;
-  };
-  related: string[];
-}
-
-const MOCK_ENTRIES: KnowledgeEntry[] = [
-  {
-    id: 'kb-001',
-    title: 'Swarm 编排最佳实践',
-    type: 'document',
-    source: '官方文档',
-    tags: ['swarm', 'orchestration', 'guide'],
-    status: 'active',
-    citations: 42,
-    createdAt: '2026-04-20',
-    content: '本指南涵盖了多智能体系统的核心编排模式，包括层级控制、协商机制、投票决策与动态任务分配。',
-    meta: { author: 'CoreTeam', version: 'v2.1', updatedAt: '2026-04-21', size: '24 KB' },
-    related: ['kb-003', 'kb-005'],
-  },
-  {
-    id: 'kb-002',
-    title: 'PlannerAgent 行为向量',
-    type: 'vector',
-    source: '运行时采集',
-    tags: ['agent', 'planner', 'embedding'],
-    status: 'active',
-    citations: 128,
-    createdAt: '2026-04-18',
-    content: '768 维向量表示，捕获 PlannerAgent 在任务分解场景中的决策边界与偏好分布。',
-    meta: { author: 'System', version: 'v1', updatedAt: '2026-04-22', size: '3.2 MB' },
-    related: ['kb-001'],
-  },
-  {
-    id: 'kb-003',
-    title: 'API 错误码对照表',
-    type: 'rule',
-    source: '手动录入',
-    tags: ['api', 'reference', 'error-handling'],
-    status: 'active',
-    citations: 15,
-    createdAt: '2026-04-15',
-    content: '涵盖 HTTP 400/401/403/404/422/500/503 等状态码的标准化处理建议与重试策略。',
-    meta: { author: 'DevOps', version: 'v1.3', updatedAt: '2026-04-19', size: '8 KB' },
-    related: ['kb-001'],
-  },
-  {
-    id: 'kb-004',
-    title: '待审：新图遍历算法草稿',
-    type: 'document',
-    source: '社区贡献',
-    tags: ['graph', 'algorithm', 'draft'],
-    status: 'draft',
-    citations: 0,
-    createdAt: '2026-04-21',
-    content: '基于 DFS 与 BFS 混合策略的图遍历优化方案，尚待评审与基准测试验证。',
-    meta: { author: 'Contributor-A', version: 'v0.2', updatedAt: '2026-04-21', size: '12 KB' },
-    related: [],
-  },
-  {
-    id: 'kb-005',
-    title: 'Prompt 模板：总结生成',
-    type: 'snippet',
-    source: '模板库',
-    tags: ['prompt', 'nlp', 'template'],
-    status: 'active',
-    citations: 67,
-    createdAt: '2026-04-10',
-    content: '你是一个专业的内容摘要助手。请根据以下输入生成简洁、准确、保留关键信息的总结。',
-    meta: { author: 'NLPTeam', version: 'v3.0', updatedAt: '2026-04-20', size: '1 KB' },
-    related: ['kb-001'],
-  },
-  {
-    id: 'kb-006',
-    title: '旧版技能配置归档',
-    type: 'document',
-    source: '历史迁移',
-    tags: ['legacy', 'archive'],
-    status: 'archived',
-    citations: 2,
-    createdAt: '2025-12-01',
-    content: '2025 Q4 技能配置快照，仅供历史追溯，不再用于生产环境。',
-    meta: { author: 'System', version: 'v0.9', updatedAt: '2026-01-15', size: '56 KB' },
-    related: [],
-  },
-];
+import { StateService, KnowledgeEntry } from '../services/state.service';
 
 @Component({
   selector: 'app-knowledge-page',
@@ -123,27 +23,27 @@ const MOCK_ENTRIES: KnowledgeEntry[] = [
       <div class="stat-cards-row">
         <div class="stat-card">
           <div class="stat-label">总条目</div>
-          <div class="stat-value">{{ entries().length }}</div>
+          <div class="stat-value">{{ state.knowledgeStats().total }}</div>
           <div class="stat-sub">知识库规模</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">文档数</div>
-          <div class="stat-value">{{ docCount() }}</div>
+          <div class="stat-value">{{ state.knowledgeStats().documents }}</div>
           <div class="stat-sub">文本类</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">向量条目</div>
-          <div class="stat-value accent-purple">{{ vectorCount() }}</div>
+          <div class="stat-value accent-purple">{{ state.knowledgeStats().vectors }}</div>
           <div class="stat-sub">Embedding</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">引用次数</div>
-          <div class="stat-value success">{{ totalCitations() }}</div>
+          <div class="stat-value success">{{ state.knowledgeStats().citations }}</div>
           <div class="stat-sub">被检索引用</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">最近更新</div>
-          <div class="stat-value">{{ lastUpdated() }}</div>
+          <div class="stat-value">—</div>
           <div class="stat-sub">活跃维护</div>
         </div>
       </div>
@@ -755,7 +655,6 @@ const MOCK_ENTRIES: KnowledgeEntry[] = [
 export class KnowledgePageComponent {
   readonly state = inject(StateService);
 
-  readonly entries = signal<KnowledgeEntry[]>(MOCK_ENTRIES);
   readonly selectedEntry = signal<KnowledgeEntry | null>(null);
   readonly searchQuery = signal('');
   readonly filterType = signal('');
@@ -763,16 +662,10 @@ export class KnowledgePageComponent {
   readonly filterTag = signal('');
   readonly filterDateRange = signal('');
 
-  readonly docCount = computed(() => this.entries().filter(e => e.type === 'document').length);
-  readonly vectorCount = computed(() => this.entries().filter(e => e.type === 'vector').length);
-  readonly totalCitations = computed(() => this.entries().reduce((s, e) => s + e.citations, 0));
-  readonly lastUpdated = computed(() => {
-    const dates = this.entries().map(e => e.meta.updatedAt).sort();
-    return dates[dates.length - 1] ?? '-';
-  });
+
 
   readonly filteredEntries = computed(() => {
-    let list = [...this.entries()];
+    let list = [...this.state.derivedKnowledge()];
     const q = this.searchQuery().trim().toLowerCase();
     if (q) list = list.filter(e => e.title.toLowerCase().includes(q) || e.tags.some(t => t.toLowerCase().includes(q)));
     if (this.filterType()) list = list.filter(e => e.type === this.filterType());
@@ -784,7 +677,7 @@ export class KnowledgePageComponent {
   readonly relatedEntries = computed(() => {
     const current = this.selectedEntry();
     if (!current) return [];
-    return this.entries().filter(e => current.related.includes(e.id));
+    return this.state.derivedKnowledge().filter(e => current.related.includes(e.id));
   });
 
   readonly graphDensity = computed(() => {
