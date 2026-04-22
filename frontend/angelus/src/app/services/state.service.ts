@@ -2,13 +2,16 @@ import { DestroyRef, Injectable, computed, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ApiService } from '../api.service';
 import type {
+  AgentCatalogItem,
   ApiIndexResponse,
   GraphSnapshot,
   HealthResponse,
+  TaskCatalogItem,
   ReadyResponse,
   RunSnapshot,
   SwarmDetails,
   SwarmSummary,
+  ToolCatalogItem,
 } from '../api.types';
 import { asJsonValue, normalizeJsonValue, valuePreview } from '../json-utils';
 
@@ -195,6 +198,12 @@ export class StateService {
   readonly activeRun = signal<RunSnapshot | null>(null);
   readonly streamState = signal<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle');
   readonly streamNote = signal<string>('未连接实时运行');
+  readonly agents = signal<AgentRow[]>([]);
+  readonly agentsLoaded = signal(false);
+  readonly tasks = signal<TaskItem[]>([]);
+  readonly tasksLoaded = signal(false);
+  readonly tools = signal<ToolItem[]>([]);
+  readonly toolsLoaded = signal(false);
 
   private readonly feedId = signal(0);
   private eventSource: EventSource | null = null;
@@ -205,6 +214,7 @@ export class StateService {
   /* ---------- Derived data (replaces hard-coded mock) ---------- */
 
   readonly derivedAgents = computed<AgentRow[]>(() => {
+    if (this.agentsLoaded()) return this.agents();
     const swarm = this.selectedSwarm();
     const graph = this.selectedGraph();
     const run = this.activeRun();
@@ -242,6 +252,7 @@ export class StateService {
   });
 
   readonly derivedTasks = computed<TaskItem[]>(() => {
+    if (this.tasksLoaded()) return this.tasks();
     const feed = this.responseFeed();
     const run = this.activeRun();
     const tasks: TaskItem[] = [];
@@ -284,6 +295,7 @@ export class StateService {
   });
 
   readonly derivedTools = computed<ToolItem[]>(() => {
+    if (this.toolsLoaded()) return this.tools();
     const graph = this.selectedGraph();
     if (!graph) return [];
     return graph.nodes
@@ -461,6 +473,70 @@ export class StateService {
     return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
   }
 
+  private fmtDurationMs(durationMs: number): string {
+    if (!Number.isFinite(durationMs) || durationMs <= 0) return '-';
+    const sec = Math.round(durationMs / 1000);
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+    return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  }
+
+  private mapAgentCatalogItem(item: AgentCatalogItem): AgentRow {
+    return {
+      id: item.id,
+      name: item.name,
+      status: item.status,
+      type: item.type,
+      capabilities: [...(item.capabilities ?? [])],
+      tags: [...(item.tags ?? [])],
+      tasksExecuted: item.tasks_executed ?? 0,
+      successRate: item.success_rate ?? 0,
+      avgResponseTime: `${Math.round(item.avg_response_time_ms ?? 0)}ms`,
+      tokenUsage: item.token_usage_total ?? 0,
+      lastActivity: item.last_activity ?? '-',
+    };
+  }
+
+  private mapTaskCatalogItem(item: TaskCatalogItem): TaskItem {
+    return {
+      id: item.id,
+      name: item.name,
+      status: item.status,
+      priority: item.priority,
+      executor: item.executor,
+      duration: this.fmtDurationMs(item.duration_ms ?? 0),
+      createdAt: item.created_at,
+      detail: {
+        description: item.description,
+        input: item.input,
+        output: item.output,
+        logs: item.logs.map((log) => ({
+          time: log.time ?? '-',
+          level: log.level,
+          message: log.message,
+        })),
+      },
+    };
+  }
+
+  private mapToolCatalogItem(item: ToolCatalogItem): ToolItem {
+    return {
+      id: item.id,
+      name: item.name,
+      icon: item.type === 'API' ? '🌐' : '🔧',
+      type: item.type,
+      status: item.status,
+      desc: item.description,
+      calls: item.calls ?? 0,
+      avgMs: item.avg_ms ?? 0,
+      lastCall: item.last_call ?? '-',
+      successRate: item.success_rate ?? 0,
+      errorRate: item.error_rate ?? 0,
+      created: item.created_at,
+      schema: (item.schema && typeof item.schema === 'object' ? (item.schema as Record<string, string>) : {}),
+    };
+  }
+
   constructor(private readonly apiService: ApiService) {}
 
   init(destroyRef: DestroyRef): void {
@@ -530,7 +606,18 @@ export class StateService {
           this.selectedSwarmName.set(swarmResult.value.swarms[0]?.swarm_name ?? null);
         }
       } else { issues.push(errorSummary(swarmResult.reason)); }
-      if (this.selectedSwarmName()) await this.reloadSelectedSwarm({ clearError: false });
+      if (this.selectedSwarmName()) {
+        await this.reloadSelectedSwarm({ clearError: false });
+      } else {
+        this.selectedSwarm.set(null);
+        this.selectedGraph.set(null);
+        this.agents.set([]);
+        this.agentsLoaded.set(true);
+        this.tasks.set([]);
+        this.tasksLoaded.set(true);
+        this.tools.set([]);
+        this.toolsLoaded.set(true);
+      }
       if (issues.length > 0) this.error.set({ summary: issues.join(' · '), message: issues.join('\n'), timestamp: new Date().toISOString() });
     } catch (error) { this.error.set(formatErrorDetail(error)); }
     finally { this.loading.set(false); }
@@ -538,7 +625,17 @@ export class StateService {
 
   async reloadSelectedSwarm(options: { clearError?: boolean } = {}): Promise<void> {
     const swarmName = this.selectedSwarmName();
-    if (!swarmName) { this.selectedSwarm.set(null); this.selectedGraph.set(null); return; }
+    if (!swarmName) {
+      this.selectedSwarm.set(null);
+      this.selectedGraph.set(null);
+      this.agents.set([]);
+      this.agentsLoaded.set(true);
+      this.tasks.set([]);
+      this.tasksLoaded.set(true);
+      this.tools.set([]);
+      this.toolsLoaded.set(true);
+      return;
+    }
     this.loadingDetails.set(true);
     if (options.clearError !== false) this.error.set(null);
     try {
@@ -547,7 +644,12 @@ export class StateService {
       this.selectedSwarm.set(response.swarm);
       this.ensureAgentSelection(response.swarm);
       this.pushFeed(`Swarm 详情 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}`, 'success', response);
-      await this.loadSelectedGraph();
+      await Promise.all([
+        this.loadSelectedGraph(),
+        this.loadAgents(),
+        this.loadTasks(),
+        this.loadTools(),
+      ]);
     } catch (error) { this.error.set(formatErrorDetail(error)); this.selectedSwarm.set(null); this.selectedGraph.set(null); }
     finally { this.loadingDetails.set(false); }
   }
@@ -561,6 +663,65 @@ export class StateService {
       this.selectedGraph.set(response.graph);
       this.pushFeed(`图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/graph`, 'info', response);
     } catch (error) { this.error.set(formatErrorDetail(error)); this.selectedGraph.set(null); }
+  }
+
+  async loadAgents(): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.agents.set([]);
+      this.agentsLoaded.set(true);
+      return;
+    }
+    try {
+      const response = await this.apiService.listAgents(this.baseUrl(), swarmName, { q: '' });
+      this.agents.set(response.agents.map((item) => this.mapAgentCatalogItem(item)));
+      this.agentsLoaded.set(true);
+      this.pushFeed(`Agents 列表 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/agents`, 'info', response);
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`Agents 列表失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/agents`, 'error', { error: errorSummary(error) });
+    }
+  }
+
+  async loadTasks(): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    try {
+      const response = await this.apiService.listTasks(this.baseUrl(), {
+        swarm: swarmName ?? undefined,
+        limit: 500,
+        page: 1,
+      });
+      this.tasks.set(response.items.map((item) => this.mapTaskCatalogItem(item)));
+      this.tasksLoaded.set(true);
+      this.pushFeed(
+        `Tasks 列表${swarmName ? ` · ${swarmName}` : ''}`,
+        'GET',
+        `${this.baseUrl()}/tasks`,
+        'info',
+        response
+      );
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(
+        `Tasks 列表失败${swarmName ? ` · ${swarmName}` : ''}`,
+        'GET',
+        `${this.baseUrl()}/tasks`,
+        'error',
+        { error: errorSummary(error) }
+      );
+    }
+  }
+
+  async loadTools(): Promise<void> {
+    try {
+      const response = await this.apiService.listTools(this.baseUrl(), {});
+      this.tools.set(response.tools.map((item) => this.mapToolCatalogItem(item)));
+      this.toolsLoaded.set(true);
+      this.pushFeed('Tools 列表', 'GET', `${this.baseUrl()}/tools`, 'info', response);
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('Tools 列表失败', 'GET', `${this.baseUrl()}/tools`, 'error', { error: errorSummary(error) });
+    }
   }
 
   async runSwarmSync(): Promise<void> {

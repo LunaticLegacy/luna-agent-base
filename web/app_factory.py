@@ -8,7 +8,7 @@ from core.swarm_loader import SwarmLoaderError
 from web.runtime import RuntimeRegistry
 
 from .errors import register_error_handlers
-from .routes import health_bp, swarms_bp
+from .routes import catalog_bp, health_bp, swarms_bp
 
 
 def create_app(config_path: str | Path = "config.toml") -> Flask:
@@ -41,6 +41,7 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
 
     register_error_handlers(app)
     app.register_blueprint(health_bp, url_prefix="/api")
+    app.register_blueprint(catalog_bp, url_prefix="/api")
     app.register_blueprint(swarms_bp, url_prefix="/api")
 
     @app.get("/")

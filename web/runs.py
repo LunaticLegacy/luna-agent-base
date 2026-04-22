@@ -274,6 +274,14 @@ class RunRegistry:
         with self._lock:
             return self._runs.get(run_id)
 
+    def list_runs(self, swarm_name: Optional[str] = None) -> List[RunRecord]:
+        """Return run records in insertion order, optionally filtered by swarm."""
+        with self._lock:
+            runs = list(self._runs.values())
+        if swarm_name is None:
+            return runs
+        return [record for record in runs if record.swarm_name == swarm_name]
+
     def snapshot(self, run_id: str) -> Optional[Dict[str, Any]]:
         """Return the JSON-ready snapshot for one run."""
         record = self.get_run(run_id)
