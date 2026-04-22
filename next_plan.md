@@ -11,7 +11,7 @@ This file captures the next round of work so the project can continue without re
   - P0 data loading now prefers real backend responses for Agents / Tasks / Tools, with fallback derivation only when no API data is available yet
   - 3 shared components: `StatCard`, `MiniChart`, `StatusBadge`
 - **Backend**: Flask API provides Swarm/Graph/Run/AgentRound endpoints.
-- **Gap**: P0 and P1 backend APIs for Agents, Tasks, Tools, Swarm Stats, Events (query), and Logs are now implemented; Knowledge, Memory, and Metrics are still mock-derived.
+- **Gap**: P0, P1, and P2 backend APIs for Agents, Tasks, Tools, Swarm Stats, Events (query), Logs, Knowledge, and Memory are now implemented; Metrics is still mock-derived.
 
 ## Backend API Gap Analysis
 
@@ -357,7 +357,7 @@ If backend APIs are not ready, the frontend can derive plausible data from exist
 2. ~~Wire P0 APIs into `StateService`~~
 3. Update page components if you want explicit page-level query support for server-side pagination and filtering.
 4. ~~Implement P1 APIs (`/stats`, `/events`, `/logs`)~~
-5. **Implement P2 APIs** (`/knowledge`, `/memory`) — only if these concepts are part of the product roadmap.
+5. ~~Implement P2 APIs (`/knowledge`, `/memory`)~~
 6. **Implement P3 API** (`/metrics`) — lowest priority, purely cosmetic.
 
 ---

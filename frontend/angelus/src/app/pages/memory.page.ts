@@ -30,7 +30,7 @@ import { StateService, MemoryItem } from '../services/state.service';
         </div>
         <div class="stat-card">
           <div class="stat-label">活跃记忆</div>
-          <div class="stat-value accent-purple">{{ activeMemories() }}</div>
+          <div class="stat-value accent-purple">{{ state.memoryStats().active }}</div>
           <div class="stat-sub">近 24h 更新</div>
         </div>
         <div class="stat-card">
@@ -631,8 +631,6 @@ export class MemoryPageComponent {
   readonly searchQuery = signal('');
   readonly filterType = signal('');
   readonly memories = computed(() => this.state.derivedMemories());
-
-  readonly activeMemories = computed(() => this.memories().filter(m => m.timestamp.startsWith('2026-04-22')).length);
   readonly avgImportance = computed(() => {
     if (!this.memories().length) return '0';
     const avg = this.memories().reduce((s, m) => s + m.importance, 0) / this.memories().length;

@@ -43,7 +43,7 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
         </div>
         <div class="stat-card">
           <div class="stat-label">最近更新</div>
-          <div class="stat-value">—</div>
+          <div class="stat-value">{{ state.knowledgeStats().recentUpdates }}</div>
           <div class="stat-sub">活跃维护</div>
         </div>
       </div>
