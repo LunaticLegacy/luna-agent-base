@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -32,6 +33,8 @@ class Core:
         self.tools: Dict[str, ToolDefinition] = {}
         self.skills: Dict[str, SkillAsset] = {}
         self._execution_graph: Optional["ExecutionGraph"] = None
+        self._execution_graph_source_path: Optional[Path] = None
+        self._execution_graph_backup_path: Optional[Path] = None
         self._runtime_info: Optional[RuntimeInfoManager] = None
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
 
@@ -187,6 +190,39 @@ class Core:
                 "exit_node_id": getattr(graph, "exit_node_id", None),
             },
         )
+
+    def set_execution_graph_artifacts(self, *, source_path: Path, backup_path: Path) -> None:
+        """Attach the on-disk locations for the active execution graph."""
+        self._execution_graph_source_path = Path(source_path)
+        self._execution_graph_backup_path = Path(backup_path)
+
+    def ensure_execution_graph_backup(self, *, overwrite: bool = False) -> Optional[Path]:
+        """Copy the active graph file into its initial backup location."""
+        source_path = self._execution_graph_source_path
+        backup_path = self._execution_graph_backup_path
+        if source_path is None or backup_path is None:
+            return None
+        if not source_path.exists():
+            return None
+        if backup_path.exists() and not overwrite:
+            return backup_path
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, backup_path)
+        return backup_path
+
+    def persist_execution_graph(self) -> Optional[Path]:
+        """Write the current execution graph back to its source file."""
+        graph = self._execution_graph
+        source_path = self._execution_graph_source_path
+        if graph is None or source_path is None:
+            return None
+
+        self.ensure_execution_graph_backup()
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = source_path.with_suffix(".tmp")
+        tmp_path.write_text(graph.to_python_source(), encoding="utf-8")
+        tmp_path.replace(source_path)
+        return source_path
 
     def get_execution_graph(self) -> Optional["ExecutionGraph"]:
         """Return the current execution graph."""

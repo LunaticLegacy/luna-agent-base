@@ -74,6 +74,7 @@ class GraphEditorTool(ToolDefinition):
             for next_node_id in next_node_ids:
                 graph.add_edge(node_id, next_node_id)
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update(
                 {
                     "graph_node_id": node_id,
@@ -114,6 +115,7 @@ class GraphEditorTool(ToolDefinition):
             for next_node_id in next_node_ids:
                 graph.add_edge(node_id, next_node_id)
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update(
                 {
                     "graph_node_id": node_id,
@@ -134,6 +136,7 @@ class GraphEditorTool(ToolDefinition):
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
             graph.remove_node(node_id)
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
                 context.core.record_runtime_change(
@@ -152,6 +155,7 @@ class GraphEditorTool(ToolDefinition):
                 to_node_ids,
             )
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update(
                 {
                     "graph_from_node_id": from_node_id,
@@ -170,6 +174,7 @@ class GraphEditorTool(ToolDefinition):
             to_node_id = int(self._pick_value(control_source, runtime_metadata, "to_node_id"))
             graph.add_edge(from_node_id, to_node_id)
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update(
                 {
                     "graph_from_node_id": from_node_id,
@@ -188,6 +193,7 @@ class GraphEditorTool(ToolDefinition):
             to_node_id = int(self._pick_value(control_source, runtime_metadata, "to_node_id"))
             graph.remove_edge(from_node_id, to_node_id)
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update(
                 {
                     "graph_from_node_id": from_node_id,
@@ -205,6 +211,7 @@ class GraphEditorTool(ToolDefinition):
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
             graph.set_entry(node_id)
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
                 context.core.record_runtime_change(
@@ -217,6 +224,7 @@ class GraphEditorTool(ToolDefinition):
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
             graph.set_exit(node_id)
             self._validate_graph(graph, context.core, action)
+            self._persist_graph(context)
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
                 context.core.record_runtime_change(
@@ -324,6 +332,13 @@ class GraphEditorTool(ToolDefinition):
         if not validation.is_valid:
             detail = "; ".join(validation.errors)
             raise ValueError(f"graph_editor action '{action}' left graph invalid: {detail}")
+
+    def _persist_graph(self, context: ToolContext) -> None:
+        if context.core is None:
+            return
+        persist = getattr(context.core, "persist_execution_graph", None)
+        if callable(persist):
+            persist()
 
     def _cleanup_metadata_keys(self) -> List[str]:
         return [

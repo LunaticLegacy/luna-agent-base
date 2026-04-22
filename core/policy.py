@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pprint import pformat
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .results import ExecutionEvent, ExecutionState, GraphValidationResult
@@ -272,6 +273,46 @@ class ExecutionGraph:
             event_sink=event_sink,
         )
 
+    def to_python_source(self) -> str:
+        """Render the graph as a standalone Python module."""
+        lines: List[str] = [
+            "from core import AgentNode, ExecutionGraph, ToolNode",
+            "",
+            "",
+            "def build_graph(core):",
+            f"    graph = ExecutionGraph({pformat(self.graph_name, sort_dicts=True)})",
+        ]
+
+        for node in sorted(self.nodes.values(), key=lambda item: item.node_id):
+            lines.extend(self._render_node_source(node))
+
+        for edge in sorted(
+            self.edges,
+            key=lambda item: (
+                item.from_node_id,
+                item.priority,
+                item.to_node_id,
+                item.label or "",
+                item.condition or "",
+            ),
+        ):
+            lines.append(
+                "    graph.add_edge("
+                f"{edge.from_node_id}, {edge.to_node_id}, "
+                f"label={pformat(edge.label, sort_dicts=True)}, "
+                f"condition={pformat(edge.condition, sort_dicts=True)}, "
+                f"priority={edge.priority})"
+            )
+
+        if self.entry_node_id is not None:
+            lines.append(f"    graph.set_entry({self.entry_node_id})")
+        if self.exit_node_id is not None:
+            lines.append(f"    graph.set_exit({self.exit_node_id})")
+
+        lines.append("    return graph")
+        lines.append("")
+        return "\n".join(lines)
+
     def clone(self) -> "ExecutionGraph":
         """Create a shallow clone of the graph structure."""
         cloned = ExecutionGraph(self.graph_name)
@@ -292,6 +333,48 @@ class ExecutionGraph:
         cloned.entry_node_id = self.entry_node_id
         cloned.exit_node_id = self.exit_node_id
         return cloned
+
+    def _render_node_source(self, node: Node) -> List[str]:
+        lines: List[str] = ["    graph.add_node("]
+        if isinstance(node, AgentNode):
+            lines.extend(
+                [
+                    "        AgentNode(",
+                    f"            node_id={node.node_id},",
+                    f"            node_name={pformat(node.node_name, sort_dicts=True)},",
+                    f"            next_node_ids={pformat(list(node.next_node_ids), sort_dicts=True)},",
+                    f"            metadata={pformat(dict(node.metadata), sort_dicts=True)},",
+                    f"            agent_id={pformat(node.agent_id, sort_dicts=True)},",
+                    f"            additional_prompt={pformat(node.additional_prompt, sort_dicts=True)},",
+                    "        ),",
+                ]
+            )
+        elif isinstance(node, ToolNode):
+            lines.extend(
+                [
+                    "        ToolNode(",
+                    f"            node_id={node.node_id},",
+                    f"            node_name={pformat(node.node_name, sort_dicts=True)},",
+                    f"            next_node_ids={pformat(list(node.next_node_ids), sort_dicts=True)},",
+                    f"            metadata={pformat(dict(node.metadata), sort_dicts=True)},",
+                    f"            tool_name={pformat(node.tool_name, sort_dicts=True)},",
+                    f"            input_mapping={pformat(dict(node.input_mapping), sort_dicts=True)},",
+                    "        ),",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "        Node(",
+                    f"            node_id={node.node_id},",
+                    f"            node_name={pformat(node.node_name, sort_dicts=True)},",
+                    f"            next_node_ids={pformat(list(node.next_node_ids), sort_dicts=True)},",
+                    f"            metadata={pformat(dict(node.metadata), sort_dicts=True)},",
+                    "        ),",
+                ]
+            )
+        lines.append("    )")
+        return lines
 
     def outgoing_edges(self, node_id: int) -> List[Edge]:
         """Return the outgoing edges for a node sorted by priority."""
