@@ -42,6 +42,8 @@ class LoadedSwarm:
 
 def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) -> ExecutionGraph:
     """Load the single execution graph file for a swarm package."""
+    graph_path = (package_path / manifest.graph_file).resolve()
+    backup_path = graph_path.with_name("graph_init.py")
     print(
         f"[angelus] loading graph: swarm={manifest.swarm_name} file={manifest.graph_file}",
         flush=True,
@@ -60,6 +62,9 @@ def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) ->
         raise SwarmLoaderError(
             f"Graph file '{manifest.graph_file}' must return an ExecutionGraph instance."
         )
+
+    core.set_execution_graph_artifacts(source_path=graph_path, backup_path=backup_path)
+    core.ensure_execution_graph_backup()
 
     validation = graph.validate(core)
     if validation.is_valid:

@@ -50,6 +50,7 @@ class AgentManagerTool(ToolDefinition):
             prompt_text = self._compose_prompt(
                 context,
                 skill_name=skill_name,
+                context_content=content_passthrough,
                 character_prompt=character_prompt,
                 extra_prompt=self._pick_optional_value(control_source, runtime_metadata, "additional_prompt"),
             )
@@ -230,6 +231,7 @@ class AgentManagerTool(ToolDefinition):
         context: ToolContext,
         *,
         skill_name: Any = None,
+        context_content: Any = None,
         character_prompt: Any = None,
         extra_prompt: Any = None,
     ) -> str:
@@ -238,6 +240,8 @@ class AgentManagerTool(ToolDefinition):
         if skill_name:
             skill = context.core.get_skill(str(skill_name))
             prompt_parts.append(skill.content)
+        if context_content:
+            prompt_parts.append(f"Current mission context:\n{str(context_content).strip()}")
         if character_prompt:
             prompt_parts.append(str(character_prompt).strip())
         if extra_prompt:
