@@ -1,0 +1,1004 @@
+:host
+  display: block
+  min-height: 100vh
+  background: #0B0F19
+  color: #E2E8F0
+  font-family: 'Noto Sans SC', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif
+
+// ─── CSS Variables ──────────────────────────────────────────
+:root
+  --bg-primary: #0B0F19
+  --bg-sidebar: #0F131F
+  --bg-card: #131827
+  --bg-card-hover: #1A2035
+  --bg-elevated: #161D2E
+  --border-subtle: rgba(148, 163, 184, 0.08)
+  --border-medium: rgba(148, 163, 184, 0.12)
+  --text-primary: #F1F5F9
+  --text-secondary: #94A3B8
+  --text-muted: #64748B
+  --accent-purple: #8B5CF6
+  --accent-purple-dim: rgba(139, 92, 246, 0.15)
+  --accent-purple-glow: rgba(139, 92, 246, 0.4)
+  --accent-green: #10B981
+  --accent-green-dim: rgba(16, 185, 129, 0.15)
+  --accent-amber: #F59E0B
+  --accent-amber-dim: rgba(245, 158, 11, 0.15)
+  --accent-red: #EF4444
+  --accent-red-dim: rgba(239, 68, 68, 0.15)
+  --accent-blue: #3B82F6
+  --font-display: 'Noto Serif SC', Georgia, serif
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace
+
+// ─── Animations ─────────────────────────────────────────────
+@keyframes fadeIn
+  from
+    opacity: 0
+  to
+    opacity: 1
+
+@keyframes fadeInUp
+  from
+    opacity: 0
+    transform: translateY(10px)
+  to
+    opacity: 1
+    transform: translateY(0)
+
+@keyframes pulseGlow
+  0%, 100%
+    box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.2)
+  50%
+    box-shadow: 0 0 20px 4px rgba(139, 92, 246, 0.35)
+
+@keyframes dashFlow
+  to
+    stroke-dashoffset: -20
+
+// ─── Layout Shell ───────────────────────────────────────────
+.app-shell
+  display: flex
+  min-height: 100vh
+
+// ─── Sidebar ────────────────────────────────────────────────
+.sidebar
+  width: 240px
+  flex-shrink: 0
+  background: var(--bg-sidebar)
+  border-right: 1px solid var(--border-subtle)
+  display: flex
+  flex-direction: column
+  position: fixed
+  top: 0
+  left: 0
+  bottom: 0
+  z-index: 100
+
+.sidebar-brand
+  display: flex
+  align-items: center
+  gap: 0.75rem
+  padding: 1.25rem 1.5rem
+  border-bottom: 1px solid var(--border-subtle)
+
+.brand-icon
+  width: 2.2rem
+  height: 2.2rem
+  border-radius: 10px
+  background: linear-gradient(135deg, #7C3AED, #A78BFA)
+  display: grid
+  place-items: center
+  font-size: 1.1rem
+  color: white
+  font-weight: 700
+
+.brand-text
+  display: flex
+  flex-direction: column
+  gap: 0.1rem
+
+.brand-title
+  font-size: 0.95rem
+  font-weight: 700
+  color: var(--text-primary)
+  letter-spacing: 0.04em
+  line-height: 1.2
+
+.brand-sub
+  font-size: 0.68rem
+  color: var(--text-muted)
+  letter-spacing: 0.08em
+  text-transform: uppercase
+
+.sidebar-nav
+  flex: 1
+  padding: 1rem 0.75rem
+  display: flex
+  flex-direction: column
+  gap: 0.25rem
+  overflow-y: auto
+
+.nav-item
+  display: flex
+  align-items: center
+  gap: 0.75rem
+  padding: 0.65rem 1rem
+  border-radius: 10px
+  color: var(--text-secondary)
+  font-size: 0.88rem
+  font-weight: 500
+  cursor: pointer
+  transition: all 0.2s ease
+  border: none
+  background: transparent
+  text-align: left
+  width: 100%
+
+.nav-item:hover
+  background: rgba(255, 255, 255, 0.04)
+  color: var(--text-primary)
+
+.nav-item.active
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.18), rgba(139, 92, 246, 0.05))
+  color: #C4B5FD
+  border-left: 3px solid var(--accent-purple)
+  margin-left: -3px
+
+.nav-icon
+  width: 1.25rem
+  height: 1.25rem
+  opacity: 0.7
+
+.nav-item.active .nav-icon
+  opacity: 1
+  color: var(--accent-purple)
+
+.sidebar-footer
+  padding: 1rem 1.25rem
+  border-top: 1px solid var(--border-subtle)
+
+.sidebar-swarm-info
+  display: flex
+  align-items: center
+  gap: 0.6rem
+  margin-bottom: 0.6rem
+
+.sidebar-swarm-icon
+  width: 1.5rem
+  height: 1.5rem
+  border-radius: 6px
+  background: var(--accent-purple-dim)
+  display: grid
+  place-items: center
+  color: var(--accent-purple)
+  font-size: 0.75rem
+
+.sidebar-swarm-name
+  font-size: 0.82rem
+  font-weight: 600
+  color: var(--text-primary)
+
+.sidebar-swarm-id
+  font-size: 0.7rem
+  color: var(--text-muted)
+  font-family: var(--font-mono)
+  margin-top: 0.15rem
+
+.sidebar-status
+  display: flex
+  align-items: center
+  gap: 0.4rem
+  font-size: 0.75rem
+  color: var(--accent-green)
+
+.status-dot
+  width: 6px
+  height: 6px
+  border-radius: 50%
+  background: var(--accent-green)
+  box-shadow: 0 0 6px var(--accent-green)
+
+// ─── Main Content ───────────────────────────────────────────
+.main
+  flex: 1
+  margin-left: 240px
+  display: flex
+  flex-direction: column
+  min-height: 100vh
+
+// ─── Topbar ─────────────────────────────────────────────────
+.topbar
+  height: 56px
+  display: flex
+  align-items: center
+  justify-content: space-between
+  padding: 0 1.5rem
+  border-bottom: 1px solid var(--border-subtle)
+  background: var(--bg-primary)
+  position: sticky
+  top: 0
+  z-index: 50
+
+.breadcrumb
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  font-size: 0.88rem
+  color: var(--text-secondary)
+
+.breadcrumb a
+  color: var(--text-secondary)
+  text-decoration: none
+  transition: color 0.2s
+
+.breadcrumb a:hover
+  color: var(--text-primary)
+
+.breadcrumb-sep
+  color: var(--text-muted)
+
+.breadcrumb-current
+  color: var(--text-primary)
+  font-weight: 600
+
+.topbar-actions
+  display: flex
+  align-items: center
+  gap: 0.5rem
+
+.topbar-chip
+  display: inline-flex
+  align-items: center
+  gap: 0.4rem
+  padding: 0.35rem 0.7rem
+  border-radius: 999px
+  background: rgba(16, 185, 129, 0.1)
+  border: 1px solid rgba(16, 185, 129, 0.2)
+  color: var(--accent-green)
+  font-size: 0.78rem
+  font-weight: 500
+
+.topbar-btn
+  width: 2rem
+  height: 2rem
+  border-radius: 8px
+  border: 1px solid var(--border-subtle)
+  background: transparent
+  color: var(--text-secondary)
+  display: grid
+  place-items: center
+  cursor: pointer
+  transition: all 0.2s
+
+.topbar-btn:hover
+  background: rgba(255, 255, 255, 0.04)
+  color: var(--text-primary)
+
+.topbar-user
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  padding: 0.25rem 0.6rem 0.25rem 0.25rem
+  border-radius: 999px
+  border: 1px solid var(--border-subtle)
+  background: transparent
+  color: var(--text-secondary)
+  font-size: 0.82rem
+  cursor: pointer
+
+.user-avatar
+  width: 1.6rem
+  height: 1.6rem
+  border-radius: 50%
+  background: linear-gradient(135deg, #7C3AED, #3B82F6)
+  display: grid
+  place-items: center
+  font-size: 0.65rem
+  font-weight: 700
+  color: white
+
+// ─── Content Area ───────────────────────────────────────────
+.content
+  flex: 1
+  padding: 1.5rem
+  display: flex
+  flex-direction: column
+  gap: 1.25rem
+
+// ─── Section Header ─────────────────────────────────────────
+.section-header
+  margin-bottom: 0.25rem
+
+.section-title
+  font-size: 1.25rem
+  font-weight: 700
+  color: var(--text-primary)
+  margin: 0
+  letter-spacing: -0.01em
+
+.section-desc
+  font-size: 0.85rem
+  color: var(--text-secondary)
+  margin: 0.3rem 0 0
+
+// ─── Stats Row ──────────────────────────────────────────────
+.stats-row
+  display: grid
+  grid-template-columns: repeat(6, 1fr)
+  gap: 1rem
+
+@media (max-width: 1400px)
+  .stats-row
+    grid-template-columns: repeat(3, 1fr)
+
+@media (max-width: 900px)
+  .stats-row
+    grid-template-columns: repeat(2, 1fr)
+
+.stat-card
+  background: var(--bg-card)
+  border: 1px solid var(--border-subtle)
+  border-radius: 14px
+  padding: 1.1rem
+  display: flex
+  flex-direction: column
+  gap: 0.6rem
+  transition: border-color 0.2s, background 0.2s
+  animation: fadeInUp 0.4s ease-out both
+
+.stat-card:hover
+  background: var(--bg-card-hover)
+  border-color: var(--border-medium)
+
+.stat-label
+  font-size: 0.78rem
+  color: var(--text-muted)
+  font-weight: 500
+  display: flex
+  align-items: center
+  justify-content: space-between
+
+.stat-value
+  font-size: 1.6rem
+  font-weight: 700
+  color: var(--text-primary)
+  line-height: 1.1
+  font-family: var(--font-mono)
+
+.stat-value.healthy
+  color: var(--accent-green)
+
+.stat-value.warning
+  color: var(--accent-amber)
+
+.stat-value.danger
+  color: var(--accent-red)
+
+.stat-sub
+  font-size: 0.75rem
+  color: var(--text-muted)
+  display: flex
+  align-items: center
+  gap: 0.4rem
+
+.stat-sub-dot
+  width: 5px
+  height: 5px
+  border-radius: 50%
+
+.stat-sub-dot.online
+  background: var(--accent-green)
+.stat-sub-dot.offline
+  background: var(--accent-red)
+.stat-sub-dot.busy
+  background: var(--accent-amber)
+
+.stat-spark
+  height: 28px
+  margin-top: 0.2rem
+
+// ─── Two Column Layout ──────────────────────────────────────
+.two-col
+  display: grid
+  grid-template-columns: 380px 1fr
+  gap: 1.25rem
+
+@media (max-width: 1200px)
+  .two-col
+    grid-template-columns: 1fr
+
+// ─── Cards ──────────────────────────────────────────────────
+.card
+  background: var(--bg-card)
+  border: 1px solid var(--border-subtle)
+  border-radius: 14px
+  overflow: hidden
+  animation: fadeInUp 0.4s ease-out both
+
+.card-header
+  display: flex
+  align-items: center
+  justify-content: space-between
+  padding: 1rem 1.25rem
+  border-bottom: 1px solid var(--border-subtle)
+
+.card-header-title
+  font-size: 0.95rem
+  font-weight: 600
+  color: var(--text-primary)
+  margin: 0
+
+.card-header-actions
+  display: flex
+  align-items: center
+  gap: 0.5rem
+
+.card-body
+  padding: 1.25rem
+
+// ─── Buttons ────────────────────────────────────────────────
+.btn
+  display: inline-flex
+  align-items: center
+  gap: 0.4rem
+  padding: 0.55rem 1rem
+  border-radius: 8px
+  font-size: 0.82rem
+  font-weight: 500
+  cursor: pointer
+  transition: all 0.2s ease
+  border: 1px solid transparent
+  background: transparent
+  color: var(--text-secondary)
+
+.btn:hover
+  background: rgba(255, 255, 255, 0.05)
+
+.btn-primary
+  background: linear-gradient(135deg, #7C3AED, #8B5CF6)
+  color: white
+  border-color: transparent
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.25)
+
+.btn-primary:hover
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4)
+  transform: translateY(-1px)
+
+.btn-primary:disabled
+  opacity: 0.5
+  cursor: not-allowed
+  transform: none
+  box-shadow: none
+
+.btn-secondary
+  background: var(--bg-elevated)
+  border-color: var(--border-medium)
+  color: var(--text-secondary)
+
+.btn-secondary:hover
+  border-color: var(--accent-purple)
+  color: var(--text-primary)
+
+.btn-danger
+  background: rgba(239, 68, 68, 0.1)
+  border-color: rgba(239, 68, 68, 0.25)
+  color: var(--accent-red)
+
+.btn-danger:hover
+  background: rgba(239, 68, 68, 0.2)
+
+.btn-ghost
+  color: var(--text-muted)
+
+.btn-ghost:hover
+  color: var(--text-primary)
+
+.btn-sm
+  padding: 0.35rem 0.7rem
+  font-size: 0.78rem
+
+// ─── Swarm List ─────────────────────────────────────────────
+.swarm-search
+  display: flex
+  gap: 0.5rem
+  margin-bottom: 0.75rem
+
+.swarm-search input
+  flex: 1
+  padding: 0.55rem 0.9rem
+  border-radius: 8px
+  border: 1px solid var(--border-subtle)
+  background: var(--bg-primary)
+  color: var(--text-primary)
+  font-size: 0.85rem
+  outline: none
+
+.swarm-search input:focus
+  border-color: var(--accent-purple)
+  box-shadow: 0 0 0 3px var(--accent-purple-dim)
+
+.swarm-list
+  display: flex
+  flex-direction: column
+  gap: 0.5rem
+  max-height: 360px
+  overflow-y: auto
+
+.swarm-item
+  display: flex
+  align-items: center
+  gap: 0.75rem
+  padding: 0.85rem 1rem
+  border-radius: 10px
+  border: 1px solid var(--border-subtle)
+  background: var(--bg-primary)
+  cursor: pointer
+  transition: all 0.2s ease
+  text-align: left
+  width: 100%
+
+.swarm-item:hover
+  background: var(--bg-card-hover)
+  border-color: var(--border-medium)
+
+.swarm-item.active
+  border-color: var(--accent-purple)
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.03))
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.2)
+
+.swarm-icon
+  width: 2.2rem
+  height: 2.2rem
+  border-radius: 10px
+  background: var(--accent-purple-dim)
+  display: grid
+  place-items: center
+  color: var(--accent-purple)
+  font-size: 1rem
+  flex-shrink: 0
+
+.swarm-info
+  flex: 1
+  min-width: 0
+
+.swarm-name
+  font-size: 0.88rem
+  font-weight: 600
+  color: var(--text-primary)
+  margin: 0
+
+.swarm-tags
+  display: flex
+  gap: 0.35rem
+  margin-top: 0.25rem
+  flex-wrap: wrap
+
+.swarm-tag
+  font-size: 0.68rem
+  padding: 0.15rem 0.4rem
+  border-radius: 4px
+  background: rgba(255, 255, 255, 0.05)
+  color: var(--text-muted)
+  font-family: var(--font-mono)
+
+.swarm-meta
+  display: flex
+  flex-direction: column
+  align-items: flex-end
+  gap: 0.2rem
+  flex-shrink: 0
+
+.swarm-status
+  font-size: 0.72rem
+  font-weight: 500
+  display: flex
+  align-items: center
+  gap: 0.3rem
+
+.swarm-status.running
+  color: var(--accent-green)
+.swarm-status.stopped
+  color: var(--accent-red)
+
+.swarm-count
+  font-size: 0.72rem
+  color: var(--text-muted)
+
+.status-badge-dot
+  width: 6px
+  height: 6px
+  border-radius: 50%
+
+.status-badge-dot.running
+  background: var(--accent-green)
+  box-shadow: 0 0 4px var(--accent-green)
+.status-badge-dot.stopped
+  background: var(--accent-red)
+
+// ─── Swarm Detail Header ────────────────────────────────────
+.swarm-detail-header
+  display: flex
+  align-items: center
+  justify-content: space-between
+  margin-bottom: 1rem
+
+.swarm-detail-title
+  display: flex
+  align-items: center
+  gap: 0.75rem
+
+.swarm-detail-name
+  font-size: 1.1rem
+  font-weight: 700
+  color: var(--text-primary)
+  margin: 0
+
+.swarm-detail-badge
+  display: inline-flex
+  align-items: center
+  gap: 0.3rem
+  padding: 0.25rem 0.6rem
+  border-radius: 999px
+  font-size: 0.72rem
+  font-weight: 500
+
+.swarm-detail-badge.running
+  background: var(--accent-green-dim)
+  color: var(--accent-green)
+  border: 1px solid rgba(16, 185, 129, 0.2)
+
+.swarm-detail-badge.stopped
+  background: var(--accent-red-dim)
+  color: var(--accent-red)
+  border: 1px solid rgba(239, 68, 68, 0.2)
+
+.swarm-detail-desc
+  font-size: 0.82rem
+  color: var(--text-secondary)
+  margin: 0.2rem 0 0
+
+.swarm-detail-actions
+  display: flex
+  gap: 0.5rem
+
+// ─── Topology Panel ─────────────────────────────────────────
+.topology-panel
+  background: var(--bg-card)
+  border: 1px solid var(--border-subtle)
+  border-radius: 14px
+  padding: 1.25rem
+  min-height: 380px
+  animation: fadeInUp 0.4s ease-out both
+
+.topology-header
+  display: flex
+  align-items: center
+  justify-content: space-between
+  margin-bottom: 1rem
+
+.topology-title
+  font-size: 0.95rem
+  font-weight: 600
+  color: var(--text-primary)
+  margin: 0
+
+.topology-tabs
+  display: flex
+  gap: 0.25rem
+  background: var(--bg-primary)
+  padding: 0.2rem
+  border-radius: 8px
+  border: 1px solid var(--border-subtle)
+
+.topology-tab
+  padding: 0.35rem 0.8rem
+  border-radius: 6px
+  font-size: 0.78rem
+  font-weight: 500
+  color: var(--text-muted)
+  background: transparent
+  border: none
+  cursor: pointer
+  transition: all 0.2s
+
+.topology-tab:hover
+  color: var(--text-secondary)
+
+.topology-tab.active
+  background: var(--bg-elevated)
+  color: var(--text-primary)
+  border: 1px solid var(--border-medium)
+
+.topology-legend
+  display: flex
+  gap: 1rem
+  margin-top: 1rem
+  font-size: 0.72rem
+  color: var(--text-muted)
+
+.legend-item
+  display: flex
+  align-items: center
+  gap: 0.35rem
+
+.legend-dot
+  width: 7px
+  height: 7px
+  border-radius: 50%
+
+.legend-dot.running
+  background: var(--accent-green)
+.legend-dot.idle
+  background: var(--accent-blue)
+.legend-dot.busy
+  background: var(--accent-amber)
+.legend-dot.offline
+  background: var(--text-muted)
+
+// ─── Activity Feed ──────────────────────────────────────────
+.activity-list
+  display: flex
+  flex-direction: column
+  gap: 0.6rem
+  max-height: 320px
+  overflow-y: auto
+
+.activity-item
+  display: flex
+  align-items: flex-start
+  gap: 0.75rem
+  padding: 0.6rem 0.75rem
+  border-radius: 10px
+  transition: background 0.2s
+
+.activity-item:hover
+  background: rgba(255, 255, 255, 0.02)
+
+.activity-icon
+  width: 1.8rem
+  height: 1.8rem
+  border-radius: 8px
+  background: var(--accent-purple-dim)
+  display: grid
+  place-items: center
+  color: var(--accent-purple)
+  font-size: 0.8rem
+  flex-shrink: 0
+
+.activity-content
+  flex: 1
+  min-width: 0
+
+.activity-title
+  font-size: 0.82rem
+  font-weight: 500
+  color: var(--text-primary)
+  margin: 0
+  line-height: 1.4
+
+.activity-desc
+  font-size: 0.75rem
+  color: var(--text-muted)
+  margin: 0.15rem 0 0
+
+.activity-time
+  font-size: 0.72rem
+  color: var(--text-muted)
+  font-family: var(--font-mono)
+  flex-shrink: 0
+  white-space: nowrap
+
+.activity-empty
+  text-align: center
+  padding: 2rem 1rem
+  color: var(--text-muted)
+  font-size: 0.85rem
+
+// ─── Metrics Grid ───────────────────────────────────────────
+.metrics-grid
+  display: grid
+  grid-template-columns: repeat(6, 1fr)
+  gap: 1rem
+
+@media (max-width: 1400px)
+  .metrics-grid
+    grid-template-columns: repeat(3, 1fr)
+
+@media (max-width: 768px)
+  .metrics-grid
+    grid-template-columns: repeat(2, 1fr)
+
+.metric-card
+  background: var(--bg-card)
+  border: 1px solid var(--border-subtle)
+  border-radius: 14px
+  padding: 1rem
+  animation: fadeInUp 0.4s ease-out both
+
+.metric-card-header
+  display: flex
+  align-items: center
+  justify-content: space-between
+  margin-bottom: 0.5rem
+
+.metric-card-label
+  font-size: 0.78rem
+  color: var(--text-muted)
+
+.metric-card-value
+  font-size: 1.15rem
+  font-weight: 700
+  color: var(--text-primary)
+  font-family: var(--font-mono)
+
+.metric-card-value.danger
+  color: var(--accent-red)
+
+.metric-spark
+  height: 36px
+  margin-top: 0.4rem
+
+// ─── System Info ────────────────────────────────────────────
+.sysinfo-card
+  background: var(--bg-card)
+  border: 1px solid var(--border-subtle)
+  border-radius: 14px
+  padding: 1.25rem
+  animation: fadeInUp 0.4s ease-out both
+
+.sysinfo-title
+  font-size: 0.9rem
+  font-weight: 600
+  color: var(--text-primary)
+  margin: 0 0 1rem
+
+.sysinfo-row
+  display: flex
+  justify-content: space-between
+  align-items: center
+  padding: 0.5rem 0
+  border-bottom: 1px solid var(--border-subtle)
+  font-size: 0.82rem
+
+.sysinfo-row:last-child
+  border-bottom: none
+
+.sysinfo-key
+  color: var(--text-muted)
+
+.sysinfo-value
+  color: var(--text-primary)
+  font-family: var(--font-mono)
+  font-size: 0.8rem
+
+// ─── Error Banner ───────────────────────────────────────────
+.error-banner
+  display: grid
+  gap: 0.75rem
+  margin: 0 0 1.25rem
+  padding: 1rem 1.25rem
+  border-radius: 12px
+  border: 1px solid rgba(239, 68, 68, 0.25)
+  background: rgba(69, 18, 29, 0.55)
+  color: #fecaca
+  animation: fadeInUp 0.35s ease-out both
+
+.error-banner-main
+  display: flex
+  align-items: center
+  gap: 0.85rem
+  flex-wrap: wrap
+
+.error-banner-main strong
+  font-family: var(--font-mono)
+  font-size: 0.75rem
+  letter-spacing: 0.1em
+  text-transform: uppercase
+  white-space: nowrap
+  flex-shrink: 0
+  color: #fca5a5
+
+.error-summary
+  flex: 1
+  min-width: 0
+  word-break: break-word
+  line-height: 1.5
+  font-size: 0.88rem
+
+.error-copy-btn
+  display: inline-flex
+  align-items: center
+  gap: 0.35rem
+  padding: 0.4rem 0.75rem
+  border-radius: 8px
+  border: 1px solid rgba(239, 68, 68, 0.3)
+  background: rgba(239, 68, 68, 0.12)
+  color: #fecaca
+  font-size: 0.75rem
+  font-weight: 500
+  cursor: pointer
+  transition: background 0.2s ease, border-color 0.2s ease
+  flex-shrink: 0
+
+.error-copy-btn:hover
+  background: rgba(239, 68, 68, 0.22)
+  border-color: rgba(239, 68, 68, 0.5)
+
+.error-details
+  border-top: 1px solid rgba(239, 68, 68, 0.15)
+  padding-top: 0.6rem
+
+.error-details-summary
+  cursor: pointer
+  list-style: none
+  font-size: 0.8rem
+  color: rgba(254, 202, 202, 0.75)
+  font-family: var(--font-mono)
+  letter-spacing: 0.05em
+  user-select: none
+  display: flex
+  align-items: center
+  gap: 0.4rem
+
+.error-details-summary::-webkit-details-marker
+  display: none
+
+.error-details-summary::before
+  content: '▸'
+  font-size: 0.85rem
+  transition: transform 0.2s ease
+  display: inline-block
+
+.error-details[open] > .error-details-summary::before
+  transform: rotate(90deg)
+
+.error-details-body
+  margin-top: 0.6rem
+  padding: 0.7rem
+  border-radius: 10px
+  background: rgba(20, 10, 12, 0.6)
+  border: 1px solid rgba(239, 68, 68, 0.12)
+
+// ─── Empty States ───────────────────────────────────────────
+.empty-state
+  display: grid
+  place-items: center
+  padding: 2.5rem 1.5rem
+  color: var(--text-muted)
+  text-align: center
+  gap: 0.5rem
+
+.empty-state h3
+  margin: 0
+  font-size: 1rem
+  font-weight: 600
+  color: var(--text-secondary)
+
+.empty-state p
+  margin: 0
+  font-size: 0.82rem
+  line-height: 1.6
+
+// ─── JSON Viewer Overrides for dark theme ───────────────────
+::ng-deep .json-details
+  border-color: var(--border-subtle) !important
+  background: var(--bg-primary) !important
+
+::ng-deep .json-leaf
+  border-color: var(--border-subtle) !important
+  background: rgba(255, 255, 255, 0.02) !important
+
+// ─── Responsive ─────────────────────────────────────────────
+@media (max-width: 768px)
+  .sidebar
+    width: 100%
+    transform: translateX(-100%)
+
+  .main
+    margin-left: 0
+
+  .stats-row
+    grid-template-columns: 1fr
+
+  .metrics-grid
+    grid-template-columns: 1fr
