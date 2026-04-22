@@ -2,11 +2,12 @@ import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
+import { MiniChartComponent } from '../components/mini-chart.component';
 
 @Component({
   selector: 'app-overview-page',
   standalone: true,
-  imports: [CommonModule, GraphViewerComponent],
+  imports: [CommonModule, GraphViewerComponent, MiniChartComponent],
   template: `
     <div class="page">
       <!-- Section Header -->
@@ -215,48 +216,22 @@ import { GraphViewerComponent } from '../graph-viewer.component';
 
       <!-- Bottom Metrics Grid -->
       <div class="bottom-grid">
-        <div class="sparkline-card">
-          <div class="sparkline-label">Agent 活跃度</div>
-          <div class="sparkline-value">{{ state.totalAgents() ?? 0 }}</div>
-          <div class="sparkline-bar">
-            <div class="sparkline-fill" [style.width.%]="Math.min(100, (state.totalAgents() || 0) * 10)"></div>
+        @for (card of state.metricCards(); track card.label) {
+          <div class="sparkline-card">
+            <div class="sparkline-label">{{ card.label }}</div>
+            <div class="sparkline-head">
+              <div class="sparkline-value" [class.success]="card.tone === 'success'" [class.warning]="card.tone === 'warning'" [class.error]="card.tone === 'error'" [class.info]="card.tone === 'info'">
+                {{ card.value }}
+              </div>
+              <div class="sparkline-delta" [class.up]="card.direction === 'up'" [class.down]="card.direction === 'down'">
+                {{ card.direction === 'neutral' ? '稳定' : card.delta }}
+              </div>
+            </div>
+            <div class="sparkline-chart">
+              <app-mini-chart [data]="card.data" [color]="card.color"></app-mini-chart>
+            </div>
           </div>
-        </div>
-        <div class="sparkline-card">
-          <div class="sparkline-label">任务成功率</div>
-          <div class="sparkline-value">N/A</div>
-          <div class="sparkline-bar">
-            <div class="sparkline-fill success" [style.width.%]="0"></div>
-          </div>
-        </div>
-        <div class="sparkline-card">
-          <div class="sparkline-label">错误数</div>
-          <div class="sparkline-value" [class.error]="state.errorCount() > 0">{{ state.errorCount() ?? 0 }}</div>
-          <div class="sparkline-bar">
-            <div class="sparkline-fill error" [style.width.%]="Math.min(100, (state.errorCount() || 0) * 5)"></div>
-          </div>
-        </div>
-        <div class="sparkline-card">
-          <div class="sparkline-label">API 索引</div>
-          <div class="sparkline-value">{{ state.apiIndex() ?? 'default' }}</div>
-          <div class="sparkline-bar">
-            <div class="sparkline-fill" [style.width.%]="50"></div>
-          </div>
-        </div>
-        <div class="sparkline-card">
-          <div class="sparkline-label">Graph 节点</div>
-          <div class="sparkline-value">0</div>
-          <div class="sparkline-bar">
-            <div class="sparkline-fill" [style.width.%]="0"></div>
-          </div>
-        </div>
-        <div class="sparkline-card">
-          <div class="sparkline-label">Graph 边</div>
-          <div class="sparkline-value">0</div>
-          <div class="sparkline-bar">
-            <div class="sparkline-fill" [style.width.%]="0"></div>
-          </div>
-        </div>
+        }
       </div>
 
       <!-- System Info Panel -->
@@ -650,20 +625,26 @@ import { GraphViewerComponent } from '../graph-viewer.component';
       margin-bottom: 10px;
     }
     .sparkline-value.error { color: #ef4444; }
-    .sparkline-bar {
-      height: 4px;
-      background: rgba(148,163,184,0.1);
-      border-radius: 2px;
-      overflow: hidden;
+    .sparkline-value.warning { color: #f59e0b; }
+    .sparkline-value.info { color: #60a5fa; }
+    .sparkline-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
     }
-    .sparkline-fill {
-      height: 100%;
-      background: #8B5CF6;
-      border-radius: 2px;
-      transition: width 0.3s ease;
+    .sparkline-delta {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      white-space: nowrap;
     }
-    .sparkline-fill.success { background: #10B981; }
-    .sparkline-fill.error { background: #ef4444; }
+    .sparkline-delta.up { color: #10B981; }
+    .sparkline-delta.down { color: #ef4444; }
+    .sparkline-chart {
+      margin-top: 8px;
+      min-height: 44px;
+    }
     .system-info {
       margin-bottom: 24px;
     }

@@ -330,6 +330,20 @@ export interface SwarmStatsResponse {
   tool_count: number;
 }
 
+export interface MetricsResponse {
+  success: boolean;
+  window: string;
+  resolution: string;
+  series: {
+    cpu_percent: number[];
+    memory_mb: number[];
+    request_latency_ms: number[];
+    throughput_rps: number[];
+    token_usage: number[];
+    error_rate: number[];
+  };
+}
+
 export interface EventCatalogItem {
   id: string;
   time: string;

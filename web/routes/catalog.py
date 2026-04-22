@@ -6,6 +6,7 @@ from web.catalog import (
     build_agent_catalog,
     build_event_catalog,
     build_log_catalog,
+    build_metrics_catalog,
     build_swarm_stats,
     build_task_catalog,
     build_tool_catalog,
@@ -173,3 +174,14 @@ def list_logs():
         limit=_parse_int(request.args.get("limit", 100), 100),
     )
     return jsonify({"success": True, **payload})
+
+
+@catalog_bp.get("/metrics")
+def metrics():
+    registry = _get_runtime_registry()
+    payload = build_metrics_catalog(
+        registry,
+        window=request.args.get("window"),
+        resolution=request.args.get("resolution"),
+    )
+    return jsonify(payload)

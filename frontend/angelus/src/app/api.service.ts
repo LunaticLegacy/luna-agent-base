@@ -14,6 +14,7 @@ import type {
   LogListResponse,
   MemoryListResponse,
   MemoryCatalogItem,
+  MetricsResponse,
   TaskListResponse,
   ReadyResponse,
   RunSnapshot,
@@ -130,6 +131,13 @@ export class ApiService {
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<LogListResponse> {
     return firstValueFrom(this.http.get<LogListResponse>(joinUrlWithQuery(baseUrl, '/logs', query)));
+  }
+
+  getMetrics(
+    baseUrl: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<MetricsResponse> {
+    return firstValueFrom(this.http.get<MetricsResponse>(joinUrlWithQuery(baseUrl, '/metrics', query)));
   }
 
   listKnowledge(
