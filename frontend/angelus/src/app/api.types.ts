@@ -146,3 +146,100 @@ export interface AgentRoundResponse {
   context: JsonValue;
 }
 
+export interface AgentCatalogItem {
+  id: string;
+  name: string;
+  status: 'online' | 'offline' | 'busy' | 'error';
+  type: 'coordinator' | 'worker' | 'specialist' | 'reviewer' | string;
+  capabilities: string[];
+  tags: string[];
+  tasks_executed: number;
+  success_rate: number;
+  avg_response_time_ms: number;
+  token_usage_total: number;
+  last_activity: string;
+}
+
+export interface AgentCatalogStats {
+  total: number;
+  active: number;
+  success_rate: number;
+  avg_response_time_ms: number;
+  token_usage_total: number;
+}
+
+export interface AgentListResponse {
+  success: boolean;
+  swarm: string;
+  total: number;
+  agents: AgentCatalogItem[];
+  stats: AgentCatalogStats;
+}
+
+export interface TaskCatalogLogItem {
+  time: string | null;
+  level: 'info' | 'warn' | 'error' | 'success';
+  message: string;
+}
+
+export interface TaskCatalogItem {
+  id: string;
+  name: string;
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  executor: string;
+  duration_ms: number;
+  created_at: string;
+  description: string;
+  input: JsonValue;
+  output: JsonValue;
+  logs: TaskCatalogLogItem[];
+  swarm: string;
+}
+
+export interface TaskCatalogStats {
+  pending: number;
+  running: number;
+  success: number;
+  failed: number;
+  avg_duration_ms: number;
+}
+
+export interface TaskListResponse {
+  success: boolean;
+  total: number;
+  page: number;
+  limit: number;
+  items: TaskCatalogItem[];
+  stats: TaskCatalogStats;
+}
+
+export interface ToolCatalogItem {
+  id: string;
+  name: string;
+  swarm: string;
+  type: 'API' | '本地' | string;
+  status: 'online' | 'offline' | 'error' | string;
+  description: string;
+  calls: number;
+  avg_ms: number;
+  last_call: string;
+  success_rate: number;
+  error_rate: number;
+  created_at: string;
+  schema: JsonValue;
+}
+
+export interface ToolCatalogStats {
+  total: number;
+  available: number;
+  api: number;
+  local: number;
+  today_calls: number;
+}
+
+export interface ToolListResponse {
+  success: boolean;
+  tools: ToolCatalogItem[];
+  stats: ToolCatalogStats;
+}

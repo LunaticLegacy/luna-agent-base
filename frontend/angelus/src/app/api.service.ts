@@ -2,11 +2,13 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import type {
+  AgentListResponse,
   AgentRoundRequest,
   AgentRoundResponse,
   ApiIndexResponse,
   GraphSnapshot,
   HealthResponse,
+  TaskListResponse,
   ReadyResponse,
   RunSnapshot,
   RunStartResponse,
@@ -14,6 +16,7 @@ import type {
   RunSwarmResponse,
   SwarmDetailResponse,
   SwarmListResponse,
+  ToolListResponse,
 } from './api.types';
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -29,6 +32,23 @@ function joinUrl(baseUrl: string, path: string): string {
   }
 
   return `${normalizedBase}${normalizedPath}`;
+}
+
+function joinUrlWithQuery(
+  baseUrl: string,
+  path: string,
+  query: Record<string, string | number | boolean | undefined | null> = {}
+): string {
+  const url = joinUrl(baseUrl, path);
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    params.set(key, String(value));
+  }
+  const queryString = params.toString();
+  return queryString ? `${url}${url.includes('?') ? '&' : '?'}${queryString}` : url;
 }
 
 @Injectable({
@@ -57,6 +77,32 @@ export class ApiService {
     return firstValueFrom(
       this.http.get<SwarmDetailResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}`))
     );
+  }
+
+  listAgents(
+    baseUrl: string,
+    swarmName: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<AgentListResponse> {
+    return firstValueFrom(
+      this.http.get<AgentListResponse>(
+        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/agents`, query)
+      )
+    );
+  }
+
+  listTasks(
+    baseUrl: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<TaskListResponse> {
+    return firstValueFrom(this.http.get<TaskListResponse>(joinUrlWithQuery(baseUrl, '/tasks', query)));
+  }
+
+  listTools(
+    baseUrl: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<ToolListResponse> {
+    return firstValueFrom(this.http.get<ToolListResponse>(joinUrlWithQuery(baseUrl, '/tools', query)));
   }
 
   getGraph(baseUrl: string, swarmName: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot }> {

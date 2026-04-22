@@ -8,9 +8,10 @@ This file captures the next round of work so the project can continue without re
   - `app.ts` / `app.html` / `app.sass`: layout shell (sidebar + topbar + `<router-outlet>`)
   - `app.routes.ts`: 10 lazy-loaded routes
   - `StateService`: global singleton with all signals, API calls, and feed management
+  - P0 data loading now prefers real backend responses for Agents / Tasks / Tools, with fallback derivation only when no API data is available yet
   - 3 shared components: `StatCard`, `MiniChart`, `StatusBadge`
 - **Backend**: Flask API provides Swarm/Graph/Run/AgentRound endpoints.
-- **Gap**: 7 out of 10 frontend pages still rely on hard-coded mock data because backend APIs do not exist for Agents, Tasks, Knowledge, Memory, Tools, Events (query), and Logs.
+- **Gap**: P0 backend APIs for Agents, Tasks, and Tools are now implemented; Knowledge, Memory, Events (query), Logs, and Metrics are still mock-derived.
 
 ## Backend API Gap Analysis
 
@@ -352,9 +353,9 @@ If backend APIs are not ready, the frontend can derive plausible data from exist
 
 ## Recommended Execution Order
 
-1. **Implement P0 APIs** (`/agents`, `/tasks`, `/tools`) — this makes 3 core pages show real data.
-2. **Wire P0 APIs into `StateService`** — add methods like `loadAgents()`, `loadTasks()`, `loadTools()`.
-3. **Update page components** — replace mock signals with `state.agents()`, `state.tasks()`, `state.tools()`.
+1. ~~Implement P0 APIs (`/agents`, `/tasks`, `/tools`)~~
+2. ~~Wire P0 APIs into `StateService`~~
+3. Update page components if you want explicit page-level query support for server-side pagination and filtering.
 4. **Implement P1 APIs** (`/stats`, `/events`, `/logs`) — operational visibility.
 5. **Implement P2 APIs** (`/knowledge`, `/memory`) — only if these concepts are part of the product roadmap.
 6. **Implement P3 API** (`/metrics`) — lowest priority, purely cosmetic.
