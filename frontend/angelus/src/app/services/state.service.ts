@@ -11,6 +11,7 @@ import type {
   LogCatalogItem,
   MemoryCatalogItem,
   TaskCatalogItem,
+  MetricsResponse,
   ReadyResponse,
   RunSnapshot,
   SwarmDetails,
@@ -138,6 +139,20 @@ export interface MemoryItem {
   relatedIds: string[];
 }
 
+export interface MetricCard {
+  label: string;
+  value: string;
+  fill: number;
+  tone?: 'success' | 'warning' | 'error' | 'info';
+}
+
+export interface MetricTrendCard extends MetricCard {
+  data: number[];
+  color: string;
+  delta: string;
+  direction: 'up' | 'down' | 'neutral';
+}
+
 function shortTime(): string {
   return new Date().toLocaleTimeString('en-GB', {
     hour12: false,
@@ -215,6 +230,10 @@ export class StateService {
   readonly eventsLoaded = signal(false);
   readonly logs = signal<LogItem[]>([]);
   readonly logsLoaded = signal(false);
+  readonly metrics = signal<MetricsResponse | null>(null);
+  readonly metricsLoaded = signal(false);
+  readonly metricsWindow = signal('1h');
+  readonly metricsResolution = signal('1m');
   readonly knowledge = signal<KnowledgeEntry[]>([]);
   readonly knowledgeLoaded = signal(false);
   readonly memories = signal<MemoryItem[]>([]);
@@ -370,6 +389,49 @@ export class StateService {
     };
   });
 
+  readonly derivedMetrics = computed<MetricsResponse>(() => {
+    if (this.metricsLoaded() && this.metrics()) {
+      return this.metrics()!;
+    }
+    return this.buildFallbackMetrics();
+  });
+
+  readonly metricCards = computed<MetricTrendCard[]>(() => {
+    const metrics = this.derivedMetrics().series;
+    return [
+      this.buildTrendCard('CPU 使用率', metrics.cpu_percent, {
+        formatter: (value) => `${Math.round(value)}%`,
+        color: '#60a5fa',
+        tone: 'info',
+      }),
+      this.buildTrendCard('内存占用', metrics.memory_mb, {
+        formatter: (value) => `${Math.round(value)} MB`,
+        color: '#f59e0b',
+        tone: 'warning',
+      }),
+      this.buildTrendCard('请求延迟', metrics.request_latency_ms, {
+        formatter: (value) => `${Math.round(value)} ms`,
+        color: '#ef4444',
+        tone: 'error',
+      }),
+      this.buildTrendCard('吞吐速率', metrics.throughput_rps, {
+        formatter: (value) => `${value.toFixed(2)} rps`,
+        color: '#10B981',
+        tone: 'success',
+      }),
+      this.buildTrendCard('Token 用量', metrics.token_usage, {
+        formatter: (value) => this.formatCompactCount(value),
+        color: '#8B5CF6',
+        tone: 'info',
+      }),
+      this.buildTrendCard('错误率', metrics.error_rate.map((value) => value * 100), {
+        formatter: (value) => `${value.toFixed(1)}%`,
+        color: '#ef4444',
+        tone: 'error',
+      }),
+    ];
+  });
+
   readonly derivedLogs = computed<LogItem[]>(() => {
     if (this.logsLoaded()) return this.logs();
     return this.responseFeed().map(item => ({
@@ -518,6 +580,87 @@ export class StateService {
     if (sec < 60) return `${sec}s`;
     if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
     return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  }
+
+  private latestNumber(values: number[]): number {
+    if (!Array.isArray(values) || values.length === 0) {
+      return 0;
+    }
+    const last = values[values.length - 1];
+    return Number.isFinite(last) ? Number(last) : 0;
+  }
+
+  private formatCompactCount(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) {
+      return '0';
+    }
+    if (value >= 1_000_000) {
+      return `${(value / 1_000_000).toFixed(1)}M`;
+    }
+    if (value >= 1_000) {
+      return `${(value / 1_000).toFixed(1)}K`;
+    }
+    return `${Math.round(value)}`;
+  }
+
+  private buildTrendCard(
+    label: string,
+    data: number[],
+    options: {
+      formatter: (value: number) => string;
+      color: string;
+      tone: MetricTrendCard['tone'];
+    }
+  ): MetricTrendCard {
+    const normalized = Array.isArray(data) ? data.map((value) => (Number.isFinite(value) ? Number(value) : 0)) : [];
+    const latest = this.latestNumber(normalized);
+    const first = normalized.length > 0 ? normalized[0] : latest;
+    const max = Math.max(...normalized, 1);
+    const deltaValue = latest - first;
+    const deltaDirection: MetricTrendCard['direction'] = deltaValue > 0.5 ? 'up' : deltaValue < -0.5 ? 'down' : 'neutral';
+    return {
+      label,
+      value: options.formatter(latest),
+      fill: Math.min(100, Math.max(0, (latest / max) * 100)),
+      tone: options.tone,
+      data: normalized.length > 0 ? normalized : [0],
+      color: options.color,
+      delta: `${deltaValue >= 0 ? '+' : ''}${Number.isInteger(deltaValue) ? deltaValue.toFixed(0) : deltaValue.toFixed(1)}`,
+      direction: deltaDirection,
+    };
+  }
+
+  private buildFallbackMetrics(): MetricsResponse {
+    const feedCount = this.responseFeed().length + this.liveEvents().length;
+    const activeRuns = this.activeRun() ? 1 : 0;
+    const totalAgents = this.totalAgents() || 0;
+    const errors = Math.max(0, this.errorCount());
+    const graphNodes = this.selectedGraph()?.node_count ?? this.selectedGraph()?.nodes.length ?? 0;
+    const graphFactor = Math.max(1, graphNodes || 1);
+    const window = this.metricsWindow();
+    const resolution = this.metricsResolution();
+    const bucketCount = 12;
+
+    const cpu = Array.from({ length: bucketCount }, (_, idx) => Math.min(100, 12 + totalAgents * 4 + activeRuns * 12 + feedCount + idx));
+    const memory = Array.from({ length: bucketCount }, (_, idx) => 220 + graphFactor * 10 + activeRuns * 28 + feedCount * 3 + idx * 4);
+    const latency = Array.from({ length: bucketCount }, (_, idx) => 28 + activeRuns * 14 + errors * 3 + idx * 2);
+    const throughput = Array.from({ length: bucketCount }, (_, idx) => Number((Math.max(0, feedCount - idx) / 6 + activeRuns * 0.25).toFixed(3)));
+    const tokenUsage = Array.from({ length: bucketCount }, (_, idx) => 800 + totalAgents * 220 + feedCount * 90 + idx * 45);
+    const errorRate = Array.from({ length: bucketCount }, (_, idx) => Number((Math.min(0.25, errors / Math.max(1, feedCount + activeRuns + idx + 1))).toFixed(4)));
+
+    return {
+      success: true,
+      window,
+      resolution,
+      series: {
+        cpu_percent: cpu,
+        memory_mb: memory,
+        request_latency_ms: latency,
+        throughput_rps: throughput,
+        token_usage: tokenUsage,
+        error_rate: errorRate,
+      },
+    };
   }
 
   private mapAgentCatalogItem(item: AgentCatalogItem): AgentRow {
@@ -705,6 +848,7 @@ export class StateService {
       await Promise.allSettled([
         this.loadEvents(),
         this.loadLogs(),
+        this.loadMetrics(),
         this.loadKnowledge(),
         this.loadMemory(),
       ]);
@@ -870,6 +1014,22 @@ export class StateService {
     } catch (error) {
       this.error.set(formatErrorDetail(error));
       this.pushFeed('日志列表失败', 'GET', `${this.baseUrl()}/logs`, 'error', { error: errorSummary(error) });
+    }
+  }
+
+  async loadMetrics(): Promise<void> {
+    try {
+      const response = await this.apiService.getMetrics(this.baseUrl(), {
+        window: this.metricsWindow(),
+        resolution: this.metricsResolution(),
+      });
+      this.metrics.set(response);
+      this.metricsLoaded.set(true);
+      this.pushFeed('系统指标', 'GET', `${this.baseUrl()}/metrics`, 'info', response);
+    } catch (error) {
+      this.metricsLoaded.set(false);
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('系统指标失败', 'GET', `${this.baseUrl()}/metrics`, 'error', { error: errorSummary(error) });
     }
   }
 

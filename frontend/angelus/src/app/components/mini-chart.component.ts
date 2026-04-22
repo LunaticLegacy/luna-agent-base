@@ -20,28 +20,29 @@ export class MiniChartComponent {
   @Input() data: number[] = [];
 
   private defaultData = computed(() => {
-    const base = this.data.length > 0 ? this.data : [30,45,35,50,40,55,45,60,50,45];
-    return base;
+    return this.data.length > 0 ? this.data : [30, 45, 35, 50, 40, 55, 45, 60, 50, 45];
+  });
+
+  private normalizedPoints = computed(() => {
+    const values = this.defaultData().map((value) => (Number.isFinite(value) ? Number(value) : 0));
+    const max = Math.max(...values, 1);
+    if (values.length === 1) {
+      const y = 30 - (values[0] / max) * 28 - 1;
+      return [`0,${y}`, `100,${y}`];
+    }
+    return values.map((value, index) => {
+      const x = (index / (values.length - 1)) * 100;
+      const y = 30 - (value / max) * 28 - 1;
+      return `${x},${y}`;
+    });
   });
 
   linePoints = computed(() => {
-    const d = this.defaultData();
-    const max = Math.max(...d, 1);
-    return d.map((v, i) => {
-      const x = (i / (d.length - 1)) * 100;
-      const y = 30 - (v / max) * 28 - 1;
-      return `${x},${y}`;
-    }).join(' ');
+    return this.normalizedPoints().join(' ');
   });
 
   areaPoints = computed(() => {
-    const d = this.defaultData();
-    const max = Math.max(...d, 1);
-    let pts = d.map((v, i) => {
-      const x = (i / (d.length - 1)) * 100;
-      const y = 30 - (v / max) * 28 - 1;
-      return `${x},${y}`;
-    }).join(' ');
-    return `0,30 ${pts} 100,30`;
+    const points = this.normalizedPoints().join(' ');
+    return `0,30 ${points} 100,30`;
   });
 }

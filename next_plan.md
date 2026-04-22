@@ -358,7 +358,7 @@ If backend APIs are not ready, the frontend can derive plausible data from exist
 3. Update page components if you want explicit page-level query support for server-side pagination and filtering.
 4. ~~Implement P1 APIs (`/stats`, `/events`, `/logs`)~~
 5. ~~Implement P2 APIs (`/knowledge`, `/memory`)~~
-6. **Implement P3 API** (`/metrics`) — lowest priority, purely cosmetic.
+6. ~~Implement P3 API (`/metrics`)~~
 
 ---
 
