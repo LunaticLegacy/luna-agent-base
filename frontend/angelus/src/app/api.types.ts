@@ -43,6 +43,10 @@ export interface SwarmSummary {
   graph_valid: boolean;
   graph_errors: string[];
   graph_warnings: string[];
+  active_run_count?: number;
+  active_run_ids?: string[];
+  agent_files?: string[];
+  graph?: GraphSnapshot | null;
 }
 
 export interface SwarmDetails extends SwarmSummary {

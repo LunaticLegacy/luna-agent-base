@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ApiService } from '../api.service';
+import { ApiService, joinUrl } from '../api.service';
 import type {
   AgentCatalogItem,
   ApiIndexResponse,
@@ -20,6 +20,44 @@ import type {
   ToolCatalogItem,
 } from '../api.types';
 import { asJsonValue, normalizeJsonValue, valuePreview } from '../json-utils';
+
+type SwarmExecutionTemplate = 'summary' | 'analysis' | 'debug' | 'custom';
+type SwarmOutputStyle = 'markdown' | 'bullet' | 'brief';
+
+const SWARM_EXECUTION_PRESETS: Record<
+  SwarmExecutionTemplate,
+  {
+    label: string;
+    prompt: string;
+    context: string;
+    outputStyle: SwarmOutputStyle;
+  }
+> = {
+  summary: {
+    label: '系统概览',
+    prompt: '总结系统当前可用的 swarm 与 graph 状态。',
+    context: '请聚焦当前可用的 agent、图结构、运行状态和关键风险。',
+    outputStyle: 'markdown',
+  },
+  analysis: {
+    label: '状态分析',
+    prompt: '分析当前 swarm 的任务执行情况，并找出瓶颈。',
+    context: '请给出关键发现、可执行建议，以及下一步观察重点。',
+    outputStyle: 'bullet',
+  },
+  debug: {
+    label: '排障建议',
+    prompt: '检查当前 swarm 的执行链路，定位异常并提出修复建议。',
+    context: '请重点关注失败节点、超时、重复执行和资源瓶颈。',
+    outputStyle: 'brief',
+  },
+  custom: {
+    label: '自定义',
+    prompt: '',
+    context: '',
+    outputStyle: 'markdown',
+  },
+};
 
 export interface FeedItem {
   id: number;
@@ -153,6 +191,27 @@ export interface MetricTrendCard extends MetricCard {
   direction: 'up' | 'down' | 'neutral';
 }
 
+export interface SwarmMgmtTrendCard {
+  label: string;
+  value: string;
+  fill: number;
+  color: string;
+}
+
+export interface SwarmMgmtTaskSlice {
+  label: string;
+  count: number;
+  percentage: number;
+  color: string;
+}
+
+export interface TopologyLegendItem {
+  label: string;
+  detail: string;
+  color: string;
+  kind: 'dot' | 'line' | 'dashed';
+}
+
 function shortTime(): string {
   return new Date().toLocaleTimeString('en-GB', {
     hour12: false,
@@ -204,10 +263,13 @@ export class StateService {
   readonly ready = signal<ReadyResponse | null>(null);
   readonly swarms = signal<SwarmSummary[]>([]);
   readonly selectedSwarmName = signal<string | null>(null);
-  readonly selectedSwarm = signal<SwarmDetails | null>(null);
+  readonly selectedSwarm = signal<SwarmSummary | null>(null);
   readonly selectedAgentIdChoice = signal<string | null>(null);
   readonly selectedGraph = signal<GraphSnapshot | null>(null);
-  readonly swarmPayloadText = signal<string>(JSON.stringify({ text: '总结系统当前可用的 swarm 与 graph 状态。' }, null, 2));
+  readonly swarmExecutionTemplate = signal<SwarmExecutionTemplate>('summary');
+  readonly swarmExecutionPrompt = signal<string>(SWARM_EXECUTION_PRESETS.summary.prompt);
+  readonly swarmExecutionContext = signal<string>(SWARM_EXECUTION_PRESETS.summary.context);
+  readonly swarmExecutionOutputStyle = signal<SwarmOutputStyle>(SWARM_EXECUTION_PRESETS.summary.outputStyle);
   readonly swarmRounds = signal<number>(1);
   readonly metaMode = signal<boolean>(false);
   readonly agentMessage = signal<string>('请说明当前 swarm 的职责边界。');
@@ -244,13 +306,14 @@ export class StateService {
 
   readonly totalAgents = computed(() => this.swarms().reduce((sum, s) => sum + s.agent_count, 0));
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
+  readonly resolvedGraph = computed<GraphSnapshot | null>(() => this.selectedSwarm()?.graph ?? this.selectedGraph());
 
   /* ---------- Derived data (replaces hard-coded mock) ---------- */
 
   readonly derivedAgents = computed<AgentRow[]>(() => {
     if (this.agentsLoaded()) return this.agents();
     const swarm = this.selectedSwarm();
-    const graph = this.selectedGraph();
+    const graph = this.resolvedGraph();
     const run = this.activeRun();
     const feed = this.responseFeed();
     if (!swarm?.agent_files?.length) return [];
@@ -330,7 +393,7 @@ export class StateService {
 
   readonly derivedTools = computed<ToolItem[]>(() => {
     if (this.toolsLoaded()) return this.tools();
-    const graph = this.selectedGraph();
+    const graph = this.resolvedGraph();
     if (!graph) return [];
     return graph.nodes
       .filter(n => n.node_type === 'ToolNode')
@@ -456,7 +519,7 @@ export class StateService {
 
   readonly derivedKnowledge = computed<KnowledgeEntry[]>(() => {
     if (this.knowledgeLoaded()) return this.knowledge();
-    const graph = this.selectedGraph();
+    const graph = this.resolvedGraph();
     if (!graph) return [];
     return graph.nodes
       .filter(n => n.metadata && typeof n.metadata === 'object' && Object.keys(n.metadata).length > 0)
@@ -564,6 +627,136 @@ export class StateService {
     };
   });
 
+  readonly swarmMgmtResourceTrends = computed<SwarmMgmtTrendCard[]>(() => {
+    const stats = this.swarmStats();
+    if (this.swarmStatsLoaded() && stats) {
+      const cpuSeries = stats.resource_usage.cpu_percent ?? [];
+      const memorySeries = stats.resource_usage.memory_mb ?? [];
+      const latestCpu = this.latestNumber(cpuSeries);
+      const latestMemory = this.latestNumber(memorySeries);
+      const memoryMax = Math.max(...memorySeries, latestMemory, 1);
+      const throughputFill = Math.min(100, Math.max(0, stats.throughput * 12));
+      return [
+        {
+          label: 'CPU',
+          value: `${Math.round(latestCpu)}%`,
+          fill: Math.min(100, Math.max(0, latestCpu)),
+          color: '#8B5CF6',
+        },
+        {
+          label: '内存',
+          value: `${Math.round(latestMemory)} MB`,
+          fill: Math.min(100, Math.max(0, (latestMemory / memoryMax) * 100)),
+          color: '#10B981',
+        },
+        {
+          label: '吞吐',
+          value: `${stats.throughput} rps`,
+          fill: throughputFill,
+          color: '#f59e0b',
+        },
+      ];
+    }
+
+    const run = this.activeRun();
+    const feedCount = this.responseFeed().length + this.liveEvents().length;
+    const totalAgents = this.totalAgents() || 0;
+    return [
+      {
+        label: 'CPU',
+        value: `${Math.min(100, 12 + totalAgents * 4 + feedCount)}%`,
+        fill: Math.min(100, 12 + totalAgents * 4 + feedCount),
+        color: '#8B5CF6',
+      },
+      {
+        label: '内存',
+        value: `${220 + totalAgents * 12 + feedCount * 3} MB`,
+        fill: Math.min(100, Math.max(0, (220 + totalAgents * 12 + feedCount * 3) / 8)),
+        color: '#10B981',
+      },
+      {
+        label: '吞吐',
+        value: run ? `${Math.round(run.event_count / Math.max(1, run.rounds || 1))} rps` : '0 rps',
+        fill: run ? Math.min(100, run.event_count * 4) : 0,
+        color: '#f59e0b',
+      },
+    ];
+  });
+
+  readonly swarmMgmtTaskSlices = computed<SwarmMgmtTaskSlice[]>(() => {
+    const stats = this.swarmStats();
+    const distribution = this.swarmStatsLoaded() && stats ? stats.task_distribution : null;
+    const counts = distribution
+      ? [
+          { label: '完成', count: distribution.completed, color: '#10B981' },
+          { label: '运行中', count: distribution.running, color: '#f59e0b' },
+          { label: '待处理', count: distribution.pending, color: '#3B82F6' },
+          { label: '失败', count: distribution.failed, color: '#ef4444' },
+        ]
+      : (() => {
+          const run = this.activeRun();
+          const pending = run ? 0 : 1;
+          const running = run ? 1 : 0;
+          const completed = this.derivedTasks().filter((task) => task.status === 'success').length;
+          const failed = this.derivedTasks().filter((task) => task.status === 'failed').length;
+          return [
+            { label: '完成', count: completed, color: '#10B981' },
+            { label: '运行中', count: running, color: '#f59e0b' },
+            { label: '待处理', count: pending, color: '#3B82F6' },
+            { label: '失败', count: failed, color: '#ef4444' },
+          ];
+        })();
+
+    const total = Math.max(1, counts.reduce((sum, item) => sum + item.count, 0));
+    return counts
+      .filter((item) => item.count > 0)
+      .map((item) => ({
+        ...item,
+        percentage: Math.round((item.count / total) * 100),
+      }));
+  });
+
+  readonly swarmMgmtTaskGradient = computed(() => {
+    const slices = this.swarmMgmtTaskSlices();
+    if (slices.length === 0) {
+      return 'conic-gradient(#10B981 0% 65%, #f59e0b 65% 90%, #ef4444 90% 100%)';
+    }
+    const total = Math.max(1, slices.reduce((sum, item) => sum + item.count, 0));
+    let cursor = 0;
+    const segments = slices.map((item) => {
+      const span = (item.count / total) * 100;
+      const segment = `${item.color} ${cursor.toFixed(1)}% ${(cursor + span).toFixed(1)}%`;
+      cursor += span;
+      return segment;
+    });
+    return `conic-gradient(${segments.join(', ')})`;
+  });
+
+  readonly topologyLegendItems = computed<TopologyLegendItem[]>(() => {
+    const graph = this.resolvedGraph();
+    if (!graph) {
+      return [
+        { label: '入口节点', detail: '—', color: '#8B5CF6', kind: 'dot' },
+        { label: 'Agent 节点', detail: '—', color: '#10B981', kind: 'dot' },
+        { label: 'Tool 节点', detail: '—', color: '#f59e0b', kind: 'dot' },
+        { label: '退出节点', detail: '—', color: '#ef4444', kind: 'dot' },
+        { label: '数据流', detail: '边', color: '#94a3b8', kind: 'line' },
+        { label: '控制流', detail: '条件边', color: '#94a3b8', kind: 'dashed' },
+      ];
+    }
+
+    const agentCount = graph.nodes.filter((node) => node.node_type === 'AgentNode').length;
+    const toolCount = graph.nodes.filter((node) => node.node_type === 'ToolNode').length;
+    return [
+      { label: '入口节点', detail: graph.entry_node_id !== null ? `ID ${graph.entry_node_id}` : '无', color: '#8B5CF6', kind: 'dot' },
+      { label: 'Agent 节点', detail: `${agentCount} 个`, color: '#10B981', kind: 'dot' },
+      { label: 'Tool 节点', detail: `${toolCount} 个`, color: '#f59e0b', kind: 'dot' },
+      { label: '退出节点', detail: graph.exit_node_id !== null ? `ID ${graph.exit_node_id}` : '无', color: '#ef4444', kind: 'dot' },
+      { label: '数据流', detail: `${graph.edge_count} 条边`, color: '#94a3b8', kind: 'line' },
+      { label: '控制流', detail: '条件/回路', color: '#94a3b8', kind: 'dashed' },
+    ];
+  });
+
   private fmtDuration(start: string | null, end: string | null): string {
     if (!start || !end) return '-';
     const s = new Date(start).getTime();
@@ -635,7 +828,7 @@ export class StateService {
     const activeRuns = this.activeRun() ? 1 : 0;
     const totalAgents = this.totalAgents() || 0;
     const errors = Math.max(0, this.errorCount());
-    const graphNodes = this.selectedGraph()?.node_count ?? this.selectedGraph()?.nodes.length ?? 0;
+    const graphNodes = this.resolvedGraph()?.node_count ?? this.resolvedGraph()?.nodes.length ?? 0;
     const graphFactor = Math.max(1, graphNodes || 1);
     const window = this.metricsWindow();
     const resolution = this.metricsResolution();
@@ -797,7 +990,25 @@ export class StateService {
     this.apiBaseUrl.set(value.trim() || '/api');
   }
 
-  setSwarmPayloadText(value: string): void { this.swarmPayloadText.set(value); }
+  setSwarmExecutionTemplate(value: string): void {
+    const template = value in SWARM_EXECUTION_PRESETS ? (value as SwarmExecutionTemplate) : 'custom';
+    this.swarmExecutionTemplate.set(template);
+    if (template === 'custom') {
+      return;
+    }
+    const preset = SWARM_EXECUTION_PRESETS[template];
+    this.swarmExecutionPrompt.set(preset.prompt);
+    this.swarmExecutionContext.set(preset.context);
+    this.swarmExecutionOutputStyle.set(preset.outputStyle);
+  }
+
+  setSwarmExecutionPrompt(value: string): void { this.swarmExecutionPrompt.set(value); }
+  setSwarmExecutionContext(value: string): void { this.swarmExecutionContext.set(value); }
+  setSwarmExecutionOutputStyle(value: string): void {
+    const next = value === 'brief' || value === 'bullet' || value === 'markdown' ? value : 'markdown';
+    this.swarmExecutionOutputStyle.set(next);
+  }
+
   setSwarmRounds(value: string): void {
     const parsed = Number.parseInt(value, 10);
     this.swarmRounds.set(Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
@@ -843,6 +1054,16 @@ export class StateService {
         const availableNames = swarmResult.value.swarms.map((s) => s.swarm_name);
         if (!this.selectedSwarmName() || !availableNames.includes(this.selectedSwarmName()!)) {
           this.selectedSwarmName.set(swarmResult.value.swarms[0]?.swarm_name ?? null);
+        }
+        if (this.selectedSwarmName()) {
+          const selectedFromList = swarmResult.value.swarms.find(
+            (item) => item.swarm_name === this.selectedSwarmName()
+          );
+          if (selectedFromList) {
+            this.selectedSwarm.set(selectedFromList);
+            this.selectedGraph.set(selectedFromList.graph ?? null);
+            this.ensureAgentSelection(selectedFromList);
+          }
         }
       } else { issues.push(errorSummary(swarmResult.reason)); }
       await Promise.allSettled([
@@ -901,19 +1122,42 @@ export class StateService {
         this.loadTools(),
         this.loadSwarmStats(),
       ]);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.selectedSwarm.set(null); this.selectedGraph.set(null); }
+    } catch (error) {
+      const fallback = this.swarms().find((item) => item.swarm_name === swarmName) ?? null;
+      if (fallback) {
+        this.selectedSwarm.set(fallback);
+        this.selectedGraph.set(fallback.graph ?? null);
+        this.ensureAgentSelection(fallback);
+      } else {
+        this.selectedSwarm.set(null);
+        this.selectedGraph.set(null);
+      }
+      this.error.set(formatErrorDetail(error));
+    }
     finally { this.loadingDetails.set(false); }
   }
 
   async loadSelectedGraph(): Promise<void> {
     const swarmName = this.selectedSwarmName();
     if (!swarmName) { this.selectedGraph.set(null); return; }
+    const cached = this.swarms().find((item) => item.swarm_name === swarmName);
+    if (cached?.graph) {
+      this.selectedGraph.set(cached.graph);
+      return;
+    }
     try {
       const baseUrl = this.baseUrl();
       const response = await this.apiService.getGraph(baseUrl, swarmName);
       this.selectedGraph.set(response.graph);
       this.pushFeed(`图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/graph`, 'info', response);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.selectedGraph.set(null); }
+    } catch (error) {
+      if (cached?.graph) {
+        this.selectedGraph.set(cached.graph);
+        return;
+      }
+      this.error.set(formatErrorDetail(error));
+      this.selectedGraph.set(null);
+    }
   }
 
   async loadAgents(): Promise<void> {
@@ -1059,39 +1303,55 @@ export class StateService {
     }
   }
 
-  async runSwarmSync(): Promise<void> {
+  async startSwarmStructure(): Promise<void> {
     const swarmName = this.selectedSwarmName();
-    if (!swarmName) { this.error.set(makeUserError('运行前请选择一个 Swarm。')); return; }
-    let parsedPayload: unknown;
-    try { parsedPayload = this.parseUserJson(this.swarmPayloadText()); } catch (error) { this.error.set(formatErrorDetail(error)); return; }
+    if (!swarmName) { this.error.set(makeUserError('启动结构前请选择一个 Swarm。')); return; }
+    const prompt = this.swarmExecutionPrompt().trim();
+    if (!prompt) { this.error.set(makeUserError('执行目标不能为空。')); return; }
     this.loading.set(true); this.error.set(null);
     try {
-      const response = await this.apiService.runSwarm(this.baseUrl(), swarmName, { input: asJsonValue(parsedPayload), rounds: this.swarmRounds(), meta_mode: this.metaMode() });
-      this.pushFeed(`Swarm 运行 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/run`, 'success', response);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`Swarm 运行失败 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/run`, 'error', { error: errorSummary(error) }); }
+      const response = await this.apiService.startSwarm(this.baseUrl(), swarmName, {
+        input: asJsonValue(this.buildSwarmExecutionInput()),
+        rounds: this.swarmRounds(),
+        meta_mode: this.metaMode(),
+      });
+      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start`), 'success', response);
+    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start`), 'error', { error: errorSummary(error) }); }
     finally { this.loading.set(false); }
   }
 
-  async startBackgroundRun(): Promise<void> {
+  async startSwarmBackground(): Promise<void> {
     const swarmName = this.selectedSwarmName();
-    if (!swarmName) { this.error.set(makeUserError('启动后台运行前请选择一个 Swarm。')); return; }
-    let parsedPayload: unknown;
-    try { parsedPayload = this.parseUserJson(this.swarmPayloadText()); } catch (error) { this.error.set(formatErrorDetail(error)); return; }
+    if (!swarmName) { this.error.set(makeUserError('启动后台结构前请选择一个 Swarm。')); return; }
+    const prompt = this.swarmExecutionPrompt().trim();
+    if (!prompt) { this.error.set(makeUserError('执行目标不能为空。')); return; }
     this.loading.set(true); this.error.set(null);
     try {
-      const response = await this.apiService.startRun(this.baseUrl(), swarmName, { input: asJsonValue(parsedPayload), rounds: this.swarmRounds(), meta_mode: this.metaMode() });
+      const response = await this.apiService.startSwarmBackground(this.baseUrl(), swarmName, {
+        input: asJsonValue(this.buildSwarmExecutionInput()),
+        rounds: this.swarmRounds(),
+        meta_mode: this.metaMode(),
+      });
       this.activeRun.set(response.run);
-      this.pushFeed(`运行已启动 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/runs`, 'success', response);
+      this.pushFeed(`后台结构已启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start/background`), 'success', response);
       this.watchRun(response.run);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`运行启动失败 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/runs`, 'error', { error: errorSummary(error) }); }
+    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`后台结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start/background`), 'error', { error: errorSummary(error) }); }
     finally { this.loading.set(false); }
+  }
+
+  async runSwarmSync(): Promise<void> {
+    await this.startSwarmStructure();
+  }
+
+  async startBackgroundRun(): Promise<void> {
+    await this.startSwarmBackground();
   }
 
   async loadRunById(runId: string): Promise<void> {
     try {
       const response = await this.apiService.getRun(this.baseUrl(), runId);
       this.activeRun.set(response.run);
-      this.pushFeed(`运行快照 · ${runId}`, 'GET', `${this.baseUrl()}/runs/${runId}`, 'info', response);
+      this.pushFeed(`运行快照 · ${runId}`, 'GET', joinUrl(this.baseUrl(), `/swarms/runs/${runId}`), 'info', response);
     } catch (error) { this.error.set(formatErrorDetail(error)); }
   }
 
@@ -1103,33 +1363,45 @@ export class StateService {
     this.loading.set(true); this.error.set(null);
     try {
       const response = await this.apiService.runAgentRound(this.baseUrl(), swarmName, agentId, { message: this.agentMessage(), rounds: this.agentRounds(), additional_prompt: this.additionalPrompt().trim() || null });
-      this.pushFeed(`智能体轮次 · ${agentId}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/agents/${agentId}/round`, 'success', response);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`智能体轮次失败 · ${agentId}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/agents/${agentId}/round`, 'error', { error: errorSummary(error) }); }
+      this.pushFeed(`Agent 调试 · ${agentId}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/agents/${agentId}/round`, 'success', response);
+    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`Agent 调试失败 · ${agentId}`, 'POST', `${this.baseUrl()}/swarms/${swarmName}/agents/${agentId}/round`, 'error', { error: errorSummary(error) }); }
     finally { this.loading.set(false); }
   }
 
   selectedAgentId(): string | null {
     const chosen = this.selectedAgentIdChoice();
-    const swarm = this.selectedSwarm();
-    if (chosen && swarm?.agent_files.some((file) => this.stripAgentName(file) === chosen)) return chosen;
+    const available = this.agentIdsFromSwarm(this.selectedSwarm());
+    if (chosen && available.includes(chosen)) return chosen;
     return this.defaultAgentId();
   }
 
   agentChoices(): string[] {
-    const swarm = this.selectedSwarm();
-    return swarm ? swarm.agent_files.map((file) => this.stripAgentName(file)) : [];
+    return this.agentIdsFromSwarm(this.selectedSwarm());
   }
 
-  private ensureAgentSelection(swarm: SwarmDetails): void {
-    const available = swarm.agent_files.map((file) => this.stripAgentName(file));
+  swarmExecutionTemplateLabel(): string {
+    return SWARM_EXECUTION_PRESETS[this.swarmExecutionTemplate()].label;
+  }
+
+  private ensureAgentSelection(swarm: SwarmSummary | SwarmDetails): void {
+    const available = this.agentIdsFromSwarm(swarm);
     const current = this.selectedAgentIdChoice();
     if (!current || !available.includes(current)) this.selectedAgentIdChoice.set(this.defaultAgentId(swarm));
   }
 
-  private defaultAgentId(swarm: SwarmDetails | null = this.selectedSwarm()): string | null {
-    if (!swarm?.agent_files?.length) return null;
-    const preferred = swarm.agent_files.find((file) => file.includes('planner'));
-    return preferred ? this.stripAgentName(preferred) : this.stripAgentName(swarm.agent_files[0]);
+  private defaultAgentId(swarm: SwarmSummary | SwarmDetails | null = this.selectedSwarm()): string | null {
+    const agentFiles = this.agentFilesFromSwarm(swarm);
+    if (!agentFiles.length) return null;
+    const preferred = agentFiles.find((file) => file.includes('planner'));
+    return preferred ? this.stripAgentName(preferred) : this.stripAgentName(agentFiles[0]);
+  }
+
+  private agentFilesFromSwarm(swarm: SwarmSummary | SwarmDetails | null | undefined): string[] {
+    return [...(swarm?.agent_files ?? [])];
+  }
+
+  private agentIdsFromSwarm(swarm: SwarmSummary | SwarmDetails | null | undefined): string[] {
+    return this.agentFilesFromSwarm(swarm).map((file) => this.stripAgentName(file));
   }
 
   private stripAgentName(filePath: string): string {
@@ -1138,12 +1410,13 @@ export class StateService {
     return withoutExt.split('/').pop() ?? filePath;
   }
 
-  private parseUserJson(value: string): unknown {
-    const trimmed = value.trim();
-    if (!trimmed) return {};
-    try { return normalizeJsonValue(JSON.parse(trimmed)); } catch (error) {
-      throw new Error(`Swarm 输入必须是有效的 JSON: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  private buildSwarmExecutionInput(): Record<string, unknown> {
+    return {
+      template: this.swarmExecutionTemplate(),
+      text: this.swarmExecutionPrompt().trim(),
+      context: this.swarmExecutionContext().trim() || undefined,
+      output_style: this.swarmExecutionOutputStyle(),
+    };
   }
 
   private pushFeed(title: string, method: string, endpoint: string, tone: FeedItem['tone'], payload: unknown, meta?: string): void {
@@ -1153,7 +1426,7 @@ export class StateService {
 
   private watchRun(run: RunSnapshot): void {
     this.closeStream();
-    const sourceUrl = `${this.baseUrl().replace(/\/$/, '')}${run.events_url}`;
+    const sourceUrl = joinUrl(this.baseUrl(), `/swarms/runs/${run.run_id}/events`);
     this.streamState.set('connecting');
     this.streamNote.set(`正在监听 ${run.run_id}`);
     const source = new EventSource(sourceUrl);
@@ -1189,11 +1462,13 @@ export class StateService {
   }
 
   graphSummary(): string {
-    const graph = this.selectedGraph();
+    const graph = this.resolvedGraph();
     return graph ? `${graph.node_count} 节点 · ${graph.edge_count} 边` : '图未加载';
   }
 
-  payloadText(): string { return this.swarmPayloadText().trim() || '{}'; }
+  payloadText(): string {
+    return JSON.stringify(this.buildSwarmExecutionInput(), null, 2);
+  }
 
   selectedRunHint(): string {
     const run = this.activeRun();

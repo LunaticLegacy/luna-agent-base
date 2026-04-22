@@ -27,13 +27,18 @@ import type {
   ToolListResponse,
 } from './api.types';
 
-function joinUrl(baseUrl: string, path: string): string {
+export function joinUrl(baseUrl: string, path: string): string {
   const base = baseUrl.trim() || '/api';
   const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base;
   if (!path) {
     return normalizedBase;
   }
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const trimmedPath = path.trim();
+  const canonicalPath = trimmedPath === '/' ? '' : trimmedPath.replace(/\/+$/, '');
+  if (!canonicalPath) {
+    return normalizedBase;
+  }
+  const normalizedPath = canonicalPath.startsWith('/') ? canonicalPath : `/${canonicalPath}`;
 
   if (/^https?:\/\//i.test(normalizedBase)) {
     return `${normalizedBase}${normalizedPath}`;
@@ -225,16 +230,31 @@ export class ApiService {
     );
   }
 
+  startSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunSwarmResponse> {
+    return firstValueFrom(
+      this.http.post<RunSwarmResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/start`), request)
+    );
+  }
+
   startRun(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStartResponse> {
     return firstValueFrom(
       this.http.post<RunStartResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/runs`), request)
     );
   }
 
+  startSwarmBackground(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStartResponse> {
+    return firstValueFrom(
+      this.http.post<RunStartResponse>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/start/background`),
+        request
+      )
+    );
+  }
+
   getRun(baseUrl: string, runId: string): Promise<{ success: boolean; run: RunSnapshot }> {
     return firstValueFrom(
       this.http.get<{ success: boolean; run: RunSnapshot }>(
-        joinUrl(baseUrl, `/runs/${encodeURIComponent(runId)}`)
+        joinUrl(baseUrl, `/swarms/runs/${encodeURIComponent(runId)}`)
       )
     );
   }

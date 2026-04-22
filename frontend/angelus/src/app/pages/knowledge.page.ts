@@ -148,18 +148,18 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       <div class="panel-card graph-section">
         <div class="panel-header">
           <h3>Graph 知识图谱</h3>
-          <span class="badge">{{ state.selectedGraph() ? '已连接' : '未加载' }}</span>
+          <span class="badge">{{ state.resolvedGraph() ? '已连接' : '未加载' }}</span>
         </div>
         <div class="graph-body">
-          @if (state.selectedGraph()) {
+          @if (state.resolvedGraph()) {
             <div class="graph-stats">
               <div class="graph-stat">
                 <div class="graph-stat-label">节点数</div>
-                <div class="graph-stat-value">{{ state.selectedGraph()!.node_count }}</div>
+                <div class="graph-stat-value">{{ state.resolvedGraph()!.node_count }}</div>
               </div>
               <div class="graph-stat">
                 <div class="graph-stat-label">边数</div>
-                <div class="graph-stat-value">{{ state.selectedGraph()!.edge_count }}</div>
+                <div class="graph-stat-value">{{ state.resolvedGraph()!.edge_count }}</div>
               </div>
               <div class="graph-stat">
                 <div class="graph-stat-label">密度</div>
@@ -171,7 +171,7 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
               </div>
             </div>
             <div class="graph-hint">
-              当前图快照来自 <code>{{ state.selectedSwarmName() ?? '未选择' }}</code>，包含 {{ state.selectedGraph()!.node_count }} 个节点与 {{ state.selectedGraph()!.edge_count }} 条边。
+              当前图快照来自 <code>{{ state.selectedSwarmName() ?? '未选择' }}</code>，包含 {{ state.resolvedGraph()!.node_count }} 个节点与 {{ state.resolvedGraph()!.edge_count }} 条边。
             </div>
           } @else {
             <div class="empty-state">尚未加载图数据，请在概览页选择 Swarm 以获取 Graph 快照。</div>
@@ -681,7 +681,7 @@ export class KnowledgePageComponent {
   });
 
   readonly graphDensity = computed(() => {
-    const g = this.state.selectedGraph();
+    const g = this.state.resolvedGraph();
     if (!g || g.node_count < 2) return '0.00';
     const max = g.node_count * (g.node_count - 1);
     return (g.edge_count / max).toFixed(3);

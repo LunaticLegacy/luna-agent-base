@@ -1,10 +1,11 @@
-import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, ElementRef, afterNextRender, signal, inject, NgZone } from '@angular/core';
 import type { GraphEdgeSnapshot, GraphNodeSnapshot, GraphSnapshot } from './api.types';
 
 interface RenderNode {
   node: GraphNodeSnapshot;
   x: number;
   y: number;
+  depth: number;
 }
 
 interface RenderEdge {
@@ -16,14 +17,30 @@ interface RenderEdge {
 @Component({
   selector: 'app-graph-viewer',
   standalone: true,
+  host: {
+    class: 'graph-viewer-host',
+  },
   template: `
-    <div class="graph-viewer">
+    <div class="graph-viewer" #container>
+      <div class="graph-toolbar">
+        <button type="button" class="graph-toolbar-btn" (click)="fitToGraph()">适配</button>
+        <button type="button" class="graph-toolbar-btn" (click)="resetView()">重置</button>
+      </div>
+      <div class="graph-status">
+        {{ graph?.nodes?.length ?? 0 }} 节点 · {{ graph?.edges?.length ?? 0 }} 边 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
+      </div>
       <svg
-        [attr.viewBox]="viewBox"
-        preserveAspectRatio="xMidYMid meet"
+        #viewport
+        [attr.viewBox]="viewBox()"
+        preserveAspectRatio="none"
         class="graph-svg"
         role="img"
         [attr.aria-label]="ariaLabel"
+        (pointerdown)="onPointerDown($event)"
+        (pointermove)="onPointerMove($event)"
+        (pointerup)="onPointerUp($event)"
+        (pointerleave)="onPointerUp($event)"
+        (wheel)="onWheel($event)"
       >
         <defs>
           <marker
@@ -45,77 +62,79 @@ interface RenderEdge {
           </filter>
         </defs>
 
-        <!-- Edges -->
-        @for (renderEdge of renderEdges; track renderEdge.edge.from_node_id + '-' + renderEdge.edge.to_node_id) {
-          @if (renderEdge.from && renderEdge.to) {
-            <line
-              [attr.x1]="renderEdge.from.x"
-              [attr.y1]="renderEdge.from.y"
-              [attr.x2]="renderEdge.to.x"
-              [attr.y2]="renderEdge.to.y"
-              class="graph-edge"
-              [class.active]="isEdgeActive(renderEdge.edge)"
-              marker-end="url(#arrowhead)"
-            />
+        <g [attr.transform]="contentTransform()">
+          <!-- Edges -->
+          @for (renderEdge of renderEdges(); track renderEdge.edge.from_node_id + '-' + renderEdge.edge.to_node_id) {
+            @if (renderEdge.from && renderEdge.to) {
+              <line
+                [attr.x1]="renderEdge.from.x"
+                [attr.y1]="renderEdge.from.y"
+                [attr.x2]="renderEdge.to.x"
+                [attr.y2]="renderEdge.to.y"
+                class="graph-edge"
+                [class.active]="isEdgeActive(renderEdge.edge)"
+                marker-end="url(#arrowhead)"
+              />
+            }
           }
-        }
 
-        <!-- Nodes -->
-        @for (renderNode of renderNodes; track renderNode.node.node_id) {
-          <g
-            class="graph-node"
-            [class.entry]="renderNode.node.node_id === graph?.entry_node_id"
-            [class.exit]="renderNode.node.node_id === graph?.exit_node_id"
-            [class.active]="renderNode.node.node_id === activeNodeId"
-          >
-            <!-- Hexagon for center node, rect for others -->
-            @if (isCenterNode(renderNode.node)) {
-              <polygon
-                [attr.points]="hexagonPoints(renderNode.x, renderNode.y, nodeRadius + 4)"
-                class="graph-node-hex"
-              />
-            } @else {
-              <rect
-                [attr.x]="renderNode.x - nodeRadius - 2"
-                [attr.y]="renderNode.y - nodeRadius * 0.6"
-                [attr.width]="nodeRadius * 2 + 4"
-                [attr.height]="nodeRadius * 1.2"
-                rx="6"
-                class="graph-node-rect"
-              />
-            }
-
-            <!-- Active pulse ring -->
-            @if (renderNode.node.node_id === activeNodeId) {
-              <circle
-                [attr.cx]="renderNode.x"
-                [attr.cy]="renderNode.y"
-                [attr.r]="nodeRadius + 10"
-                fill="none"
-                stroke="rgba(139, 92, 246, 0.25)"
-                stroke-width="1.5"
-                class="pulse-ring"
-              />
-            }
-
-            <text
-              [attr.x]="renderNode.x"
-              [attr.y]="renderNode.y - 2"
-              text-anchor="middle"
-              class="graph-node-label"
+          <!-- Nodes -->
+          @for (renderNode of renderNodes(); track renderNode.node.node_id) {
+            <g
+              class="graph-node"
+              [class.entry]="nodeRole(renderNode.node) === 'entry'"
+              [class.agent-node]="nodeRole(renderNode.node) === 'agent'"
+              [class.tool-node]="nodeRole(renderNode.node) === 'tool'"
+              [class.exit]="nodeRole(renderNode.node) === 'exit'"
+              [class.active]="renderNode.node.node_id === activeNodeId"
             >
-              {{ renderNode.node.node_name }}
-            </text>
-            <text
-              [attr.x]="renderNode.x"
-              [attr.y]="renderNode.y + 10"
-              text-anchor="middle"
-              class="graph-node-type"
-            >
-              {{ renderNode.node.node_type }}
-            </text>
-          </g>
-        }
+              @if (isCenterNode(renderNode.node)) {
+                <polygon
+                  [attr.points]="hexagonPoints(renderNode.x, renderNode.y, nodeRadius() + 4)"
+                  class="graph-node-hex"
+                />
+              } @else {
+                <rect
+                  [attr.x]="renderNode.x - nodeRadius() - 2"
+                  [attr.y]="renderNode.y - nodeRadius() * 0.6"
+                  [attr.width]="nodeRadius() * 2 + 4"
+                  [attr.height]="nodeRadius() * 1.2"
+                  rx="6"
+                  class="graph-node-rect"
+                />
+              }
+
+              @if (renderNode.node.node_id === activeNodeId) {
+                <circle
+                  [attr.cx]="renderNode.x"
+                  [attr.cy]="renderNode.y"
+                  [attr.r]="nodeRadius() + 10"
+                  fill="none"
+                  stroke="rgba(139, 92, 246, 0.25)"
+                  stroke-width="1.5"
+                  class="pulse-ring"
+                />
+              }
+
+              <text
+                [attr.x]="renderNode.x"
+                [attr.y]="renderNode.y - 2"
+                text-anchor="middle"
+                class="graph-node-label"
+              >
+                {{ renderNode.node.node_name }}
+              </text>
+              <text
+                [attr.x]="renderNode.x"
+                [attr.y]="renderNode.y + 10"
+                text-anchor="middle"
+                class="graph-node-type"
+              >
+                {{ renderNode.node.node_type }}
+              </text>
+            </g>
+          }
+        </g>
       </svg>
     </div>
   `,
@@ -126,13 +145,57 @@ export class GraphViewerComponent {
   @Input() graph: GraphSnapshot | null = null;
   @Input() activeNodeId: number | null = null;
 
-  readonly svgWidth = 420;
-  readonly svgHeight = 280;
-  readonly nodeRadius = 22;
-  readonly padding = 50;
+  private readonly el = inject(ElementRef);
+  private readonly ngZone = inject(NgZone);
+  private readonly dragState = signal<{
+    dragging: boolean;
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+  }>({ dragging: false, startX: 0, startY: 0, panX: 0, panY: 0 });
 
-  get viewBox(): string {
-    return `0 0 ${this.svgWidth} ${this.svgHeight}`;
+  readonly svgWidth = signal(800);
+  readonly svgHeight = signal(520);
+  readonly nodeRadius = signal(26);
+  readonly padding = signal(60);
+
+  viewBox = signal('0 0 800 520');
+  renderNodes = signal<RenderNode[]>([]);
+  renderEdges = signal<RenderEdge[]>([]);
+  readonly zoom = signal(1);
+  readonly panX = signal(0);
+  readonly panY = signal(0);
+  private needsFit = true;
+
+  constructor() {
+    afterNextRender(() => {
+      this.observeSize();
+    });
+  }
+
+  private observeSize(): void {
+    const container = this.el.nativeElement.querySelector('.graph-viewer') as HTMLElement;
+    if (!container) return;
+
+    const update = () => {
+      const rect = container.getBoundingClientRect();
+      const w = Math.max(400, Math.round(rect.width));
+      const h = Math.max(300, Math.round(rect.height));
+      this.svgWidth.set(w);
+      this.svgHeight.set(h);
+      this.viewBox.set(`0 0 ${w} ${h}`);
+      this.nodeRadius.set(Math.max(20, Math.min(32, Math.round(Math.min(w, h) / 18))));
+      this.recalculateLayout();
+    };
+
+    // Run initial layout inside Zone so Angular detects signal changes
+    this.ngZone.run(update);
+
+    const ro = new ResizeObserver(() => {
+      this.ngZone.run(update);
+    });
+    ro.observe(container);
   }
 
   get ariaLabel(): string {
@@ -143,6 +206,19 @@ export class GraphViewerComponent {
 
   isCenterNode(node: GraphNodeSnapshot): boolean {
     return node.node_id === this.graph?.entry_node_id;
+  }
+
+  nodeRole(node: GraphNodeSnapshot): 'entry' | 'agent' | 'tool' | 'exit' {
+    if (node.node_id === this.graph?.entry_node_id) {
+      return 'entry';
+    }
+    if (node.node_id === this.graph?.exit_node_id) {
+      return 'exit';
+    }
+    if (node.node_type === 'ToolNode') {
+      return 'tool';
+    }
+    return 'agent';
   }
 
   hexagonPoints(cx: number, cy: number, r: number): string {
@@ -156,12 +232,25 @@ export class GraphViewerComponent {
     return points.join(' ');
   }
 
-  get renderNodes(): RenderNode[] {
+  private recalculateLayout(): void {
     const g = this.graph;
-    if (!g || g.nodes.length === 0) return [];
+    if (!g || g.nodes.length === 0) {
+      this.renderNodes.set([]);
+      this.renderEdges.set([]);
+      this.zoom.set(1);
+      this.panX.set(0);
+      this.panY.set(0);
+      return;
+    }
 
     const nodes = [...g.nodes];
     const entryId = g.entry_node_id ?? nodes[0]?.node_id;
+    const svgW = this.svgWidth();
+    const svgH = this.svgHeight();
+    const pad = this.padding();
+    const nr = this.nodeRadius();
+
+    const fallbackOrder = new Map<number, number>(nodes.map((node, index) => [node.node_id, index]));
 
     // BFS for depth levels
     const depths = new Map<number, number>();
@@ -188,63 +277,158 @@ export class GraphViewerComponent {
     for (const d of depths.values()) maxDepth = Math.max(maxDepth, d);
     for (const node of nodes) {
       if (!depths.has(node.node_id)) {
-        depths.set(node.node_id, maxDepth + 1);
+        depths.set(node.node_id, maxDepth + 1 + (fallbackOrder.get(node.node_id) ?? 0) * 0.02);
       }
     }
 
-    // Radial layout: entry at center, others around in rings
+    // Radial layout
     const layers = new Map<number, GraphNodeSnapshot[]>();
     for (const node of nodes) {
-      const d = depths.get(node.node_id) ?? 0;
+      const d = Math.round(depths.get(node.node_id) ?? 0);
       if (!layers.has(d)) layers.set(d, []);
       layers.get(d)!.push(node);
     }
 
     const result: RenderNode[] = [];
-    const centerX = this.svgWidth / 2;
-    const centerY = this.svgHeight / 2;
+    const centerY = svgH / 2;
+    const horizontalPad = Math.max(80, Math.min(180, svgW * 0.1));
+    const verticalPad = Math.max(70, Math.min(140, svgH * 0.12));
+    const columnCount = Math.max(1, Math.max(...layers.keys()));
+    const availableWidth = Math.max(1, svgW - horizontalPad * 2);
+    const xStep = columnCount > 0 ? availableWidth / columnCount : 0;
+    const usableHeight = Math.max(1, svgH - verticalPad * 2);
+    const minYGap = Math.max(this.nodeRadius() * 3.6, 88);
 
-    // Entry node at center
-    const entryNode = nodes.find((n) => n.node_id === entryId);
-    if (entryNode) {
-      result.push({ node: entryNode, x: centerX, y: centerY });
-    }
-
-    // Other nodes in concentric rings
-    const sortedDepths = Array.from(layers.keys()).filter((d) => d > 0).sort((a, b) => a - b);
-    const maxRing = sortedDepths.length > 0 ? Math.max(...sortedDepths) : 1;
-    const maxRadius = Math.min(this.svgWidth, this.svgHeight) / 2 - this.padding;
-
+    const sortedDepths = Array.from(layers.keys()).sort((a, b) => a - b);
     for (const depth of sortedDepths) {
       const layerNodes = layers.get(depth)!;
-      const ringRadius = (depth / maxRing) * maxRadius;
-      const angleStep = (2 * Math.PI) / layerNodes.length;
-      // Offset angle so first node is at top
-      const angleOffset = -Math.PI / 2;
+      const x = depth === 0 ? horizontalPad : horizontalPad + xStep * depth;
+      const layerCount = layerNodes.length;
+      const span = layerCount <= 1 ? 0 : Math.min(usableHeight, (layerCount - 1) * minYGap);
+      const startY = centerY - span / 2;
+      const yStep = layerCount <= 1 ? 0 : span / Math.max(1, layerCount - 1);
 
       for (let i = 0; i < layerNodes.length; i++) {
-        const angle = angleOffset + i * angleStep;
-        const x = centerX + ringRadius * Math.cos(angle);
-        const y = centerY + ringRadius * Math.sin(angle);
-        result.push({ node: layerNodes[i], x, y });
+        const node = layerNodes[i];
+        const jitter = layerCount <= 1 ? 0 : ((i % 2 === 0 ? -1 : 1) * Math.min(18, this.nodeRadius() * 0.45));
+        const y = layerCount <= 1 ? centerY : startY + i * yStep + jitter;
+        result.push({ node, x, y, depth });
       }
     }
 
-    return result;
+    this.renderNodes.set(result);
+
+    this.renderEdges.set(
+      g.edges.map((edge) => ({
+        edge,
+        from: result.find((n) => n.node.node_id === edge.from_node_id),
+        to: result.find((n) => n.node.node_id === edge.to_node_id),
+      }))
+    );
+
+    if (this.needsFit) {
+      this.needsFit = false;
+      queueMicrotask(() => this.fitToGraph());
+    }
   }
 
-  get renderEdges(): RenderEdge[] {
-    const g = this.graph;
-    if (!g) return [];
-    const nodes = this.renderNodes;
-    return g.edges.map((edge) => ({
-      edge,
-      from: nodes.find((n) => n.node.node_id === edge.from_node_id),
-      to: nodes.find((n) => n.node.node_id === edge.to_node_id),
-    }));
+  ngOnChanges(): void {
+    this.needsFit = true;
+    this.recalculateLayout();
   }
 
   isEdgeActive(edge: GraphEdgeSnapshot): boolean {
     return edge.from_node_id === this.activeNodeId || edge.to_node_id === this.activeNodeId;
+  }
+
+  contentTransform(): string {
+    return `matrix(${this.zoom()}, 0, 0, ${this.zoom()}, ${this.panX()}, ${this.panY()})`;
+  }
+
+  fitToGraph(): void {
+    const nodes = this.renderNodes();
+    const svgW = this.svgWidth();
+    const svgH = this.svgHeight();
+    if (!nodes.length || svgW <= 0 || svgH <= 0) {
+      this.zoom.set(1);
+      this.panX.set(0);
+      this.panY.set(0);
+      return;
+    }
+
+    const nr = this.nodeRadius();
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    for (const item of nodes) {
+      minX = Math.min(minX, item.x - nr - 48);
+      minY = Math.min(minY, item.y - nr - 28);
+      maxX = Math.max(maxX, item.x + nr + 48);
+      maxY = Math.max(maxY, item.y + nr + 40);
+    }
+
+    const graphW = Math.max(1, maxX - minX);
+    const graphH = Math.max(1, maxY - minY);
+    const scale = Math.min((svgW - 48) / graphW, (svgH - 48) / graphH);
+    const safeScale = Math.max(0.35, Math.min(1, Number.isFinite(scale) ? scale : 1));
+    const contentW = graphW * safeScale;
+    const contentH = graphH * safeScale;
+
+    this.zoom.set(safeScale);
+    this.panX.set((svgW - contentW) / 2 - minX * safeScale);
+    this.panY.set((svgH - contentH) / 2 - minY * safeScale);
+  }
+
+  resetView(): void {
+    this.fitToGraph();
+  }
+
+  onPointerDown(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    const state = this.dragState();
+    this.dragState.set({
+      dragging: true,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: this.panX(),
+      panY: this.panY(),
+    });
+    (event.currentTarget as SVGSVGElement | null)?.setPointerCapture?.(event.pointerId);
+  }
+
+  onPointerMove(event: PointerEvent): void {
+    const state = this.dragState();
+    if (!state.dragging) return;
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    this.panX.set(state.panX + dx);
+    this.panY.set(state.panY + dy);
+  }
+
+  onPointerUp(event: PointerEvent): void {
+    const state = this.dragState();
+    if (!state.dragging) return;
+    this.dragState.set({ ...state, dragging: false });
+    (event.currentTarget as SVGSVGElement | null)?.releasePointerCapture?.(event.pointerId);
+  }
+
+  onWheel(event: WheelEvent): void {
+    event.preventDefault();
+    const svg = event.currentTarget as SVGSVGElement | null;
+    const rect = svg?.getBoundingClientRect();
+    if (!rect) return;
+
+    const cursorX = event.clientX - rect.left;
+    const cursorY = event.clientY - rect.top;
+    const currentZoom = this.zoom();
+    const delta = event.deltaY > 0 ? 0.9 : 1.1;
+    const nextZoom = Math.max(0.35, Math.min(2.5, currentZoom * delta));
+    const zoomRatio = nextZoom / currentZoom;
+
+    this.panX.set(cursorX - (cursorX - this.panX()) * zoomRatio);
+    this.panY.set(cursorY - (cursorY - this.panY()) * zoomRatio);
+    this.zoom.set(nextZoom);
   }
 }
