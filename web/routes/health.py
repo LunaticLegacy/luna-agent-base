@@ -12,8 +12,11 @@ def health():
 
 @health_bp.get("/ready")
 def ready():
-    registry = current_app.extensions.get("angelus_runtime", {})
-    load_error = registry.get("load_error")
+    registry = current_app.extensions.get("angelus_runtime")
+    if registry is None:
+        return jsonify({"success": False, "ready": False, "reason": "runtime registry missing"}), 503
+
+    load_error = registry.load_error
     if load_error:
         return (
             jsonify(
@@ -27,7 +30,7 @@ def ready():
             503,
         )
 
-    swarms = registry.get("swarms", {})
+    swarms = registry.swarms
     if not swarms:
         return jsonify({"success": False, "ready": False, "reason": "no swarms loaded"}), 503
 

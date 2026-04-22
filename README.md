@@ -109,6 +109,10 @@ python app.py
 
 - 健康检查
 - swarm 列表和详情
+- swarm 热插拔控制：load / unload / reload
+- `load`：按目录或 swarm 名称装载新 swarm，成功后立即进入运行时 registry
+- `unload`：从运行时 registry 摘除 swarm；默认会拒绝正在运行的 swarm
+- `reload`：基于当前路径或显式路径原子重载同名 swarm；默认同样会拒绝正在运行的 swarm
 - graph 快照
 - 同步执行
 - 异步 run session
