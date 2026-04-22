@@ -281,6 +281,24 @@ class RunRegistry:
             return None
         return record.snapshot()
 
+    def active_run_count(self, swarm_name: Optional[str] = None) -> int:
+        """Return the number of active runs, optionally filtered by swarm."""
+        with self._lock:
+            return sum(
+                1
+                for record in self._runs.values()
+                if not record._done and (swarm_name is None or record.swarm_name == swarm_name)
+            )
+
+    def active_run_ids(self, swarm_name: Optional[str] = None) -> List[str]:
+        """Return active run ids, optionally filtered by swarm."""
+        with self._lock:
+            return [
+                record.run_id
+                for record in self._runs.values()
+                if not record._done and (swarm_name is None or record.swarm_name == swarm_name)
+            ]
+
     def _worker(
         self,
         *,
