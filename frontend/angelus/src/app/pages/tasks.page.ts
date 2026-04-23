@@ -37,9 +37,9 @@ import { StateService, TaskItem } from '../services/state.service';
           <div class="stat-sub">近 24 小时</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">平均执行时间</div>
-          <div class="stat-value">{{ avgDuration() }}</div>
-          <div class="stat-sub">已完成的任务</div>
+          <div class="stat-label">超时</div>
+          <div class="stat-value" [class.amber]="timeoutCount() > 0">{{ timeoutCount() }}</div>
+          <div class="stat-sub">请求超时任务</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">待处理</div>
@@ -64,6 +64,7 @@ import { StateService, TaskItem } from '../services/state.service';
           <option value="success">成功</option>
           <option value="failed">失败</option>
           <option value="cancelled">已取消</option>
+          <option value="timeout">超时</option>
         </select>
         <select class="filter-select" [value]="filterPriority()" (change)="filterPriority.set($any($event).target.value)">
           <option value="">全部优先级</option>
@@ -387,6 +388,7 @@ import { StateService, TaskItem } from '../services/state.service';
     .badge-success { background: rgba(16,185,129,0.12); color: #10B981; }
     .badge-failed { background: rgba(239,68,68,0.12); color: #EF4444; }
     .badge-cancelled { background: rgba(148,163,184,0.12); color: #94A3B8; }
+    .badge-timeout { background: rgba(245,158,11,0.12); color: #F59E0B; }
     .badge-priority-urgent { background: rgba(239,68,68,0.12); color: #EF4444; }
     .badge-priority-high { background: rgba(245,158,11,0.12); color: #F59E0B; }
     .badge-priority-medium { background: rgba(139,92,246,0.12); color: #a78bfa; }
@@ -605,6 +607,7 @@ export class TasksPageComponent {
 
   readonly runningCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'running').length);
   readonly pendingCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'pending').length);
+  readonly timeoutCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'timeout').length);
   readonly successRate = computed(() => this.state.taskStats().successRate);
   readonly avgDuration = computed(() => this.state.taskStats().avgDuration);
 
@@ -638,7 +641,7 @@ export class TasksPageComponent {
   }
 
   statusLabel(status: TaskItem['status']): string {
-    const map: Record<string, string> = { pending: '待处理', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消' };
+    const map: Record<string, string> = { pending: '待处理', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消', timeout: '超时' };
     return map[status] ?? status;
   }
 
