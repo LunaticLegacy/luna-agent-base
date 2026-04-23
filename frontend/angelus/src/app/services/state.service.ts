@@ -22,6 +22,7 @@ import type {
   SwarmSummary,
   SwarmStatsResponse,
   ToolCatalogItem,
+  ThoughtGraphSnapshot,
 } from '../api.types';
 import { asJsonValue, normalizeJsonValue, valuePreview } from '../json-utils';
 
@@ -271,6 +272,7 @@ export class StateService {
   readonly selectedSwarm = signal<SwarmSummary | null>(null);
   readonly selectedAgentIdChoice = signal<string | null>(null);
   readonly selectedGraph = signal<GraphSnapshot | null>(null);
+  readonly selectedThoughtGraph = signal<ThoughtGraphSnapshot | null>(null);
   readonly swarmExecutionTemplate = signal<SwarmExecutionTemplate>('summary');
   readonly swarmExecutionPrompt = signal<string>(SWARM_EXECUTION_PRESETS.summary.prompt);
   readonly swarmExecutionContext = signal<string>(SWARM_EXECUTION_PRESETS.summary.context);
@@ -330,6 +332,7 @@ export class StateService {
   readonly totalAgents = computed(() => this.swarms().reduce((sum, s) => sum + s.agent_count, 0));
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
   readonly resolvedGraph = computed<GraphSnapshot | null>(() => this.selectedSwarm()?.graph ?? this.selectedGraph());
+  readonly resolvedThoughtGraph = computed<ThoughtGraphSnapshot | null>(() => this.selectedThoughtGraph());
   readonly activeRunNodeId = computed(() => {
     const run = this.activeRun();
     return run?.status === 'running' ? run.current_node_id ?? null : null;
@@ -1264,7 +1267,10 @@ export class StateService {
 
   refreshAll(): void { void this.loadOverview(); }
   refreshSelectedSwarm(): void { void this.reloadSelectedSwarm(); }
-  refreshGraph(): void { void this.loadSelectedGraph(); }
+  refreshGraph(): void {
+    void this.loadSelectedGraph();
+    void this.loadSelectedThoughtGraph();
+  }
 
   async loadOverview(options: { gracefulOffline?: boolean } = {}): Promise<void> {
     const gracefulOffline = options.gracefulOffline ?? true;
@@ -1312,16 +1318,24 @@ export class StateService {
         if (!this.selectedSwarmName() || !availableNames.includes(this.selectedSwarmName()!)) {
           this.selectedSwarmName.set(swarmResult.value.swarms[0]?.swarm_name ?? null);
         }
-        if (this.selectedSwarmName()) {
-          const selectedFromList = swarmResult.value.swarms.find(
-            (item) => item.swarm_name === this.selectedSwarmName()
-          );
-          if (selectedFromList) {
-            this.selectedSwarm.set(selectedFromList);
-            this.selectedGraph.set(selectedFromList.graph ?? null);
-            this.ensureAgentSelection(selectedFromList);
-          }
+      if (this.selectedSwarmName()) {
+        const selectedFromList = swarmResult.value.swarms.find(
+          (item) => item.swarm_name === this.selectedSwarmName()
+        );
+        if (selectedFromList) {
+          this.selectedSwarm.set(selectedFromList);
+          this.selectedGraph.set(selectedFromList.graph ?? null);
+          this.ensureAgentSelection(selectedFromList);
+        } else {
+          this.selectedSwarm.set(null);
+          this.selectedGraph.set(null);
+          this.selectedThoughtGraph.set(null);
         }
+      } else {
+        this.selectedSwarm.set(null);
+        this.selectedGraph.set(null);
+        this.selectedThoughtGraph.set(null);
+      }
       } else if (this.isOfflineLikeError(swarmResult.reason)) {
         offlineDetected = true;
       } else {
@@ -1339,6 +1353,7 @@ export class StateService {
       } else {
         this.selectedSwarm.set(null);
         this.selectedGraph.set(null);
+        this.selectedThoughtGraph.set(null);
         this.agents.set([]);
         this.agentsLoaded.set(true);
         this.tasks.set([]);
@@ -1371,6 +1386,7 @@ export class StateService {
     if (!swarmName) {
       this.selectedSwarm.set(null);
       this.selectedGraph.set(null);
+      this.selectedThoughtGraph.set(null);
       this.agents.set([]);
       this.agentsLoaded.set(true);
       this.tasks.set([]);
@@ -1391,6 +1407,7 @@ export class StateService {
       this.pushFeed(`Swarm 详情 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}`, 'success', response);
       await Promise.all([
         this.loadSelectedGraph(),
+        this.loadSelectedThoughtGraph(),
         this.loadAgents(),
         this.loadTasks(),
         this.loadTools(),
@@ -1405,6 +1422,7 @@ export class StateService {
       } else {
         this.selectedSwarm.set(null);
         this.selectedGraph.set(null);
+        this.selectedThoughtGraph.set(null);
       }
       if (options.gracefulOffline ?? this.refreshGraceful) {
         if (this.isOfflineLikeError(error)) {
@@ -1441,6 +1459,25 @@ export class StateService {
         this.error.set(formatErrorDetail(error));
       }
       this.selectedGraph.set(null);
+    }
+  }
+
+  async loadSelectedThoughtGraph(): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.selectedThoughtGraph.set(null);
+      return;
+    }
+    try {
+      const baseUrl = this.baseUrl();
+      const response = await this.apiService.getThoughtGraph(baseUrl, swarmName);
+      this.selectedThoughtGraph.set(response.thought_graph);
+      this.pushFeed(`思考图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/thought-graph`, 'info', response);
+    } catch (error) {
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+      }
+      this.selectedThoughtGraph.set(null);
     }
   }
 
@@ -1672,6 +1709,7 @@ export class StateService {
       this.pushFeed(`Swarm 卸载 · ${swarmName}`, 'DELETE', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}`, 'success', response);
       if (this.selectedSwarmName() === swarmName) {
         this.selectedSwarmName.set(null);
+        this.selectedThoughtGraph.set(null);
       }
       await this.loadOverview();
     } catch (error) {

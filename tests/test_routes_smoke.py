@@ -105,6 +105,28 @@ class DummyCore:
     def get_execution_graph(self):
         return self._graph
 
+    def get_cognitive_graph_snapshot(self):
+        return {
+            "graph_id": "thought-demo",
+            "nodes": [
+                {
+                    "node_id": "n1",
+                    "node_type": "fact",
+                    "content": "fact content",
+                    "summary": "fact summary",
+                    "confidence": 0.9,
+                    "evidence": [],
+                    "tags": [],
+                    "source": "system",
+                    "metadata": {},
+                    "created_at": "2026-04-23T00:00:00Z",
+                    "version": 1,
+                }
+            ],
+            "edges": [],
+            "active_subgraphs": [],
+        }
+
     def check_execution_graph_available(self):
         return DummyValidation()
 
@@ -204,6 +226,12 @@ class RouteSmokeTest(unittest.TestCase):
         graph = graph_response.get_json()
         self.assertTrue(graph["success"])
         self.assertEqual(graph["graph"]["graph_name"], "demo-graph")
+
+        thought_response = self.client.get("/api/swarms/demo/thought-graph")
+        self.assertEqual(thought_response.status_code, 200)
+        thought = thought_response.get_json()
+        self.assertTrue(thought["success"])
+        self.assertEqual(thought["thought_graph"]["graph_id"], "thought-demo")
 
         run_response = self.client.post("/api/swarms/demo/run", json={"input": {"hello": "world"}, "rounds": 2})
         self.assertEqual(run_response.status_code, 200)

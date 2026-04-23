@@ -2,11 +2,12 @@ import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
+import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
 
 @Component({
   selector: 'app-swarm-management-page',
   standalone: true,
-  imports: [CommonModule, GraphViewerComponent],
+  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent],
   template: `
     <div class="page">
       <!-- Header -->
@@ -281,6 +282,23 @@ import { GraphViewerComponent } from '../graph-viewer.component';
                 <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
               } @else {
                 <div class="empty-state">暂无拓扑数据</div>
+              }
+            </div>
+          </div>
+        }
+        @case ('思考图') {
+          <div class="panel-card topology-canvas topology-fullscreen thought-fullscreen">
+            <div class="panel-header">
+              <h3>Swarm 思考图</h3>
+              <div class="panel-actions">
+                <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
+              </div>
+            </div>
+            <div class="topology-graph thought-graph">
+              @if (state.resolvedThoughtGraph()) {
+                <app-thought-graph-viewer [graph]="state.resolvedThoughtGraph()"></app-thought-graph-viewer>
+              } @else {
+                <div class="empty-state">暂无思考图数据</div>
               }
             </div>
           </div>
@@ -832,7 +850,7 @@ export class SwarmManagementPageComponent {
   readonly state = inject(StateService);
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
-  readonly tabs = ['概览', '拓扑视图', 'Agents', '任务', '活动', '知识', '记忆', '设置'];
+  readonly tabs = ['概览', '拓扑视图', '思考图', 'Agents', '任务', '活动', '知识', '记忆', '设置'];
 
   async loadSwarm(): Promise<void> {
     const source = window.prompt('输入要加载的 Swarm 路径或名称');

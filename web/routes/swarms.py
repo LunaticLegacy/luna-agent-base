@@ -145,6 +145,13 @@ def get_swarm_graph(swarm_name: str):
     return jsonify({"success": True, "swarm": swarm_name, "graph": serialize_graph_snapshot(graph)})
 
 
+@swarms_bp.get("/<string:swarm_name>/thought-graph")
+def get_swarm_thought_graph(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    snapshot = swarm.core.get_cognitive_graph_snapshot()
+    return jsonify({"success": True, "swarm": swarm_name, "thought_graph": to_jsonable(snapshot)})
+
+
 @swarms_bp.post("/<string:swarm_name>/run")
 async def run_swarm(swarm_name: str):
     return await _execute_swarm_run(swarm_name)

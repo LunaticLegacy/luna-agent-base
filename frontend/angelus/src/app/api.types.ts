@@ -94,6 +94,57 @@ export interface GraphSnapshot {
   edges: GraphEdgeSnapshot[];
 }
 
+export interface ThoughtGraphNodeSnapshot {
+  node_id: string;
+  node_type: string;
+  content: string;
+  summary: string;
+  confidence: number;
+  evidence: string[];
+  tags: string[];
+  source: string;
+  metadata: JsonValue;
+  created_at: string;
+  version: number;
+}
+
+export interface ThoughtGraphEdgeSnapshot {
+  edge_id: string;
+  source_id: string;
+  target_id: string;
+  relation: string;
+  strength: number;
+  description: string;
+  metadata: JsonValue;
+}
+
+export interface ThoughtSubgraphSnapshot {
+  subgraph_id: string;
+  root_node_ids: string[];
+  frontier_node_ids: string[];
+  purpose: string;
+  visibility: string;
+  owner_agent: string;
+  expected_next_information: string;
+  priority: number;
+  status: string;
+  metadata: JsonValue;
+  created_at: string;
+}
+
+export interface ThoughtGraphSnapshot {
+  graph_id: string;
+  nodes: ThoughtGraphNodeSnapshot[];
+  edges: ThoughtGraphEdgeSnapshot[];
+  active_subgraphs?: ThoughtSubgraphSnapshot[];
+}
+
+export interface ThoughtGraphResponse {
+  success: boolean;
+  swarm: string;
+  thought_graph: ThoughtGraphSnapshot;
+}
+
 export interface RunSwarmRequest {
   input: JsonValue | JsonObject;
   rounds?: number;
