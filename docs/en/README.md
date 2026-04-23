@@ -201,21 +201,27 @@ angelus/
 
 ## Demo Package
 
-The main demo package lives in `agents/deepseek_demo/` and shows a full execution chain:
+The main demo package lives in `agents/deepseek_demo/` and shows a full adaptive execution chain:
 
-1. `planner` produces a control plan
-2. `agent_manager` creates a temporary `auditor`
-3. `graph_editor` inserts that temporary agent into the live graph
-4. `auditor` produces a conclusion
-5. `agent_manager` deletes the temporary agent
-6. `graph_editor` removes the temporary node
-7. `publisher` emits the final answer
-8. `file_writer` writes `outputs/deepseek_demo_final.txt`
+1. `orchestrator` analyzes the user request and produces a structured research plan
+2. `organizer_preflight` inspects the request and decides whether to keep the branch tree wide or narrow it
+3. `planner` transforms the orchestrator framework into a compact mission brief
+4. `research_dispatcher` (organizer) fans out three parallel research branches:
+   - `architecture_researcher_runtime` — graph topology and branching patterns
+   - `evidence_researcher_runtime` — implementation evidence and runtime behavior
+   - `risk_researcher_runtime` — failure modes and operational risks
+   - Each branch uses `agent_manager_tool` to spawn a temporary researcher and `graph_editor_tool` to insert it into the live graph
+5. `organizer_checkpoint` gathers branch outputs and decides whether another planning pass is needed
+6. `writer` synthesizes the branch outputs into a single report
+7. `reviewer` reviews the draft and emits a verdict (approve → publisher, revise → writer, re_research → organizer_preflight)
+8. `publisher` emits the final user-readable answer
+9. `file_writer` writes `outputs/deepseek_demo_final.txt`
 
 The demo is designed to separate:
 
 - content flow
 - control flow
+- adaptive architecture decisions
 - graph mutation
 - temporary agent lifecycle
 - runtime persistence
@@ -226,17 +232,21 @@ If you want to test the current demo, you can use this task:
 
 > Write a clear technical note about "a mutable multi-agent runtime".  
 > Requirements:  
-> 1. let the planner generate a control plan;  
-> 2. create a temporary auditor agent for review;  
-> 3. insert the auditor into the live graph at runtime;  
-> 4. let the auditor output a substantive conclusion, not control instructions;  
-> 5. delete the auditor and remove the corresponding node after the conclusion is produced;  
-> 6. output a publish-ready note and write it to `outputs/deepseek_demo_final.txt`.
+> 1. let the orchestrator analyze the request and generate a research plan;  
+> 2. let the organizer decide whether to widen or narrow the research branches;  
+> 3. let the planner produce a compact mission brief;  
+> 4. let the dispatcher fan out three parallel research branches (architecture, evidence, risk);  
+> 5. let each branch spawn a temporary researcher, gather findings, and clean up after completion;  
+> 6. let the checkpoint organizer decide if the results are sufficient;  
+> 7. let the writer synthesize a report and the reviewer approve it;  
+> 8. output a publish-ready note and write it to `outputs/deepseek_demo_final.txt`.
 
 This task exercises:
 
-- graph editing
+- adaptive orchestration
+- graph editing and temporary node insertion
 - agent creation and deletion
+- parallel branch execution with join semantics
 - separation of content and control
 - runtime_info persistence
 - final output writing
