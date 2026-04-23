@@ -15,6 +15,10 @@ from core.cognitive import (
 
 
 class ThoughtGraphTest(unittest.TestCase):
+    def test_thought_graph_taxonomy_counts(self) -> None:
+        self.assertEqual(len(CognitiveNodeType), 14)
+        self.assertEqual(len(CognitiveRelationType), 12)
+
     def test_schedulable_subgraph_descriptor_exports_context(self) -> None:
         graph = CognitiveGraph(graph_id="shared")
         fact = graph.add_node(

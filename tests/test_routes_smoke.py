@@ -232,6 +232,15 @@ class RouteSmokeTest(unittest.TestCase):
         thought = thought_response.get_json()
         self.assertTrue(thought["success"])
         self.assertEqual(thought["thought_graph"]["graph_id"], "thought-demo")
+        self.assertEqual(thought["thought_graph"]["nodes"][0]["node_type"], "fact")
+        self.assertIn("active_subgraphs", thought["thought_graph"])
+
+        task_graph_response = self.client.get("/api/tasks/graph?swarm=demo")
+        self.assertEqual(task_graph_response.status_code, 200)
+        task_graph = task_graph_response.get_json()
+        self.assertTrue(task_graph["success"])
+        self.assertEqual(task_graph["graph"]["graph_id"], "tasks_demo")
+        self.assertIn("summary", task_graph["graph"])
 
         run_response = self.client.post("/api/swarms/demo/run", json={"input": {"hello": "world"}, "rounds": 2})
         self.assertEqual(run_response.status_code, 200)
