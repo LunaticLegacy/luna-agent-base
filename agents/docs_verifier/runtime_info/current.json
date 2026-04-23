@@ -1,25 +1,33 @@
 {
-  "action": "register_tool",
+  "action": "set_execution_graph",
   "agent_name": "docs_verifier",
   "detail": {
-    "description": "Echo the input payload."
+    "entry_node_id": 1,
+    "exit_node_id": 7
   },
-  "sequence": 9,
+  "sequence": 16,
   "snapshot": {
     "agent_name": "docs_verifier",
-    "agents": [],
+    "agents": [
+      "orchestrator",
+      "backend_verifier",
+      "frontend_verifier",
+      "structure_verifier",
+      "reviewer",
+      "publisher"
+    ],
     "graph": {
-      "edge_count": 0,
-      "entry_node_id": null,
-      "exit_node_id": null,
-      "graph_name": null,
-      "node_count": 0
+      "edge_count": 8,
+      "entry_node_id": 1,
+      "exit_node_id": 7,
+      "graph_name": "docs_verifier",
+      "node_count": 7
     },
     "last_event": {
-      "action": "register_tool",
-      "sequence": 9,
-      "subject_id": "echo",
-      "subject_kind": "tool"
+      "action": "set_execution_graph",
+      "sequence": 16,
+      "subject_id": "docs_verifier",
+      "subject_kind": "graph"
     },
     "skills": [
       "backend_verifier_prompt",
@@ -39,9 +47,9 @@
       "echo",
       "file_writer"
     ],
-    "updated_at": "2026-04-23T10:08:38.845874+00:00"
+    "updated_at": "2026-04-23T10:49:25.990177+00:00"
   },
-  "subject_id": "echo",
-  "subject_kind": "tool",
-  "timestamp": "2026-04-23T10:08:38.845871+00:00"
+  "subject_id": "docs_verifier",
+  "subject_kind": "graph",
+  "timestamp": "2026-04-23T10:49:25.990172+00:00"
 }

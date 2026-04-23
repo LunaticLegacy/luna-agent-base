@@ -4,34 +4,53 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from core.swarm_spec import SwarmLoaderError, _coerce_agent_blueprint
+from core.swarm_spec import SwarmLoaderError, load_swarm_manifest
 from core.toodefl import ToolContext
 from tools.file_writer_tool import FileWriterTool
 
 
 class WorkspaceAccessTest(unittest.TestCase):
-    def test_agent_blueprint_parses_workspace_fields(self) -> None:
-        blueprint = _coerce_agent_blueprint(
-            {
-                "agent_id": "reviewer",
-                "workspace_mode": "workspace",
-                "workspace_root": "agents/docs_verifier",
-            },
-            Path("agents/docs_verifier/agents/reviewer.py"),
-        )
-        self.assertEqual(blueprint.workspace_mode, "workspace")
-        self.assertEqual(blueprint.workspace_root, "agents/docs_verifier")
+    def test_workspace_config_loads_from_swarm_manifest(self) -> None:
+        with patch.dict("os.environ", {"MOONSHOT_API_KEY": "test-key"}):
+            _, manifest = load_swarm_manifest(Path("agents/docs_verifier"))
+        self.assertEqual(manifest.workspace.default_mode, "workspace")
+        self.assertEqual(manifest.workspace.default_root, "agents/docs_verifier")
 
-    def test_agent_blueprint_rejects_invalid_workspace_mode(self) -> None:
-        with self.assertRaises(SwarmLoaderError):
-            _coerce_agent_blueprint(
-                {
-                    "agent_id": "reviewer",
-                    "workspace_mode": "invalid",
-                },
-                Path("agents/docs_verifier/agents/reviewer.py"),
+    def test_workspace_config_rejects_invalid_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            package_path = Path(tmp_dir)
+            (package_path / "agents").mkdir()
+            (package_path / "skills").mkdir()
+            (package_path / "tools").mkdir()
+            (package_path / "graph.py").write_text("GRAPH = None\n", encoding="utf-8")
+            (package_path / "agents" / "agent.py").write_text(
+                'AGENT = {"agent_id": "a"}\n',
+                encoding="utf-8",
             )
+            (package_path / "swarm.toml").write_text(
+                """
+[swarm]
+name = "tmp"
+graph_file = "graph.py"
+agent_files = ["agents/agent.py"]
+
+[llm.default]
+name = "tmp"
+provider = "openai"
+api_url = "https://example.com"
+api_key = "key"
+model = "model"
+
+[workspace]
+default_mode = "invalid"
+default_root = "."
+""".strip(),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SwarmLoaderError):
+                load_swarm_manifest(package_path)
 
     def test_file_writer_allows_workspace_writes(self) -> None:
         tool = FileWriterTool()

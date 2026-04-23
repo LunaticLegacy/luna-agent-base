@@ -66,6 +66,10 @@ skill_files = ["skills/planner.prompt.md", "skills/reviewer.prompt.md"]
 tool_files = ["tools.echo_tool", "tools.file_writer_tool"]
 default_backend = "deepseek"
 
+[workspace]
+default_mode = "workspace"
+default_root = "."
+
 [llm.default]
 name = "deepseek"
 provider = "openai"
@@ -90,6 +94,23 @@ model = "deepseek-reasoner"
 - `graph_file` 和 `agent_files` 是必需的
 - `skill_files` 和 `tool_files` 是可选的
 - `default_backend` 只在你有多个 backend 时特别有用
+
+## Workspace 配置
+
+`workspace` 建议作为 swarm 级配置写在 `swarm.toml` 里，用来定义 agent 的文件访问边界。
+
+常见字段如下：
+
+- `default_mode`：默认工作空间模式，支持 `workspace` 和 `full_access`
+- `default_root`：默认工作空间根目录，通常写成相对仓库根目录的路径
+- `agents.<agent_id>.mode`：某个 agent 的单独模式覆盖
+- `agents.<agent_id>.root`：某个 agent 的单独根目录覆盖
+
+推荐用法：
+
+- 大多数 agent 使用 `workspace`
+- 只有明确可信的系统 agent 才使用 `full_access`
+- `file_writer` 等文件工具会根据这个配置限制写入路径
 
 ## Agent 文件
 
@@ -118,8 +139,6 @@ model = "deepseek-reasoner"
 - `api_key`
 - `model`
 - `provider`
-- `workspace_mode`
-- `workspace_root`
 - `tools`
 
 建议：
@@ -127,9 +146,8 @@ model = "deepseek-reasoner"
 - `agent_id` 必须稳定且唯一
 - `character_prompt` 适合写角色人格、职责边界和工作风格
 - `skill_name` / `prompt_file` / `prompt_text` 用来指定角色提示词来源
-- `workspace_mode` 用来声明这个 Agent 是否只能访问工作空间，还是允许 `full_access`
-- `workspace_root` 用来指定工作空间根目录，建议写成相对仓库根目录的路径
 - `tools` 用来声明这个 Agent 可以调用哪些工具
+- 工作空间边界应写在 `swarm.toml` 的 `[workspace]` 里，而不是写进 agent Python 文件
 
 ## Skill 文件
 

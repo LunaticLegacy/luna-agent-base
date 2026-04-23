@@ -33,3 +33,7 @@ provider = "openai"
 api_url = "https://api.deepseek.com"
 api_key = "sk-076ea11fbb2741948a9b60b6ca7efca2"
 model = "deepseek-reasoner"
+
+[workspace]
+default_mode = "workspace"
+default_root = "."
