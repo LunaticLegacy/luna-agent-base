@@ -22,12 +22,18 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 class CognitiveNodeType(str, Enum):
+    FACT = "fact"
     GOAL = "goal"
     HYPOTHESIS = "hypothesis"
+    GUESS = "guess"
     REASONING = "reasoning"
     EVIDENCE = "evidence"
     CLAIM = "claim"
     QUESTION = "question"
+    ASSUMPTION = "assumption"
+    DECISION = "decision"
+    RISK = "risk"
+    COUNTEREVIDENCE = "counterevidence"
     TOOL_RESULT = "tool_result"
     EXECUTION_TRACE = "execution_trace"
 
@@ -37,8 +43,62 @@ class CognitiveRelationType(str, Enum):
     OPPOSES = "opposes"
     DERIVES_FROM = "derives_from"
     LEADS_TO = "leads_to"
+    DEPENDS_ON = "depends_on"
+    QUESTIONS = "questions"
+    REFINES = "refines"
+    VERIFIES = "verifies"
+    DISPROVES = "disproves"
+    SPECULATES = "speculates"
     RELATES = "relates"
     EVIDENCE_FOR = "evidence_for"
+
+
+@dataclass
+class CognitiveSubgraphDescriptor:
+    """A schedulable view into the shared thought graph."""
+
+    root_node_ids: List[str] = field(default_factory=list)
+    frontier_node_ids: List[str] = field(default_factory=list)
+    purpose: str = ""
+    visibility: str = "shared"
+    owner_agent: str = ""
+    expected_next_information: str = ""
+    priority: int = 0
+    subgraph_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "active"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "subgraph_id": self.subgraph_id,
+            "root_node_ids": list(self.root_node_ids),
+            "frontier_node_ids": list(self.frontier_node_ids),
+            "purpose": self.purpose,
+            "visibility": self.visibility,
+            "owner_agent": self.owner_agent,
+            "expected_next_information": self.expected_next_information,
+            "priority": self.priority,
+            "status": self.status,
+            "metadata": dict(self.metadata),
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CognitiveSubgraphDescriptor":
+        return cls(
+            subgraph_id=str(data.get("subgraph_id", uuid.uuid4())),
+            root_node_ids=[str(item) for item in data.get("root_node_ids", []) or []],
+            frontier_node_ids=[str(item) for item in data.get("frontier_node_ids", []) or []],
+            purpose=str(data.get("purpose", "")),
+            visibility=str(data.get("visibility", "shared")),
+            owner_agent=str(data.get("owner_agent", "")),
+            expected_next_information=str(data.get("expected_next_information", "")),
+            priority=int(data.get("priority", 0)),
+            status=str(data.get("status", "active")),
+            metadata=dict(data.get("metadata", {}) or {}),
+            created_at=str(data.get("created_at", datetime.now(timezone.utc).isoformat())),
+        )
 
 
 @dataclass
@@ -244,6 +304,43 @@ class CognitiveGraph:
                     sub.add_edge(deepcopy(e))
         return sub
 
+    def describe_subgraph(
+        self,
+        *,
+        owner_agent: str = "",
+        query: Optional[str] = None,
+        seed_ids: Optional[List[str]] = None,
+        purpose: str = "",
+        visibility: str = "shared",
+        expected_next_information: str = "",
+        priority: int = 0,
+        max_nodes: int = 20,
+        max_hops: int = 2,
+    ) -> Tuple[CognitiveSubgraphDescriptor, "CognitiveGraph"]:
+        """Create a schedulable descriptor and matching graph slice."""
+        roots = [sid for sid in (seed_ids or []) if sid in self.nodes]
+        if not roots and query:
+            roots = self._score_nodes_by_query(query)[:max_nodes]
+        if not roots:
+            roots = list(self.nodes.keys())[:max_nodes]
+
+        subgraph = self.query_subgraph(roots, max_hops=max_hops, max_nodes=max_nodes)
+        frontier = [
+            node_id
+            for node_id in subgraph.nodes
+            if any(neighbor_id not in subgraph.nodes for neighbor_id in self.neighbors(node_id))
+        ]
+        descriptor = CognitiveSubgraphDescriptor(
+            root_node_ids=list(roots),
+            frontier_node_ids=frontier,
+            purpose=purpose or (query or "General thought graph context"),
+            visibility=visibility,
+            owner_agent=owner_agent,
+            expected_next_information=expected_next_information,
+            priority=priority,
+        )
+        return descriptor, subgraph
+
     def find_conflicts(self) -> List[Tuple[CognitiveNode, CognitiveNode, List[CognitiveEdge]]]:
         """Detect pairs of nodes that both support and oppose each other."""
         conflicts: List[Tuple[CognitiveNode, CognitiveNode, List[CognitiveEdge]]] = []
@@ -272,14 +369,24 @@ class CognitiveGraph:
         return conflicts
 
     def find_unsupported_claims(self) -> List[CognitiveNode]:
-        """Return claim/hypothesis nodes with no incoming SUPPORTS or EVIDENCE_FOR edges."""
+        """Return claim-like nodes with no incoming support or verification edges."""
         unsupported: List[CognitiveNode] = []
         for node in self.nodes.values():
-            if node.node_type not in (CognitiveNodeType.CLAIM, CognitiveNodeType.HYPOTHESIS):
+            if node.node_type not in (
+                CognitiveNodeType.CLAIM,
+                CognitiveNodeType.HYPOTHESIS,
+                CognitiveNodeType.GUESS,
+                CognitiveNodeType.FACT,
+                CognitiveNodeType.DECISION,
+            ):
                 continue
             has_support = any(
                 e.target_id == node.node_id
-                and e.relation in (CognitiveRelationType.SUPPORTS, CognitiveRelationType.EVIDENCE_FOR)
+                and e.relation in (
+                    CognitiveRelationType.SUPPORTS,
+                    CognitiveRelationType.EVIDENCE_FOR,
+                    CognitiveRelationType.VERIFIES,
+                )
                 for e in self.edges
             )
             if not has_support:
@@ -321,6 +428,26 @@ class CognitiveGraph:
                     f"  {edge.source_id} --[{edge.relation.value}]--> {edge.target_id}"
                     f"  (strength={edge.strength:.2f})"
                 )
+        return "\n".join(lines)
+
+    def export_subgraph_for_llm(
+        self,
+        descriptor: CognitiveSubgraphDescriptor,
+        subgraph: "CognitiveGraph",
+    ) -> str:
+        """Serialize a schedulable subgraph with its scheduling metadata."""
+        lines: List[str] = [
+            "Schedulable Thought Subgraph:",
+            f"- id: {descriptor.subgraph_id}",
+            f"- owner_agent: {descriptor.owner_agent or 'unassigned'}",
+            f"- purpose: {descriptor.purpose or 'unspecified'}",
+            f"- visibility: {descriptor.visibility}",
+            f"- expected_next_information: {descriptor.expected_next_information or 'unspecified'}",
+            f"- root_nodes: {', '.join(descriptor.root_node_ids) or 'none'}",
+            f"- frontier_nodes: {', '.join(descriptor.frontier_node_ids) or 'none'}",
+            "",
+            subgraph.export_for_llm(max_nodes=len(subgraph.nodes) or 1),
+        ]
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional, Set
 
 
 @dataclass
@@ -18,6 +18,21 @@ class ToolContext:
     metadata: Dict[str, Any] = field(default_factory=dict)
     core: Optional[Any] = None
     graph: Optional[Any] = None
+    capabilities: Set[str] = field(default_factory=set)
+
+    def has_capability(self, capability: str) -> bool:
+        return capability in self.capabilities
+
+
+def require_tool_capability(context: Optional[ToolContext], capability: str, tool_name: str) -> None:
+    """Reject a high-risk tool call unless its context explicitly grants a capability."""
+    if context is not None and context.has_capability(capability):
+        return
+    raise PermissionError(f"Tool '{tool_name}' requires capability '{capability}'.")
+
+
+def normalize_capabilities(raw: Iterable[str] | None) -> Set[str]:
+    return {str(item).strip() for item in (raw or []) if str(item).strip()}
 
 
 class ToolDefinition(ABC):

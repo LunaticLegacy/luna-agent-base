@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from core.toodefl import ToolContext, ToolDefinition
+from core.toodefl import ToolContext, ToolDefinition, require_tool_capability
 
 
 class FileWriterTool(ToolDefinition):
@@ -18,6 +18,7 @@ class FileWriterTool(ToolDefinition):
         *,
         context: Optional[ToolContext] = None,
     ) -> Any:
+        require_tool_capability(context, "file_write", self.tool_name)
         path_value = str(arguments.get("path", "")).strip()
         if not path_value:
             raise ValueError("file_writer requires a non-empty 'path'.")
@@ -25,6 +26,8 @@ class FileWriterTool(ToolDefinition):
         if self._is_workspace_restricted(context):
             workspace_root = self._resolve_workspace_root(context)
             if workspace_root is not None:
+                if not target_path.is_absolute():
+                    target_path = workspace_root / target_path
                 target_resolved = target_path.resolve()
                 if not self._path_is_within_root(target_resolved, workspace_root):
                     raise ValueError(
@@ -35,6 +38,7 @@ class FileWriterTool(ToolDefinition):
         if content_value is None:
             content_value = arguments.get("input", "")
         content = str(content_value)
+        self._reject_sensitive_path(target_path, context)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(content, encoding="utf-8")
         return {
@@ -68,6 +72,22 @@ class FileWriterTool(ToolDefinition):
             return target_path == workspace_root or workspace_root in target_path.parents
         except RuntimeError:
             return False
+
+    def _reject_sensitive_path(self, target_path: Path, context: Optional[ToolContext]) -> None:
+        parts = {part.lower() for part in target_path.parts}
+        blocked_parts = {".git", ".venv", ".lvenv", "__pycache__"}
+        if parts & blocked_parts:
+            raise ValueError(f"file_writer refuses to write sensitive path '{target_path}'.")
+        blocked_names = {".bashrc", ".profile", ".zshrc"}
+        if target_path.name.lower() in blocked_names:
+            raise ValueError(f"file_writer refuses to write sensitive path '{target_path}'.")
+        config_names = {"config.toml", ".env", ".env.local", ".env.production"}
+        if target_path.name.lower() in config_names and not (
+            context is not None and context.has_capability("config_write")
+        ):
+            raise ValueError(
+                f"file_writer refuses to write configuration path '{target_path}' without 'config_write'."
+            )
 
 
 TOOL = FileWriterTool()

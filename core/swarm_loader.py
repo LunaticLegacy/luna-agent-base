@@ -42,7 +42,7 @@ class LoadedSwarm:
 
 def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) -> ExecutionGraph:
     """Load the single execution graph file for a swarm package."""
-    graph_path = (package_path / manifest.graph_file).resolve()
+    graph_path = _resolve_package_local_path(package_path, manifest.graph_file)
     backup_path = graph_path.with_name("graph_init.py")
     print(
         f"[angelus] loading graph: swarm={manifest.swarm_name} file={manifest.graph_file}",
@@ -151,6 +151,7 @@ def build_core_from_package(
     tools, tool_requirement_files = load_swarm_tools(package_path, manifest)
     for tool in tools.values():
         core.register_tool(tool)
+        core.set_tool_capabilities(tool.tool_name, manifest.tool_capabilities.get(tool.tool_name, []))
         print(
             f"[angelus] registered tool: swarm={manifest.swarm_name} tool={tool.tool_name}",
             flush=True,
@@ -210,7 +211,7 @@ def build_core_from_package(
     )
 
 
-def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = True) -> List[LoadedSwarm]:
+def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -> List[LoadedSwarm]:
     """Discover and load every swarm package in the given root."""
     package_paths = discover_swarm_packages(root)
     print(
@@ -343,13 +344,41 @@ def _resolve_module_path(entry: str, package_path: Path) -> Optional[Path]:
     entry_path = Path(entry)
     if entry_path.suffix == ".py" or entry_path.exists():
         if entry_path.is_absolute():
-            return entry_path
-        return (package_path / entry_path).resolve()
+            resolved = entry_path.resolve()
+        else:
+            resolved = (package_path / entry_path).resolve()
+        _ensure_allowed_module_path(resolved, package_path)
+        return resolved
 
     spec = importlib.util.find_spec(entry)
     if spec and spec.origin and spec.origin not in {"built-in", "frozen"}:
-        return Path(spec.origin).resolve()
+        resolved = Path(spec.origin).resolve()
+        _ensure_allowed_module_path(resolved, package_path)
+        return resolved
     return None
+
+
+def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
+    path = Path(value)
+    resolved = path.resolve() if path.is_absolute() else (package_path / path).resolve()
+    try:
+        resolved.relative_to(package_path.resolve())
+    except ValueError as exc:
+        raise SwarmLoaderError(f"Path '{value}' escapes swarm package '{package_path}'.") from exc
+    return resolved
+
+
+def _ensure_allowed_module_path(module_path: Path, package_path: Path) -> None:
+    allowed_roots = [package_path.resolve(), (Path.cwd() / "tools").resolve()]
+    for root in allowed_roots:
+        try:
+            module_path.relative_to(root)
+            return
+        except ValueError:
+            continue
+    raise SwarmLoaderError(
+        f"Module path '{module_path}' is outside the swarm package and allowed tool roots."
+    )
 
 
 def _discover_module_requirement_file(module_path: Optional[Path]) -> Optional[Path]:
@@ -427,7 +456,7 @@ def _resolve_agent_prompt(
         return skill.content
 
     if blueprint.prompt_file:
-        prompt_path = (package_path / blueprint.prompt_file).resolve()
+        prompt_path = _resolve_package_local_path(package_path, blueprint.prompt_file)
         skill = skill_by_path.get(prompt_path)
         if skill is not None:
             return skill.content
@@ -510,4 +539,4 @@ def _resolve_workspace_path(package_path: Path, value: str | Path) -> Path:
     path = Path(value)
     if path.is_absolute():
         return path.resolve()
-    return (Path.cwd() / path).resolve()
+    return (package_path / path).resolve()

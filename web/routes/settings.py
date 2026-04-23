@@ -33,7 +33,8 @@ def update_settings():
     config_path, registry = _get_config_path()
     request_data = request.get_json(silent=True) or {}
     api_section = request_data.get("api")
-    api_settings = ApiSettings.from_mapping(api_section)
+    existing = load_api_settings(config_path)
+    api_settings = ApiSettings.from_mapping(api_section, existing=existing)
     updated = save_api_settings(config_path, api_settings)
     try:
         registry.root_config = load_root_config(config_path)

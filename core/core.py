@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Set, TYPE_CHECKING
 
 from modules.llm_fetcher import LLMFetcher
 
 from .agent import Agent
-from .cognitive import CognitiveGraph, merge_cognitive_graphs
+from .cognitive import CognitiveGraph, CognitiveSubgraphDescriptor, merge_cognitive_graphs
 from .config import AgentConfig
 from .runtime_info import RuntimeInfoManager
-from .toodefl import ToolDefinition
+from .toodefl import ToolDefinition, normalize_capabilities
 from .skills import SkillAsset
 from .protocols import AgentLike
 from .results import GraphValidationResult
@@ -34,12 +34,15 @@ class Core:
         self.workspace_mode = "workspace"
         self.agents: Dict[str, AgentLike] = {}
         self.tools: Dict[str, ToolDefinition] = {}
+        self.tool_capabilities: Dict[str, Set[str]] = {}
         self.skills: Dict[str, SkillAsset] = {}
         self._execution_graph: Optional["ExecutionGraph"] = None
         self._execution_graph_source_path: Optional[Path] = None
         self._execution_graph_backup_path: Optional[Path] = None
         self._runtime_info: Optional[RuntimeInfoManager] = None
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
+        self.active_thought_subgraphs: Dict[str, CognitiveSubgraphDescriptor] = {}
+        self.current_run_id: Optional[str] = None
 
     async def init(self) -> None:
         """Initialize runtime resources and validate the current graph."""
@@ -87,6 +90,7 @@ class Core:
             workspace_mode=workspace_mode,
             workspace_root=workspace_root if workspace_root is not None else self.workspace_root,
         )
+        agent.set_run_id(self.current_run_id)
         self.add_agent(agent)
         return agent
 
@@ -137,12 +141,21 @@ class Core:
         if tool.tool_name in self.tools:
             raise ValueError(f"Duplicate tool_name: {tool.tool_name}")
         self.tools[tool.tool_name] = tool
+        self.tool_capabilities.setdefault(tool.tool_name, set())
         self._record_runtime_change(
             action="register_tool",
             subject_kind="tool",
             subject_id=tool.tool_name,
             detail={"description": getattr(tool, "description", "")},
         )
+
+    def set_tool_capabilities(self, tool_name: str, capabilities: Iterable[str]) -> None:
+        """Grant configured capabilities to one registered tool."""
+        self.tool_capabilities[tool_name] = normalize_capabilities(capabilities)
+
+    def get_tool_capabilities(self, tool_name: str) -> Set[str]:
+        """Return capabilities granted to one tool."""
+        return set(self.tool_capabilities.get(tool_name, set()))
 
     def register_skill(self, skill: SkillAsset) -> None:
         """Register a runtime skill asset.
@@ -320,9 +333,103 @@ class Core:
         """Return a human-readable export of the swarm cognitive graph for LLM prompting."""
         return self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=max_nodes)
 
+    def schedule_thought_subgraph(
+        self,
+        *,
+        agent_id: str = "",
+        query: Optional[str] = None,
+        seed_ids: Optional[List[str]] = None,
+        purpose: str = "",
+        expected_next_information: str = "",
+        max_nodes: int = 16,
+    ) -> tuple[CognitiveSubgraphDescriptor, CognitiveGraph]:
+        """Create and remember a schedulable subgraph slice for an agent."""
+        if agent_id:
+            for existing in self.active_thought_subgraphs.values():
+                if existing.owner_agent == agent_id and existing.status == "active":
+                    existing.status = "retired"
+        descriptor, subgraph = self.swarm_cognitive_graph.describe_subgraph(
+            owner_agent=agent_id,
+            query=query,
+            seed_ids=seed_ids,
+            purpose=purpose,
+            expected_next_information=expected_next_information,
+            max_nodes=max_nodes,
+        )
+        self.active_thought_subgraphs[descriptor.subgraph_id] = descriptor
+        return descriptor, subgraph
+
+    def retire_thought_subgraph(self, subgraph_id: str) -> bool:
+        """Mark a scheduled thought subgraph as retired."""
+        descriptor = self.active_thought_subgraphs.get(subgraph_id)
+        if descriptor is None:
+            return False
+        descriptor.status = "retired"
+        return True
+
+    def get_private_workspace_summary(self, agent_id: str) -> str:
+        """Return a compact summary of an agent's private workspace."""
+        agent = self.agents.get(agent_id)
+        summarize = getattr(agent, "summarize_private_workspace", None)
+        if callable(summarize):
+            return str(summarize())
+        return "No private workspace summary available."
+
+    def set_current_run_id(self, run_id: Optional[str]) -> None:
+        """Attach runtime agents to a run-scoped private workspace."""
+        self.current_run_id = str(run_id).strip() if run_id else None
+        for agent in self.agents.values():
+            set_run_id = getattr(agent, "set_run_id", None)
+            if callable(set_run_id):
+                set_run_id(self.current_run_id)
+
+    def build_thought_context_export(
+        self,
+        *,
+        agent_id: str,
+        query: Optional[str] = None,
+        purpose: str = "",
+        max_nodes: int = 16,
+    ) -> str:
+        """Build layered thought context for an agent prompt."""
+        main_graph = self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=12)
+        descriptor, subgraph = self.schedule_thought_subgraph(
+            agent_id=agent_id,
+            query=query,
+            purpose=purpose or "Continue the current agent task using relevant shared reasoning.",
+            expected_next_information="Identify missing facts, uncertain claims, and useful next evidence.",
+            max_nodes=max_nodes,
+        )
+        subgraph_export = self.swarm_cognitive_graph.export_subgraph_for_llm(descriptor, subgraph)
+        private_summary = self.get_private_workspace_summary(agent_id)
+        return (
+            "## Swarm Thought Context\n\n"
+            "Use the shared graph as public reasoning state. Use the active subgraph as the current "
+            "schedulable slice. Treat private workspace notes as agent-local context; only promote "
+            "private information by emitting explicit thought graph nodes and relations.\n\n"
+            "### Main Shared Graph Summary\n"
+            f"{main_graph}\n\n"
+            "### Active Schedulable Subgraph\n"
+            f"{subgraph_export}\n\n"
+            "### Private Workspace Summary\n"
+            f"{private_summary}\n\n"
+            "### Thought Graph Output Contract\n"
+            "When you discover reusable reasoning, include a <cognitive_graph> JSON block with nodes "
+            "and edges. Prefer node types fact, evidence, hypothesis, guess, claim, question, "
+            "assumption, decision, risk, counterevidence, and tool_result. Prefer relations supports, "
+            "opposes, derives_from, leads_to, depends_on, questions, refines, verifies, disproves, "
+            "and speculates."
+        )
+
     def get_cognitive_graph_snapshot(self) -> Dict[str, Any]:
         """Return a JSON-serializable snapshot of the swarm cognitive graph."""
-        return self.swarm_cognitive_graph.snapshot()
+        snapshot = self.swarm_cognitive_graph.snapshot()
+        snapshot["active_subgraphs"] = [
+            descriptor.to_dict()
+            for descriptor in self.active_thought_subgraphs.values()
+            if descriptor.status == "active"
+        ]
+        return snapshot
 
     def reset_runtime_state(self) -> None:
         """Clear transient runtime state before starting a fresh swarm run."""
@@ -333,3 +440,5 @@ class Core:
                 continue
             agent.reset_context()
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{self.agent_name}")
+        self.active_thought_subgraphs.clear()
+        self.current_run_id = None

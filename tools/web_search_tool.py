@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from core.toodefl import ToolContext, ToolDefinition
+from core.toodefl import ToolContext, ToolDefinition, require_tool_capability
 
 
 class WebSearchTool(ToolDefinition):
@@ -36,6 +36,7 @@ class WebSearchTool(ToolDefinition):
         *,
         context: Optional[ToolContext] = None,
     ) -> Any:
+        require_tool_capability(context, "network_access", self.tool_name)
         from duckduckgo_search import DDGS
 
         query = str(arguments.get("query", "")).strip()

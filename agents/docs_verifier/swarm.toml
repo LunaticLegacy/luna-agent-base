@@ -22,13 +22,16 @@ tool_files = [
   "tools.echo_tool",
 ]
 
+[tool_capabilities]
+file_writer = ["file_write"]
+
 [llm.default]
 name = "kimi"
 provider = "litellm"
 api_url = "https://api.moonshot.ai/v1"
-api_key = "sk-kimi-zbaNh9r6fuxzOh5zzPaFp5v0fmrEqCIMO4rGtpYjfH1Veaail7oBtggMXrPSKORb"
+api_key = "${MOONSHOT_API_KEY}"
 model = "moonshot/kimi-k2.5"
 
 [workspace]
 default_mode = "workspace"
-default_root = "agents/docs_verifier"
+default_root = "."

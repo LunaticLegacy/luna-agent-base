@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from core.toodefl import ToolContext, ToolDefinition
+from core.toodefl import ToolContext, ToolDefinition, require_tool_capability
 
 
 class AgentManagerTool(ToolDefinition):
@@ -21,6 +21,7 @@ class AgentManagerTool(ToolDefinition):
         *,
         context: Optional[ToolContext] = None,
     ) -> Any:
+        require_tool_capability(context, "agent_lifecycle", self.tool_name)
         if context is None or context.core is None:
             raise ValueError("agent_manager requires a runtime core context.")
 
@@ -50,6 +51,8 @@ class AgentManagerTool(ToolDefinition):
             workspace_mode = str(
                 self._pick_optional_value(control_source, runtime_metadata, "workspace_mode", "workspace")
             ).strip() or "workspace"
+            if context.workspace_mode != "full_access" and workspace_mode == "full_access":
+                raise PermissionError("agent_manager cannot escalate spawned agents to full_access.")
             workspace_root_value = self._pick_optional_value(control_source, runtime_metadata, "workspace_root")
             workspace_root = str(workspace_root_value).strip() if workspace_root_value is not None else None
             if workspace_root == "":

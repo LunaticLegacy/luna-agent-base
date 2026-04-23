@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from core import AgentNode, ExecutionGraph, Node, ToolNode
-from core.toodefl import ToolContext, ToolDefinition
+from core.toodefl import ToolContext, ToolDefinition, require_tool_capability
 
 
 class GraphEditorTool(ToolDefinition):
@@ -22,6 +22,7 @@ class GraphEditorTool(ToolDefinition):
         *,
         context: Optional[ToolContext] = None,
     ) -> Any:
+        require_tool_capability(context, "graph_mutation", self.tool_name)
         if context is None or context.graph is None:
             raise ValueError("graph_editor requires a runtime graph context.")
 
@@ -60,21 +61,23 @@ class GraphEditorTool(ToolDefinition):
             replace_existing = bool(
                 self._pick_optional_value(control_source, runtime_metadata, "replace_existing", False)
             )
-            if replace_existing and node_id in graph.nodes:
-                graph.remove_node(node_id)
-            node = AgentNode(
-                node_id=node_id,
-                node_name=node_name,
-                agent_id=agent_id,
-                additional_prompt=additional_prompt,
-                next_node_ids=next_node_ids,
-                metadata={"runtime_transient": runtime_transient},
-            )
-            graph.add_node(node)
-            for next_node_id in next_node_ids:
-                graph.add_edge(node_id, next_node_id)
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
+
+            def mutate_add_agent(target_graph: ExecutionGraph) -> None:
+                if replace_existing and node_id in target_graph.nodes:
+                    target_graph.remove_node(node_id)
+                node = AgentNode(
+                    node_id=node_id,
+                    node_name=node_name,
+                    agent_id=agent_id,
+                    additional_prompt=additional_prompt,
+                    next_node_ids=next_node_ids,
+                    metadata={"runtime_transient": runtime_transient},
+                )
+                target_graph.add_node(node)
+                for next_node_id in next_node_ids:
+                    target_graph.add_edge(node_id, next_node_id)
+
+            self._commit_graph_edit(graph, context, action, mutate_add_agent)
             metadata_patch.update(
                 {
                     "graph_node_id": node_id,
@@ -103,19 +106,21 @@ class GraphEditorTool(ToolDefinition):
             next_node_ids = self._coerce_node_id_list(
                 self._pick_optional_value(control_source, runtime_metadata, "next_node_ids") or []
             )
-            node = ToolNode(
-                node_id=node_id,
-                node_name=node_name,
-                tool_name=tool_name,
-                input_mapping=input_mapping,
-                next_node_ids=next_node_ids,
-                metadata={"runtime_transient": runtime_transient},
-            )
-            graph.add_node(node)
-            for next_node_id in next_node_ids:
-                graph.add_edge(node_id, next_node_id)
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
+
+            def mutate_add_tool(target_graph: ExecutionGraph) -> None:
+                node = ToolNode(
+                    node_id=node_id,
+                    node_name=node_name,
+                    tool_name=tool_name,
+                    input_mapping=input_mapping,
+                    next_node_ids=next_node_ids,
+                    metadata={"runtime_transient": runtime_transient},
+                )
+                target_graph.add_node(node)
+                for next_node_id in next_node_ids:
+                    target_graph.add_edge(node_id, next_node_id)
+
+            self._commit_graph_edit(graph, context, action, mutate_add_tool)
             metadata_patch.update(
                 {
                     "graph_node_id": node_id,
@@ -134,9 +139,12 @@ class GraphEditorTool(ToolDefinition):
                 )
         elif action == "remove_node":
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
-            graph.remove_node(node_id)
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
+            self._commit_graph_edit(
+                graph,
+                context,
+                action,
+                lambda target_graph: target_graph.remove_node(node_id),
+            )
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
                 context.core.record_runtime_change(
@@ -150,12 +158,12 @@ class GraphEditorTool(ToolDefinition):
             to_node_ids = self._coerce_node_id_list(
                 self._pick_optional_value(control_source, runtime_metadata, "to_node_ids") or []
             )
-            graph.replace_next(
-                from_node_id,
-                to_node_ids,
+            self._commit_graph_edit(
+                graph,
+                context,
+                action,
+                lambda target_graph: target_graph.replace_next(from_node_id, to_node_ids),
             )
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
             metadata_patch.update(
                 {
                     "graph_from_node_id": from_node_id,
@@ -172,9 +180,12 @@ class GraphEditorTool(ToolDefinition):
         elif action == "add_edge":
             from_node_id = int(self._pick_value(control_source, runtime_metadata, "from_node_id"))
             to_node_id = int(self._pick_value(control_source, runtime_metadata, "to_node_id"))
-            graph.add_edge(from_node_id, to_node_id)
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
+            self._commit_graph_edit(
+                graph,
+                context,
+                action,
+                lambda target_graph: target_graph.add_edge(from_node_id, to_node_id),
+            )
             metadata_patch.update(
                 {
                     "graph_from_node_id": from_node_id,
@@ -191,9 +202,12 @@ class GraphEditorTool(ToolDefinition):
         elif action == "remove_edge":
             from_node_id = int(self._pick_value(control_source, runtime_metadata, "from_node_id"))
             to_node_id = int(self._pick_value(control_source, runtime_metadata, "to_node_id"))
-            graph.remove_edge(from_node_id, to_node_id)
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
+            self._commit_graph_edit(
+                graph,
+                context,
+                action,
+                lambda target_graph: target_graph.remove_edge(from_node_id, to_node_id),
+            )
             metadata_patch.update(
                 {
                     "graph_from_node_id": from_node_id,
@@ -209,9 +223,12 @@ class GraphEditorTool(ToolDefinition):
                 )
         elif action == "set_entry":
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
-            graph.set_entry(node_id)
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
+            self._commit_graph_edit(
+                graph,
+                context,
+                action,
+                lambda target_graph: target_graph.set_entry(node_id),
+            )
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
                 context.core.record_runtime_change(
@@ -222,9 +239,12 @@ class GraphEditorTool(ToolDefinition):
                 )
         elif action == "set_exit":
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
-            graph.set_exit(node_id)
-            self._validate_graph(graph, context.core, action)
-            self._persist_graph(context)
+            self._commit_graph_edit(
+                graph,
+                context,
+                action,
+                lambda target_graph: target_graph.set_exit(node_id),
+            )
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
                 context.core.record_runtime_change(
@@ -332,6 +352,31 @@ class GraphEditorTool(ToolDefinition):
         if not validation.is_valid:
             detail = "; ".join(validation.errors)
             raise ValueError(f"graph_editor action '{action}' left graph invalid: {detail}")
+
+    def _commit_graph_edit(self, graph: ExecutionGraph, context: ToolContext, action: str, mutate) -> None:
+        previous = graph.clone()
+        candidate = graph.clone()
+        mutate(candidate)
+        self._validate_graph(candidate, context.core, action)
+        self._copy_graph_state(graph, candidate)
+        try:
+            self._persist_graph(context)
+        except Exception:
+            self._copy_graph_state(graph, previous)
+            raise
+
+    def _copy_graph_state(self, target: ExecutionGraph, source: ExecutionGraph) -> None:
+        target.graph_name = source.graph_name
+        target.nodes = {
+            node_id: source._clone_node(node)
+            for node_id, node in source.nodes.items()
+        }
+        target.edges = [
+            edge
+            for edge in source.clone().edges
+        ]
+        target.entry_node_id = source.entry_node_id
+        target.exit_node_id = source.exit_node_id
 
     def _persist_graph(self, context: ToolContext) -> None:
         if context.core is None:

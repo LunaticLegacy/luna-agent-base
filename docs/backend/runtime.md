@@ -92,6 +92,34 @@ export MOONSHOT_API_KEY="sk-..."
 python app.py
 ```
 
+## HTTP API 安全设置
+
+根配置 `config.toml` 的 `[api]` 表现在同时控制前端 API 参数、认证和 CORS：
+
+```toml
+[api]
+base_url = "/api"
+timeout_seconds = 120
+sse_reconnect_interval_seconds = 5
+auto_reconnect = true
+require_auth = true
+api_token_env = "ANGELUS_API_TOKEN"
+cors_allowed_origins = ["http://localhost:4200", "http://127.0.0.1:4200"]
+```
+
+认证规则：
+
+- `POST`、`PUT`、`PATCH`、`DELETE` 的 `/api/*` 请求属于高风险请求。
+- 当 `require_auth = true` 或已配置 token 时，高风险请求必须携带 `Authorization: Bearer <token>` 或 `X-Angelus-Token: <token>`。
+- token 优先从 `api_token_env` 指向的环境变量读取；也可以用 `api_token` 写在配置里，但不推荐把真实密钥落盘。
+- `GET`、`OPTIONS`、健康检查和只读目录查询默认公开。
+
+CORS 规则：
+
+- `cors_allowed_origins` 为空时，运行时只允许内置的本地开发来源。
+- `cors_allowed_origins` 指定后，只给匹配 `Origin` 的响应写入 `Access-Control-Allow-Origin`。
+- 不再默认返回 `Access-Control-Allow-Origin: *`。
+
 ### Agent 工作空间访问
 
 工作空间边界现在写在 `swarm.toml` 的 `[workspace]` 表里，而不是 agent Python 文件里。
@@ -110,7 +138,7 @@ max_retries = 1
 
 [workspace]
 default_mode = "workspace"
-default_root = "agents/docs_verifier"
+default_root = "."
 ```
 
 `workspace` 当前支持两个模式：
@@ -118,7 +146,21 @@ default_root = "agents/docs_verifier"
 - `workspace`: 只能访问分配的工作空间
 - `full_access`: 不受工作空间边界限制
 
-`default_root` 用来指定工作空间根目录。runtime 会把它传给工具上下文，`file_writer` 会在 `workspace` 模式下拒绝写出该根目录之外的路径。
+`default_root` 用来指定工作空间根目录。相对路径会按 swarm package 根目录解析，而不是按当前进程工作目录解析。runtime 会把它传给工具上下文，`file_writer` 会在 `workspace` 模式下拒绝写出该根目录之外的路径。
+
+每个 graph run 会在自己的 workspace 根目录下拥有 run-scoped 私有运行目录：
+
+```text
+.angelus_private/runs/<run_id>/<agent_id>/
+```
+
+直接调用单个 agent round 且不属于 graph run 时，会使用：
+
+```text
+.angelus_private/manual/<agent_id>/
+```
+
+这个目录用于保存该 agent 的私有思考工件，例如认知图快照、草稿、缓存和本地笔记。它不会自动提升进 swarm 共享思考图；只有 agent 通过 `<cognitive_graph>...</cognitive_graph>` 输出显式节点和边时，才会合并进共享图。
 
 如果某个 agent 需要特殊配置，可以在 `[workspace.agents.<agent_id>]` 下覆盖：
 
@@ -128,13 +170,35 @@ mode = "workspace"
 root = "agents/docs_verifier"
 ```
 
+### 工具能力声明
+
+高风险工具必须在 `swarm.toml` 中显式声明能力。声明位置是 `[tool_capabilities]`：
+
+```toml
+[tool_capabilities]
+agent_manager = ["agent_lifecycle"]
+graph_editor = ["graph_mutation"]
+file_writer = ["file_write"]
+web_search = ["network_access"]
+```
+
+运行时会把能力写入 `ToolContext.capabilities`。工具执行前会检查所需能力：
+
+- `file_writer` 需要 `file_write`
+- `graph_editor` 需要 `graph_mutation`
+- `agent_manager` 需要 `agent_lifecycle`
+- `web_search` 需要 `network_access`
+- `file_writer` 写 `config.toml`、`.env` 等配置/密钥文件时额外需要 `config_write`
+
+如果 manifest 没有授予对应能力，即使 agent 绑定了工具，工具调用也会被拒绝。`agent_manager` 创建运行时 agent 时还会阻止从 `workspace` 升级到 `full_access`。
+
 ### 全量加载时的额外动作
 
-`load_all_swarms()` 在真正构建每个 swarm 之前，会先收集所有工具模块旁边的 `tool_requirements.txt`，然后统一执行：
+`load_all_swarms()` 默认不会自动安装工具依赖。也就是说，启动阶段不会因为某个 swarm 声明了工具而自动执行：
 
 - `python -m pip install -r <file>`
 
-也就是说，工具依赖是在“导入工具模块之前”预装的，而不是等 swarm 运行时再装。
+如果开发环境需要预装工具依赖，可以显式调用 `load_all_swarms(root, preinstall_tool_requirements=True)`，或手动执行对应的 `tool_requirements.txt`。这是为了避免“加载 swarm package”同时变成隐式网络安装和代码执行边界。
 
 ## 单个 swarm 的加载
 
@@ -166,14 +230,72 @@ root = "agents/docs_verifier"
 4. 注册 skill
 5. 合并 LLM backends
 6. 加载 tool modules 并注册 tool
-7. 根据 blueprint 创建 agent
-8. 加载 graph 文件并绑定到 core
+7. 从 `[tool_capabilities]` 给工具写入能力集
+8. 根据 blueprint 创建 agent
+9. 加载 graph 文件并绑定到 core
 
 这意味着：
 
 - tool 先于 agent 创建完成注册
+- 高风险工具只有声明了能力才可执行对应动作
 - graph 最后附着到 core
 - 只要其中任一步失败，整个 swarm 就不会进入 registry
+
+## 共享思考图与可调度子图
+
+运行时现在把“执行图”和“思考图”分开处理：
+
+- execution graph 负责节点调度、分支、join、循环和工具调用
+- shared thought graph 负责事实、证据、假设、猜测、问题、风险和决策
+- agent private workspace 负责 agent 私有草稿和本地思考工件
+
+`core/cognitive.py` 中的思考图节点支持以下核心类型：
+
+- `fact`
+- `evidence`
+- `hypothesis`
+- `guess`
+- `claim`
+- `question`
+- `assumption`
+- `decision`
+- `risk`
+- `counterevidence`
+- `tool_result`
+
+关系类型支持：
+
+- `supports`
+- `opposes`
+- `derives_from`
+- `leads_to`
+- `depends_on`
+- `questions`
+- `refines`
+- `verifies`
+- `disproves`
+- `speculates`
+
+`Core.build_thought_context_export()` 会为 agent prompt 组装三层上下文：
+
+- 主共享图摘要
+- 当前 agent 的可调度子图
+- 当前 agent 的私有 workspace 摘要
+
+可调度子图由 `CognitiveSubgraphDescriptor` 描述，包含 root nodes、frontier nodes、purpose、visibility、owner agent、expected next information 和状态字段。它不是新的执行图节点，而是给 LLM 使用的语义任务切片。
+
+## 发布链路的内容流与控制流
+
+`writer -> reviewer -> publisher` 链路中，正文和路由控制现在按不同通道处理。
+
+结构化 agent 输出里的 `next_node_id`、`next_node_ids`、`branch` 和 `branches` 仍然用于路由；正文则会被保存进运行时 metadata 的专用字段，例如：
+
+- `draft_report`
+- `approved_report`
+- `final_report`
+- `latest_report`
+
+这避免了 reviewer 这类控制节点在返回 `content = ""` 时把 writer 已生成的正文清空。`approve` verdict 会把当前最新报告提升为 `approved_report`，publisher 会继续收到非空正文。
 
 ## 包解析规则
 

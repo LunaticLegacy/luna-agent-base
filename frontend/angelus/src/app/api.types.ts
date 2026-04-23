@@ -155,6 +155,11 @@ export interface ApiSettings {
   timeout_seconds: number;
   sse_reconnect_interval_seconds: number;
   auto_reconnect: boolean;
+  require_auth?: boolean;
+  api_token?: string | null;
+  api_token_env?: string;
+  api_token_set?: boolean;
+  cors_allowed_origins?: string[];
 }
 
 export interface SettingsResponse {

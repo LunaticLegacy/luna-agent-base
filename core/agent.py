@@ -54,6 +54,7 @@ class Agent:
         self.cognitive_graph = cognitive_graph or CognitiveGraph(graph_id=f"agent_{agent_id}")
         self.workspace_mode = workspace_mode
         self.workspace_root = Path(workspace_root).resolve() if workspace_root is not None else None
+        self.current_run_id: Optional[str] = None
 
     def append_context(self, role: str, content: str) -> None:
         """Append one message into the agent-local context."""
@@ -75,6 +76,61 @@ class Agent:
         """Clear per-run state so a fresh graph run starts without residue."""
         self.reset_context()
         self.cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}")
+        self.current_run_id = None
+
+    def set_run_id(self, run_id: Optional[str]) -> None:
+        """Attach this agent to the current graph run."""
+        self.current_run_id = str(run_id).strip() if run_id else None
+
+    @property
+    def private_workspace_dir(self) -> Path:
+        """Directory for this agent's private, non-shared runtime artifacts."""
+        root = self.workspace_root or Path.cwd()
+        if self.current_run_id:
+            return root / ".angelus_private" / "runs" / self.current_run_id / self.agent_id
+        return root / ".angelus_private" / "manual" / self.agent_id
+
+    def summarize_private_workspace(self, *, max_files: int = 8, max_chars: int = 1200) -> str:
+        """Return a compact summary of private workspace artifacts for prompting."""
+        workspace_dir = self.private_workspace_dir
+        if not workspace_dir.exists():
+            return "No private workspace artifacts recorded."
+
+        files = sorted(
+            [path for path in workspace_dir.rglob("*") if path.is_file()],
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )[:max_files]
+        if not files:
+            return "No private workspace artifacts recorded."
+
+        lines = [f"Private workspace: {workspace_dir}"]
+        remaining = max_chars
+        for path in files:
+            rel_path = path.relative_to(workspace_dir)
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                lines.append(f"- {rel_path}: unreadable")
+                continue
+            snippet = text.strip().replace("\n", " ")
+            if len(snippet) > remaining:
+                snippet = snippet[:remaining].rstrip() + "..."
+            lines.append(f"- {rel_path}: {snippet or '[empty]'}")
+            remaining -= len(snippet)
+            if remaining <= 0:
+                break
+        return "\n".join(lines)
+
+    def persist_private_thought_snapshot(self) -> None:
+        """Persist private thought state inside the agent workspace."""
+        workspace_dir = self.private_workspace_dir
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = workspace_dir / "cognitive_graph_snapshot.json"
+        snapshot_path.write_text(
+            json.dumps(self.cognitive_graph.snapshot(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def _build_system_prompt(self, additional_prompt: Optional[str] = None) -> str:
         prompts = [self.character_prompt.strip()]
@@ -142,6 +198,8 @@ class Agent:
 
         from .toodefl import ToolContext
 
+        get_capabilities = getattr(self.core, "get_tool_capabilities", None)
+        capabilities = get_capabilities(str(tool_name)) if callable(get_capabilities) else set()
         context = ToolContext(
             agent_id=self.agent_id,
             node_id=None,
@@ -151,6 +209,7 @@ class Agent:
             metadata={},
             core=self.core,
             graph=None,
+            capabilities=capabilities,
         )
 
         try:
@@ -218,7 +277,7 @@ class Agent:
                 self._record_tool_call_in_cognitive_graph(tc, result)
 
             # Refresh prev_messages for the next LLM call
-            prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages[:-1]]
+            prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages]
 
         if assistant_message is None:
             assistant_message = content or "[Agent reached max tool rounds without final response]"
@@ -236,6 +295,7 @@ class Agent:
             for edge in cg.edges:
                 self.cognitive_graph.add_edge(edge)
             assistant_message = strip_cognitive_graph_tags(assistant_message)
+            self.persist_private_thought_snapshot()
 
         return AgentRoundResult(
             rounds=rounds,
@@ -294,7 +354,6 @@ class Agent:
                 description=f"Output of {tool_name}",
             )
         )
-
         # Link latest evidence to any existing REASONING node (heuristic: connect to most recent)
         recent_reasoning = [
             n for n in self.cognitive_graph.nodes.values()
@@ -312,3 +371,4 @@ class Agent:
                     description="Supports recent reasoning",
                 )
             )
+        self.persist_private_thought_snapshot()
