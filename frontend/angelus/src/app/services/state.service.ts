@@ -102,7 +102,7 @@ export interface AgentRow {
 export interface TaskItem {
   id: string;
   name: string;
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'timeout';
   priority: 'low' | 'medium' | 'high' | 'urgent';
   executor: string;
   duration: string;
@@ -112,6 +112,7 @@ export interface TaskItem {
     input: unknown;
     output: unknown;
     logs: { time: string; level: 'info' | 'warn' | 'error' | 'success'; message: string }[];
+    failureReason?: string;
   };
 }
 
@@ -306,9 +307,21 @@ export class StateService {
   readonly memories = signal<MemoryItem[]>([]);
   readonly memoriesLoaded = signal(false);
 
+  /* ---------- Settings (localStorage-backed) ---------- */
+  readonly apiTimeout = signal<number>(30);
+  readonly reconnectInterval = signal<number>(5);
+  readonly autoReconnect = signal<boolean>(true);
+  readonly darkMode = signal<boolean>(true);
+  readonly compactMode = signal<boolean>(false);
+  readonly showDebug = signal<boolean>(false);
+  readonly language = signal<string>('zh');
+  readonly settingsSaved = signal<boolean>(false);
+
   private readonly feedId = signal(0);
   private eventSource: EventSource | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshGraceful = false;
+  private readonly LS_PREFIX = 'angelus_';
 
   readonly totalAgents = computed(() => this.swarms().reduce((sum, s) => sum + s.agent_count, 0));
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
@@ -368,27 +381,29 @@ export class StateService {
     const run = this.activeRun();
     const tasks: TaskItem[] = [];
     if (run) {
+      const isTimeout = run.error && this.isTimeoutLike(run.error);
       tasks.push({
         id: run.run_id,
         name: `${run.swarm} 运行`,
-        status: (run.status === 'completed' ? 'success' : run.status === 'failed' ? 'failed' : 'running') as TaskItem['status'],
+        status: (run.status === 'completed' ? 'success' : run.status === 'failed' ? (isTimeout ? 'timeout' : 'failed') : 'running') as TaskItem['status'],
         priority: 'high' as TaskItem['priority'],
         executor: run.swarm,
         duration: run.finished_at && run.started_at ? this.fmtDuration(run.started_at, run.finished_at) : '-',
         createdAt: run.created_at,
-        detail: { description: `Swarm ${run.swarm} 执行`, input: run.state, output: run.final_state, logs: [] },
+        detail: { description: `Swarm ${run.swarm} 执行`, input: run.state, output: run.final_state, logs: [], failureReason: isTimeout ? 'timeout' : run.error ? 'error' : undefined },
       });
     }
     feed.filter(f => f.method === 'POST' && (f.endpoint.includes('/run') || f.endpoint.includes('/round'))).forEach(item => {
+      const isTimeout = item.tone === 'error' && this.isTimeoutLike(item.payload);
       tasks.push({
         id: `task-feed-${item.id}`,
         name: item.title,
-        status: (item.tone === 'error' ? 'failed' : item.tone === 'success' ? 'success' : 'completed') as TaskItem['status'],
+        status: (isTimeout ? 'timeout' : item.tone === 'error' ? 'failed' : item.tone === 'success' ? 'success' : 'completed') as TaskItem['status'],
         priority: 'medium' as TaskItem['priority'],
         executor: item.meta || 'System',
         duration: '-',
         createdAt: item.timestamp,
-        detail: { description: item.title, input: item.payload, output: null, logs: [] },
+        detail: { description: item.title, input: item.payload, output: null, logs: [], failureReason: isTimeout ? 'timeout' : item.tone === 'error' ? 'error' : undefined },
       });
     });
     return tasks;
@@ -396,12 +411,16 @@ export class StateService {
 
   readonly taskStats = computed(() => {
     const tasks = this.derivedTasks();
+    const completed = tasks.filter(t => t.status === 'success').length;
+    const failed = tasks.filter(t => t.status === 'failed' || t.status === 'timeout').length;
+    const totalFinished = completed + failed;
     return {
       total: tasks.length,
       running: tasks.filter(t => t.status === 'running').length,
-      successRate: tasks.length ? Math.round(tasks.filter(t => t.status === 'success').length / tasks.length * 100) : 0,
+      successRate: totalFinished ? Math.round(completed / totalFinished * 100) : 0,
       avgDuration: '-',
       pending: tasks.filter(t => t.status === 'pending').length,
+      timeout: tasks.filter(t => t.status === 'timeout').length,
     };
   });
 
@@ -997,6 +1016,7 @@ export class StateService {
   constructor(private readonly apiService: ApiService) {}
 
   init(destroyRef: DestroyRef): void {
+    this.loadSettings();
     void this.loadOverview();
     destroyRef.onDestroy(() => this.closeStream());
   }
@@ -1013,6 +1033,105 @@ export class StateService {
 
   setApiBaseUrl(value: string): void {
     this.apiBaseUrl.set(value.trim() || '/api');
+  }
+
+  private _loadNumber(key: string, fallback: number): number {
+    try {
+      const raw = localStorage.getItem(`${this.LS_PREFIX}${key}`);
+      if (raw === null) return fallback;
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    } catch { return fallback; }
+  }
+
+  private _loadBool(key: string, fallback: boolean): boolean {
+    try {
+      const raw = localStorage.getItem(`${this.LS_PREFIX}${key}`);
+      if (raw === null) return fallback;
+      return raw === 'true';
+    } catch { return fallback; }
+  }
+
+  private _loadString(key: string, fallback: string): string {
+    try {
+      return localStorage.getItem(`${this.LS_PREFIX}${key}`) ?? fallback;
+    } catch { return fallback; }
+  }
+
+  loadSettings(): void {
+    this.apiBaseUrl.set(this._loadString('apiBaseUrl', '/api'));
+    this.apiTimeout.set(this._loadNumber('apiTimeout', 30));
+    this.reconnectInterval.set(this._loadNumber('reconnectInterval', 5));
+    this.autoReconnect.set(this._loadBool('autoReconnect', true));
+    this.darkMode.set(this._loadBool('darkMode', true));
+    this.compactMode.set(this._loadBool('compactMode', false));
+    this.showDebug.set(this._loadBool('showDebug', false));
+    this.language.set(this._loadString('language', 'zh'));
+    this.applyTheme();
+  }
+
+  saveSettings(settings: {
+    apiBaseUrl?: string;
+    apiTimeout?: number;
+    reconnectInterval?: number;
+    autoReconnect?: boolean;
+    darkMode?: boolean;
+    compactMode?: boolean;
+    showDebug?: boolean;
+    language?: string;
+  }): void {
+    try {
+      if (settings.apiBaseUrl !== undefined) {
+        this.apiBaseUrl.set(settings.apiBaseUrl.trim() || '/api');
+        localStorage.setItem(`${this.LS_PREFIX}apiBaseUrl`, this.apiBaseUrl());
+      }
+      if (settings.apiTimeout !== undefined) {
+        this.apiTimeout.set(settings.apiTimeout);
+        localStorage.setItem(`${this.LS_PREFIX}apiTimeout`, String(settings.apiTimeout));
+      }
+      if (settings.reconnectInterval !== undefined) {
+        this.reconnectInterval.set(settings.reconnectInterval);
+        localStorage.setItem(`${this.LS_PREFIX}reconnectInterval`, String(settings.reconnectInterval));
+      }
+      if (settings.autoReconnect !== undefined) {
+        this.autoReconnect.set(settings.autoReconnect);
+        localStorage.setItem(`${this.LS_PREFIX}autoReconnect`, String(settings.autoReconnect));
+      }
+      if (settings.darkMode !== undefined) {
+        this.darkMode.set(settings.darkMode);
+        localStorage.setItem(`${this.LS_PREFIX}darkMode`, String(settings.darkMode));
+      }
+      if (settings.compactMode !== undefined) {
+        this.compactMode.set(settings.compactMode);
+        localStorage.setItem(`${this.LS_PREFIX}compactMode`, String(settings.compactMode));
+      }
+      if (settings.showDebug !== undefined) {
+        this.showDebug.set(settings.showDebug);
+        localStorage.setItem(`${this.LS_PREFIX}showDebug`, String(settings.showDebug));
+      }
+      if (settings.language !== undefined) {
+        this.language.set(settings.language);
+        localStorage.setItem(`${this.LS_PREFIX}language`, settings.language);
+      }
+      this.applyTheme();
+      this.settingsSaved.set(true);
+      setTimeout(() => this.settingsSaved.set(false), 2000);
+    } catch {
+      // localStorage may be unavailable in some environments
+    }
+  }
+
+  applyTheme(): void {
+    const dm = this.darkMode();
+    try {
+      if (dm) {
+        document.body.classList.add('dark');
+        document.body.classList.remove('light');
+      } else {
+        document.body.classList.add('light');
+        document.body.classList.remove('dark');
+      }
+    } catch { /* ignore */ }
   }
 
   setSwarmExecutionTemplate(value: string): void {
@@ -1677,7 +1796,19 @@ export class StateService {
     const source = new EventSource(sourceUrl);
     this.eventSource = source;
     source.onopen = () => { this.streamState.set('open'); this.streamNote.set(`实时事件流已开启: ${run.run_id}`); };
-    source.onerror = () => { this.streamState.set('error'); this.streamNote.set(`实时事件流已中断: ${run.run_id}`); };
+    source.onerror = () => {
+      this.streamState.set('error');
+      this.streamNote.set(`实时事件流已中断: ${run.run_id}`);
+      if (this.autoReconnect()) {
+        const delayMs = this.reconnectInterval() * 1000;
+        this.streamNote.set(`${delayMs / 1000}秒后尝试重连...`);
+        this.reconnectTimer = setTimeout(() => {
+          if (this.activeRun()?.run_id === run.run_id) {
+            this.watchRun(run);
+          }
+        }, delayMs);
+      }
+    };
     source.addEventListener('run.snapshot', (event) => { const parsed = this.safeParseEvent(event); if (parsed) { this.activeRun.set(parsed as RunSnapshot); this.pushLiveEvent('run.snapshot', parsed); } });
     source.addEventListener('message', (event) => { const parsed = this.safeParseEvent(event); if (parsed) this.pushLiveEvent('message', parsed); });
     source.onmessage = (event) => { const parsed = this.safeParseEvent(event); if (parsed) this.pushLiveEvent('message', parsed); };
@@ -1696,6 +1827,7 @@ export class StateService {
 
   private closeStream(): void {
     if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.streamState.set('closed');
   }
 
@@ -1712,6 +1844,27 @@ export class StateService {
     }
     const summary = errorSummary(error).toLowerCase();
     return summary.includes('econnrefused') || summary.includes('failed to fetch') || summary.includes('networkerror') || summary.includes('unknown error');
+  }
+
+  isTimeoutError(error: unknown): boolean {
+    if (error instanceof HttpErrorResponse) {
+      return error.status === 0 || error.status === 504;
+    }
+    const summary = errorSummary(error).toLowerCase();
+    return summary.includes('timeout') || summary.includes('timed out');
+  }
+
+  private isTimeoutLike(payload: unknown): boolean {
+    if (payload === null || payload === undefined) return false;
+    if (typeof payload === 'string') {
+      return payload.toLowerCase().includes('timeout') || payload.toLowerCase().includes('timed out') || payload.toLowerCase().includes('请求超时');
+    }
+    if (typeof payload === 'object') {
+      const obj = payload as Record<string, unknown>;
+      const errMsg = String(obj?.['error'] ?? obj?.['message'] ?? JSON.stringify(payload)).toLowerCase();
+      return errMsg.includes('timeout') || errMsg.includes('timed out') || errMsg.includes('请求超时');
+    }
+    return false;
   }
 
   private shouldSuppressOfflineError(error: unknown): boolean {
