@@ -118,6 +118,7 @@ def build_core_from_package(
     )
 
     default_config = manifest.default_llm or _backend_to_agent_config(manifest.llm_backends[0])
+    default_workspace_mode, default_workspace_root = _resolve_workspace_defaults(package_path, manifest)
     core = Core(
         agent_name=manifest.swarm_name,
         agent_config=AgentConfig(
@@ -126,7 +127,9 @@ def build_core_from_package(
             model=default_config.model,
             provider=default_config.provider,
         ),
+        workspace_root=default_workspace_root,
     )
+    core.workspace_mode = default_workspace_mode
     core.set_runtime_info_dir(package_path / "runtime_info")
 
     for skill in skills:
@@ -161,6 +164,7 @@ def build_core_from_package(
             skill_by_path=skill_by_path,
         )
         llm_handler = _build_llm_handler(blueprint, package_backends, manifest.default_backend)
+        workspace_mode, workspace_root = _resolve_workspace_for_agent(package_path, manifest, blueprint)
 
         # Resolve blueprint tools to actual ToolDefinition instances
         agent_tools = []
@@ -179,8 +183,8 @@ def build_core_from_package(
             name=blueprint.name,
             llm_handler=llm_handler,
             tools=agent_tools if agent_tools else None,
-            workspace_mode=blueprint.workspace_mode,
-            workspace_root=Path(blueprint.workspace_root).resolve() if blueprint.workspace_root else None,
+            workspace_mode=workspace_mode,
+            workspace_root=workspace_root,
         )
         print(
             f"[angelus] loaded agent: swarm={manifest.swarm_name} agent={blueprint.agent_id}"
@@ -467,3 +471,43 @@ def _build_llm_handler(
         return LLMFetcher(backends=backends, default_backend=default_backend_name)
 
     return LLMFetcher(backends=backends)
+
+
+def _resolve_workspace_defaults(package_path: Path, manifest: SwarmManifest) -> tuple[str, Path]:
+    workspace = manifest.workspace
+    root_value = workspace.default_root if workspace.default_root is not None else "."
+    return workspace.default_mode, _resolve_workspace_path(package_path, root_value)
+
+
+def _resolve_workspace_for_agent(
+    package_path: Path,
+    manifest: SwarmManifest,
+    blueprint: AgentBlueprint,
+) -> tuple[str, Path]:
+    workspace = manifest.workspace
+    agent_override = workspace.agents.get(blueprint.agent_id)
+
+    mode = (
+        agent_override.workspace_mode
+        if agent_override and agent_override.workspace_mode is not None
+        else getattr(blueprint, "workspace_mode", None)
+    )
+    if mode is None:
+        mode = workspace.default_mode
+
+    root_value = (
+        agent_override.workspace_root
+        if agent_override and agent_override.workspace_root is not None
+        else getattr(blueprint, "workspace_root", None)
+    )
+    if root_value is None:
+        root_value = workspace.default_root if workspace.default_root is not None else "."
+
+    return mode, _resolve_workspace_path(package_path, root_value)
+
+
+def _resolve_workspace_path(package_path: Path, value: str | Path) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path.resolve()
+    return (Path.cwd() / path).resolve()

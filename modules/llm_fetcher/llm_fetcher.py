@@ -262,6 +262,10 @@ class LLMFetcher:
             return LLMTimeoutError(message)
         return LLMError(message)
 
+    def _timeout_retry_count(self, backend: LLMBackendConfig) -> int:
+        """Return how many retries to allow for timeout failures on one backend."""
+        return max(1, int(backend.max_retries))
+
     def _extract_content(self, delta: Any) -> Optional[str]:
         """从流式增量中提取正文内容。
 
@@ -369,18 +373,26 @@ class LLMFetcher:
         backend_errors: List[str] = []
 
         for backend in self._resolve_backends(backend_name, fallback_order):
-            try:
-                return await asyncio.to_thread(
-                    self._create_completion,
-                    backend,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=False,
-                    tools=tools,
-                )
-            except Exception as exc:
-                backend_errors.append(str(self._normalize_exception(backend, exc)))
+            retries_left = self._timeout_retry_count(backend)
+            while True:
+                try:
+                    return await asyncio.to_thread(
+                        self._create_completion,
+                        backend,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stream=False,
+                        tools=tools,
+                    )
+                except Exception as exc:
+                    normalized = self._normalize_exception(backend, exc)
+                    if isinstance(normalized, LLMTimeoutError) and retries_left > 0:
+                        retries_left -= 1
+                        await asyncio.sleep(min(1.5, 0.25 * (self._timeout_retry_count(backend) - retries_left)))
+                        continue
+                    backend_errors.append(str(normalized))
+                    break
 
         raise LLMBackendError("; ".join(backend_errors))
 
@@ -420,25 +432,32 @@ class LLMFetcher:
         backend_errors: List[str] = []
 
         for backend in self._resolve_backends(backend_name, fallback_order):
-            yielded_any = False
-            try:
-                response = self._create_completion(
-                    backend,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=True,
-                    tools=tools,
-                )
-                for text in self._iter_stream_text(response, output_reasoning=output_reasoning):
-                    yielded_any = True
-                    yield text
-                return
-            except Exception as exc:
-                normalized_error = self._normalize_exception(backend, exc)
-                if yielded_any:
-                    raise normalized_error
-                backend_errors.append(str(normalized_error))
+            retries_left = self._timeout_retry_count(backend)
+            while True:
+                yielded_any = False
+                try:
+                    response = self._create_completion(
+                        backend,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stream=True,
+                        tools=tools,
+                    )
+                    for text in self._iter_stream_text(response, output_reasoning=output_reasoning):
+                        yielded_any = True
+                        yield text
+                    return
+                except Exception as exc:
+                    normalized_error = self._normalize_exception(backend, exc)
+                    if isinstance(normalized_error, LLMTimeoutError) and not yielded_any and retries_left > 0:
+                        retries_left -= 1
+                        await asyncio.sleep(min(1.5, 0.25 * (self._timeout_retry_count(backend) - retries_left)))
+                        continue
+                    if yielded_any:
+                        raise normalized_error
+                    backend_errors.append(str(normalized_error))
+                    break
 
         raise LLMBackendError("; ".join(backend_errors))
 

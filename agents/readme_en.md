@@ -66,6 +66,10 @@ skill_files = ["skills/planner.prompt.md", "skills/reviewer.prompt.md"]
 tool_files = ["tools.echo_tool", "tools.file_writer_tool"]
 default_backend = "deepseek"
 
+[workspace]
+default_mode = "workspace"
+default_root = "."
+
 [llm.default]
 name = "deepseek"
 provider = "openai"
@@ -90,6 +94,23 @@ Notes:
 - `graph_file` and `agent_files` are required
 - `skill_files` and `tool_files` are optional
 - `default_backend` is most useful when multiple backends exist
+
+## Workspace Configuration
+
+`workspace` should live in `swarm.toml` as a swarm-level policy for filesystem access.
+
+Common fields:
+
+- `default_mode`: default workspace mode, either `workspace` or `full_access`
+- `default_root`: default workspace root, usually a path relative to the repository root
+- `agents.<agent_id>.mode`: per-agent mode override
+- `agents.<agent_id>.root`: per-agent root override
+
+Recommended usage:
+
+- most agents should use `workspace`
+- only trusted system agents should use `full_access`
+- file tools such as `file_writer` should enforce this boundary
 
 ## Agent Files
 
@@ -118,8 +139,6 @@ Supported agent fields:
 - `api_key`
 - `model`
 - `provider`
-- `workspace_mode`
-- `workspace_root`
 - `tools`
 
 Recommended usage:
@@ -127,9 +146,8 @@ Recommended usage:
 - `agent_id` should be stable and unique
 - `character_prompt` is for role, responsibility, and working style
 - `skill_name` / `prompt_file` / `prompt_text` define where the prompt contract comes from
-- `workspace_mode` declares whether the agent is restricted to its workspace or allowed `full_access`
-- `workspace_root` sets the workspace root, usually as a path relative to the repository root
 - `tools` declares the tools this agent may use
+- workspace boundaries should be declared in `swarm.toml`, not in agent Python files
 
 ## Skill Files
 

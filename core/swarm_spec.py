@@ -47,12 +47,27 @@ class AgentBlueprint:
     api_key: Optional[str] = None
     model: Optional[str] = None
     provider: str = "openai"
-    workspace_mode: str = "workspace"
-    workspace_root: Optional[str] = None
     skill_name: Optional[str] = None
     prompt_file: Optional[str] = None
     prompt_text: Optional[str] = None
     tools: List[str] = field(default_factory=list)
+
+
+@dataclass
+class WorkspaceAgentConfig:
+    """Workspace override for one agent, declared in swarm.toml."""
+
+    workspace_mode: Optional[str] = None
+    workspace_root: Optional[str] = None
+
+
+@dataclass
+class WorkspaceConfig:
+    """Swarm-level workspace settings parsed from swarm.toml."""
+
+    default_mode: str = "workspace"
+    default_root: Optional[str] = None
+    agents: Dict[str, WorkspaceAgentConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -67,6 +82,7 @@ class SwarmManifest:
     default_backend: Optional[str] = None
     default_llm: Optional[LLMBackendConfig] = None
     llm_backends: List[LLMBackendConfig] = field(default_factory=list)
+    workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
 
 
 def load_root_config(path: Path) -> SwarmAppConfig:
@@ -179,6 +195,8 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
     if default_backend is not None:
         default_backend = str(default_backend).strip() or None
 
+    workspace = _parse_workspace_config(raw.get("workspace", {}), manifest_path)
+
     llm_section = raw.get("llm", {})
     if not isinstance(llm_section, dict):
         raise SwarmLoaderError(f"[llm] must be a TOML table in {manifest_path}")
@@ -200,6 +218,7 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         default_backend=default_backend,
         default_llm=default_llm,
         llm_backends=llm_backends,
+        workspace=workspace,
     )
 
 
@@ -268,17 +287,6 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
     elif isinstance(tools_raw, str):
         tools = [tools_raw.strip()]
 
-    workspace_mode = str(raw.get("workspace_mode", "workspace")).strip() or "workspace"
-    if workspace_mode not in {"workspace", "full_access"}:
-        raise SwarmLoaderError(
-            f"{source} has invalid workspace_mode '{workspace_mode}'. "
-            "Expected 'workspace' or 'full_access'."
-        )
-    workspace_root_value = raw.get("workspace_root")
-    workspace_root = str(workspace_root_value).strip() if workspace_root_value is not None else None
-    if workspace_root == "":
-        workspace_root = None
-
     return AgentBlueprint(
         agent_id=agent_id,
         character_prompt=str(raw.get("character_prompt", "")).strip() or None,
@@ -288,12 +296,62 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
         api_key=raw.get("api_key"),
         model=raw.get("model"),
         provider=str(raw.get("provider", "openai")),
-        workspace_mode=workspace_mode,
-        workspace_root=workspace_root,
         skill_name=raw.get("skill_name"),
         prompt_file=raw.get("prompt_file"),
         prompt_text=raw.get("prompt_text"),
         tools=tools,
+    )
+
+
+def _parse_workspace_config(raw: Any, source: Path) -> WorkspaceConfig:
+    if raw is None:
+        return WorkspaceConfig()
+    if not isinstance(raw, dict):
+        raise SwarmLoaderError(f"[workspace] must be a TOML table in {source}")
+
+    default_mode = str(raw.get("default_mode", "workspace")).strip() or "workspace"
+    if default_mode not in {"workspace", "full_access"}:
+        raise SwarmLoaderError(
+            f"[workspace] default_mode '{default_mode}' in {source} is invalid. "
+            "Expected 'workspace' or 'full_access'."
+        )
+    default_root_value = raw.get("default_root")
+    default_root = str(default_root_value).strip() if default_root_value is not None else None
+    if default_root == "":
+        default_root = None
+
+    agents_raw = raw.get("agents", {})
+    if agents_raw is None:
+        agents_raw = {}
+    if not isinstance(agents_raw, dict):
+        raise SwarmLoaderError(f"[workspace].agents must be a TOML table in {source}")
+
+    agents: Dict[str, WorkspaceAgentConfig] = {}
+    for agent_id, agent_raw in agents_raw.items():
+        if not isinstance(agent_raw, dict):
+            raise SwarmLoaderError(f"[workspace].agents.{agent_id} must be a TOML table in {source}")
+        mode_value = agent_raw.get("mode")
+        root_value = agent_raw.get("root")
+        workspace_mode = str(mode_value).strip() if mode_value is not None else None
+        if workspace_mode == "":
+            workspace_mode = None
+        if workspace_mode is not None and workspace_mode not in {"workspace", "full_access"}:
+            raise SwarmLoaderError(
+                f"[workspace].agents.{agent_id}.mode '{workspace_mode}' in {source} is invalid. "
+                "Expected 'workspace' or 'full_access'."
+            )
+        workspace_root = str(root_value).strip() if root_value is not None else None
+        if workspace_root == "":
+            workspace_root = None
+        agents[str(agent_id)] = WorkspaceAgentConfig(
+            workspace_mode=workspace_mode,
+            workspace_root=workspace_root,
+        )
+
+    return WorkspaceConfig(
+        default_mode=default_mode,
+        default_root=default_root,
+        agents=agents,
     )
 
 

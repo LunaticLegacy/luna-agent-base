@@ -75,6 +75,12 @@ max_retries = 1
 - `openai`：使用 `openai` 库直接调用，适用于 OpenAI 兼容接口（如 DeepSeek）
 - `litellm`：通过 `litellm.completion()` 调用，支持 100+ 提供商（Moonshot、Anthropic、Gemini 等）
 
+**超时与重试：**
+
+- 单次 LLM 请求会根据 `timeout` 限制等待时间。
+- 遇到超时时，系统会自动重试一次；如果显式设置了 `max_retries`，则会在默认重试基础上继续增加重试次数。
+- 这类重试只针对“尚未产出结果的超时失败”，不会吞掉已经开始输出的流式中断。
+
 **环境变量替换：**
 
 `api_key` 和 `api_url` 支持 `${VAR_NAME}` 或 `$VAR_NAME` 语法，在加载时自动替换为对应的环境变量值。如果环境变量不存在，替换为空字符串。`api_key` 替换后仍不能为空，否则加载会失败。
@@ -88,17 +94,7 @@ python app.py
 
 ### Agent 工作空间访问
 
-每个 agent blueprints 现在支持两个工作空间相关字段：
-
-- `workspace_mode`
-- `workspace_root`
-
-`workspace_mode` 目前支持两个值：
-
-- `workspace`: 只能访问分配的工作空间
-- `full_access`: 不受工作空间边界限制
-
-`workspace_root` 用来指定工作空间根目录。当前实现会把它传给 runtime 的工具上下文，`file_writer` 会在 `workspace` 模式下拒绝写出该根目录之外的路径。
+工作空间边界现在写在 `swarm.toml` 的 `[workspace]` 表里，而不是 agent Python 文件里。
 
 例如：
 
@@ -109,15 +105,27 @@ provider = "litellm"
 api_url = "https://api.moonshot.ai/v1"
 api_key = "${MOONSHOT_API_KEY}"
 model = "moonshot/kimi-k2.5"
+timeout = 120.0
+max_retries = 1
+
+[workspace]
+default_mode = "workspace"
+default_root = "agents/docs_verifier"
 ```
 
-```python
-AGENT = {
-    "agent_id": "reviewer",
-    "backend_name": "kimi",
-    "workspace_mode": "workspace",
-    "workspace_root": "agents/docs_verifier",
-}
+`workspace` 当前支持两个模式：
+
+- `workspace`: 只能访问分配的工作空间
+- `full_access`: 不受工作空间边界限制
+
+`default_root` 用来指定工作空间根目录。runtime 会把它传给工具上下文，`file_writer` 会在 `workspace` 模式下拒绝写出该根目录之外的路径。
+
+如果某个 agent 需要特殊配置，可以在 `[workspace.agents.<agent_id>]` 下覆盖：
+
+```toml
+[workspace.agents.reviewer]
+mode = "workspace"
+root = "agents/docs_verifier"
 ```
 
 ### 全量加载时的额外动作
