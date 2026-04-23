@@ -1,6 +1,7 @@
 # Next Plan
 
 This file is an implementation checklist for the next concrete feature. Keep it version-clean and do not mix older planning threads into it.
+Status: implemented in the current branch; the checklist is kept here as the record of what was added.
 
 ## Baseline
 
@@ -172,4 +173,3 @@ The checklist is complete when:
 - [ ] File tools enforce the declared boundary.
 - [ ] Tests prove the boundary works.
 - [ ] Docs match the implementation.
-

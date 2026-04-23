@@ -47,6 +47,8 @@ class AgentBlueprint:
     api_key: Optional[str] = None
     model: Optional[str] = None
     provider: str = "openai"
+    workspace_mode: str = "workspace"
+    workspace_root: Optional[str] = None
     skill_name: Optional[str] = None
     prompt_file: Optional[str] = None
     prompt_text: Optional[str] = None
@@ -266,6 +268,17 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
     elif isinstance(tools_raw, str):
         tools = [tools_raw.strip()]
 
+    workspace_mode = str(raw.get("workspace_mode", "workspace")).strip() or "workspace"
+    if workspace_mode not in {"workspace", "full_access"}:
+        raise SwarmLoaderError(
+            f"{source} has invalid workspace_mode '{workspace_mode}'. "
+            "Expected 'workspace' or 'full_access'."
+        )
+    workspace_root_value = raw.get("workspace_root")
+    workspace_root = str(workspace_root_value).strip() if workspace_root_value is not None else None
+    if workspace_root == "":
+        workspace_root = None
+
     return AgentBlueprint(
         agent_id=agent_id,
         character_prompt=str(raw.get("character_prompt", "")).strip() or None,
@@ -275,6 +288,8 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
         api_key=raw.get("api_key"),
         model=raw.get("model"),
         provider=str(raw.get("provider", "openai")),
+        workspace_mode=workspace_mode,
+        workspace_root=workspace_root,
         skill_name=raw.get("skill_name"),
         prompt_file=raw.get("prompt_file"),
         prompt_text=raw.get("prompt_text"),

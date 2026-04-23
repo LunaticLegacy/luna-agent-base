@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 
@@ -12,6 +13,8 @@ class ToolContext:
     agent_id: Optional[str] = None
     node_id: Optional[int] = None
     rounds: int = 0
+    workspace_mode: str = "workspace"
+    workspace_root: Optional[Path] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     core: Optional[Any] = None
     graph: Optional[Any] = None

@@ -3,4 +3,6 @@ AGENT = {
     "name": "frontend_verifier",
     "skill_name": "frontend_verifier_prompt",
     "backend_name": "kimi",
+    "workspace_mode": "workspace",
+    "workspace_root": "agents/docs_verifier",
 }

@@ -86,6 +86,40 @@ export MOONSHOT_API_KEY="sk-..."
 python app.py
 ```
 
+### Agent 工作空间访问
+
+每个 agent blueprints 现在支持两个工作空间相关字段：
+
+- `workspace_mode`
+- `workspace_root`
+
+`workspace_mode` 目前支持两个值：
+
+- `workspace`: 只能访问分配的工作空间
+- `full_access`: 不受工作空间边界限制
+
+`workspace_root` 用来指定工作空间根目录。当前实现会把它传给 runtime 的工具上下文，`file_writer` 会在 `workspace` 模式下拒绝写出该根目录之外的路径。
+
+例如：
+
+```toml
+[llm.default]
+name = "kimi"
+provider = "litellm"
+api_url = "https://api.moonshot.ai/v1"
+api_key = "${MOONSHOT_API_KEY}"
+model = "moonshot/kimi-k2.5"
+```
+
+```python
+AGENT = {
+    "agent_id": "reviewer",
+    "backend_name": "kimi",
+    "workspace_mode": "workspace",
+    "workspace_root": "agents/docs_verifier",
+}
+```
+
 ### 全量加载时的额外动作
 
 `load_all_swarms()` 在真正构建每个 swarm 之前，会先收集所有工具模块旁边的 `tool_requirements.txt`，然后统一执行：

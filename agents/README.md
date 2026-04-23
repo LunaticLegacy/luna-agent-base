@@ -118,6 +118,8 @@ model = "deepseek-reasoner"
 - `api_key`
 - `model`
 - `provider`
+- `workspace_mode`
+- `workspace_root`
 - `tools`
 
 建议：
@@ -125,6 +127,8 @@ model = "deepseek-reasoner"
 - `agent_id` 必须稳定且唯一
 - `character_prompt` 适合写角色人格、职责边界和工作风格
 - `skill_name` / `prompt_file` / `prompt_text` 用来指定角色提示词来源
+- `workspace_mode` 用来声明这个 Agent 是否只能访问工作空间，还是允许 `full_access`
+- `workspace_root` 用来指定工作空间根目录，建议写成相对仓库根目录的路径
 - `tools` 用来声明这个 Agent 可以调用哪些工具
 
 ## Skill 文件

@@ -118,6 +118,8 @@ Supported agent fields:
 - `api_key`
 - `model`
 - `provider`
+- `workspace_mode`
+- `workspace_root`
 - `tools`
 
 Recommended usage:
@@ -125,6 +127,8 @@ Recommended usage:
 - `agent_id` should be stable and unique
 - `character_prompt` is for role, responsibility, and working style
 - `skill_name` / `prompt_file` / `prompt_text` define where the prompt contract comes from
+- `workspace_mode` declares whether the agent is restricted to its workspace or allowed `full_access`
+- `workspace_root` sets the workspace root, usually as a path relative to the repository root
 - `tools` declares the tools this agent may use
 
 ## Skill Files
