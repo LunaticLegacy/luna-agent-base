@@ -1,0 +1,47 @@
+{
+  "action": "register_tool",
+  "agent_name": "docs_verifier",
+  "detail": {
+    "description": "Echo the input payload."
+  },
+  "sequence": 9,
+  "snapshot": {
+    "agent_name": "docs_verifier",
+    "agents": [],
+    "graph": {
+      "edge_count": 0,
+      "entry_node_id": null,
+      "exit_node_id": null,
+      "graph_name": null,
+      "node_count": 0
+    },
+    "last_event": {
+      "action": "register_tool",
+      "sequence": 9,
+      "subject_id": "echo",
+      "subject_kind": "tool"
+    },
+    "skills": [
+      "backend_verifier_prompt",
+      "backend_verifier_prompt",
+      "frontend_verifier_prompt",
+      "frontend_verifier_prompt",
+      "orchestrator_prompt",
+      "orchestrator_prompt",
+      "publisher_prompt",
+      "publisher_prompt",
+      "reviewer_prompt",
+      "reviewer_prompt",
+      "structure_verifier_prompt",
+      "structure_verifier_prompt"
+    ],
+    "tools": [
+      "echo",
+      "file_writer"
+    ],
+    "updated_at": "2026-04-23T10:08:38.845874+00:00"
+  },
+  "subject_id": "echo",
+  "subject_kind": "tool",
+  "timestamp": "2026-04-23T10:08:38.845871+00:00"
+}

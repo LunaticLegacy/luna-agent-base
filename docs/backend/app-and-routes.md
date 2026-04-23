@@ -62,13 +62,14 @@
 
 ## 4. Blueprint 注册
 
-`web/routes/__init__.py` 只做了一件事：把四个蓝图汇总导出。
+`web/routes/__init__.py` 只做了一件事：把五个蓝图汇总导出。
 
 当前被 `create_app()` 注册的蓝图有：
 
 - `health_bp`
 - `catalog_bp`
 - `content_bp`
+- `settings_bp`
 - `swarms_bp`
 
 注册前缀分别是：
@@ -76,6 +77,7 @@
 - `health_bp` -> `/api`
 - `catalog_bp` -> `/api`
 - `content_bp` -> `/api`
+- `settings_bp` -> `/api`
 - `swarms_bp` -> `/api/swarms`
 
 其中 `swarms_bp` 自己在蓝图定义里还带了 `url_prefix="/swarms"`，所以它最终对外的路径会落到 `/api/swarms/...`。
@@ -116,6 +118,8 @@
 |---|---|---|
 | `GET` | `/` | 服务根页，返回 `service`、`swarm_count`、`load_error` |
 | `GET` | `/api` | API 根页，返回 `api_root` 等摘要信息 |
+| `GET` | `/api/settings` | 读取当前 API 配置 |
+| `PUT` | `/api/settings` | 更新 API 配置并写回 `config.toml` |
 | `OPTIONS` | `/*` | 统一预检响应，返回 `204` |
 
 ### 6.2 Health
