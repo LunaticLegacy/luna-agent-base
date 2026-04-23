@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
-from web.errors import ApiError, NotFoundError
+from web.errors import ApiError, ConflictError, NotFoundError
 from web.runs import (
     RunRegistry,
     serialize_graph_snapshot,
@@ -64,9 +64,17 @@ async def _execute_swarm_run(swarm_name: str, *, use_background: bool = False):
     payload = request_data.get("input")
     rounds = int(request_data.get("rounds", 0))
     meta_mode = bool(request_data.get("meta_mode", False))
+    runs_registry = _get_runs_registry()
+
+    if runs_registry.active_run_count(swarm_name) > 0:
+        raise ConflictError(
+            f"Swarm '{swarm_name}' already has an active run. Wait for it to finish before starting another."
+        )
+
+    swarm.core.reset_runtime_state()
 
     if use_background:
-        record = _get_runs_registry().launch_run(
+        record = runs_registry.launch_run(
             swarm_name=swarm_name,
             core=swarm.core,
             graph=graph,

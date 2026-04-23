@@ -1,4 +1,4 @@
-import { Component, inject, computed } from '@angular/core';
+import { Component, DestroyRef, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { StateService } from './services/state.service';
@@ -12,6 +12,11 @@ import { StateService } from './services/state.service';
 })
 export class AppComponent {
   readonly state = inject(StateService);
+  private readonly destroyRef = inject(DestroyRef);
+
+  constructor() {
+    this.state.init(this.destroyRef);
+  }
 
   readonly pageTitle = computed(() => {
     const path = typeof window !== 'undefined' ? window.location.pathname : '/';

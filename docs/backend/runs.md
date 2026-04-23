@@ -76,6 +76,32 @@ flowchart TD
 - 不保留运行历史
 - 请求会一直阻塞到执行完成或者抛错
 
+### 3.3 运行态隔离
+
+当前实现里，`/run` 和 `/runs` 在正式执行前都会先重置 swarm 级运行态，避免上一轮残留影响下一轮输入。
+
+这里的重置包括：
+
+- 清空每个 agent 的私有消息上下文
+- 清空每个 agent 的私有 cognitive graph
+- 重建 swarm 级共享 cognitive graph
+
+这条重置发生在 `web/routes/swarms.py` 的执行入口上，而不是放在单个 agent 内部。这样做的原因是：
+
+- `RuntimeRegistry` 里加载的 `Core` 是进程内常驻对象，会被多个请求复用
+- `Agent.round_call()` 默认会把历史消息拼进 `prev_messages`
+- `core.swarm_cognitive_graph` 也会被持续注入到后续 agent prompt
+
+所以如果不在 run 边界做 reset，上一轮的对话、工具结果和认知痕迹都会继续影响下一轮。
+
+### 3.4 并发约束
+
+同一个 swarm 当前不允许同时启动多个 active run。
+
+如果该 swarm 还有未完成的 run，`web/routes/swarms.py` 会直接返回 `409 Conflict`，提示等待当前 run 结束后再启动新的 run。
+
+这样做的目的不是限制吞吐，而是避免多个线程共享同一个 `core`、同一组 agent context 和同一份 swarm cognitive graph。
+
 ## 4. 后台运行
 
 后台运行走的是 `RunRegistry.launch_run()`。
@@ -88,6 +114,8 @@ flowchart TD
 - 构造一个 `RunRecord`
 - 先把 `RunRecord` 放进 `_runs` 字典
 - 启动一个 `daemon=True` 的线程去执行任务
+
+在调用 `launch_run()` 之前，路由层已经完成了 run 边界的 runtime reset 和 active run 冲突检查，所以 `RunRegistry` 本身只负责记录和调度，不负责清理 swarm 运行态。
 
 ### 4.2 worker 执行
 

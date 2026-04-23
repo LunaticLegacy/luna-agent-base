@@ -1,12 +1,11 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { StateService, EventItem } from '../services/state.service';
 
 @Component({
   selector: 'app-events-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule],
   template: `
     <div class="page-header">
       <div>
@@ -30,25 +29,32 @@ import { StateService, EventItem } from '../services/state.service';
     <div class="card">
       <div class="card-header">
         <div class="tabs">
-          <button class="tab" [class.active]="tab()==='all'" (click)="tab.set('all')">全部</button>
-          <button class="tab" [class.active]="tab()==='error'" (click)="tab.set('error')">错误</button>
-          <button class="tab" [class.active]="tab()==='warn'" (click)="tab.set('warn')">警告</button>
-          <button class="tab" [class.active]="tab()==='info'" (click)="tab.set('info')">信息</button>
-          <button class="tab" [class.active]="tab()==='live'" (click)="tab.set('live')">实时流</button>
+          <button class="tab" [class.active]="tab()==='all'" (click)="onTabChange('all')">全部</button>
+          <button class="tab" [class.active]="tab()==='error'" (click)="onTabChange('error')">错误</button>
+          <button class="tab" [class.active]="tab()==='warn'" (click)="onTabChange('warn')">警告</button>
+          <button class="tab" [class.active]="tab()==='info'" (click)="onTabChange('info')">信息</button>
+          <button class="tab" [class.active]="tab()==='live'" (click)="onTabChange('live')">实时流</button>
         </div>
         <div class="toolbar">
-          <input class="input search" placeholder="搜索事件..." [(ngModel)]="searchText" />
-          <select class="input" [value]="sourceFilter()" (change)="sourceFilter.set($any($event).target.value)">
+          <input class="input search" placeholder="搜索事件..." [value]="searchText()" (input)="onSearchChange($any($event).target.value)" />
+          <select class="input" [value]="sourceFilter()" (change)="onSourceFilterChange($any($event).target.value)">
             <option value="">所有来源</option>
             <option value="System">系统</option>
             <option value="Swarm">Swarm</option>
             <option value="Agent">Agent</option>
           </select>
-          <select class="input" [value]="timeFilter()" (change)="timeFilter.set($any($event).target.value)">
+          <select class="input" [value]="timeFilter()" (change)="onTimeFilterChange($any($event).target.value)">
             <option value="">全部时间</option>
             <option value="hour">最近1小时</option>
             <option value="day">今天</option>
             <option value="week">最近7天</option>
+          </select>
+          <select class="input" [value]="pageSize()" (change)="onPageSizeChange($any($event).target.value)">
+            <option [value]="20">20 / 页</option>
+            <option [value]="50">50 / 页</option>
+            <option [value]="100">100 / 页</option>
+            <option [value]="200">200 / 页</option>
+            <option [value]="500">500 / 页</option>
           </select>
         </div>
       </div>
@@ -95,6 +101,21 @@ import { StateService, EventItem } from '../services/state.service';
             }
           </tbody>
         </table>
+
+        <div class="pagination-bar">
+          <div class="pagination-summary">
+            <span>共 {{ totalEvents() }} 条</span>
+            <span>第 {{ currentPage() }} / {{ totalPages() }} 页</span>
+            <span>{{ pageItemRange() }}</span>
+          </div>
+          <div class="pagination-controls">
+            <button class="btn btn-sm" (click)="goToPage(currentPage() - 1)" [disabled]="loading() || currentPage() <= 1">上一页</button>
+            <button class="btn btn-sm" (click)="goToPage(currentPage() + 1)" [disabled]="loading() || currentPage() >= totalPages()">下一页</button>
+            <button class="btn btn-sm" (click)="reloadEvents(currentPage())" [disabled]="loading()">
+              {{ loading() ? '加载中...' : '刷新当前页' }}
+            </button>
+          </div>
+        </div>
       }
     </div>
   `,
@@ -119,7 +140,7 @@ import { StateService, EventItem } from '../services/state.service';
     .tabs { display:flex; gap:.25rem; }
     .tab { padding:.45rem .9rem; border-radius:8px; border:none; background:transparent; color:#94A3B8; font-size:.82rem; cursor:pointer; }
     .tab.active { background:rgba(139,92,246,.12); color:#C4B5FD; }
-    .toolbar { display:flex; gap:.5rem; }
+    .toolbar { display:flex; gap:.5rem; flex-wrap:wrap; }
     .input { background:#0B0F19; border:1px solid rgba(148,163,184,.12); border-radius:8px; padding:.45rem .7rem; color:#F1F5F9; font-size:.82rem; }
     .input.search { width:200px; }
     .live-panel { padding:1rem 1.25rem; }
@@ -153,56 +174,99 @@ import { StateService, EventItem } from '../services/state.service';
     .tag { padding:.15rem .4rem; border-radius:4px; background:rgba(255,255,255,.06); color:#94A3B8; font-size:.72rem; }
     .event-detail { padding:1rem 1.25rem; }
     .event-detail pre { margin:0; font-size:.78rem; color:#E2E8F0; overflow:auto; max-height:200px; }
+    .pagination-bar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:1rem;
+      padding:1rem 1.25rem 1.1rem;
+      border-top:1px solid rgba(148,163,184,.08);
+      flex-wrap:wrap;
+    }
+    .pagination-summary {
+      display:flex;
+      align-items:center;
+      gap:.9rem;
+      flex-wrap:wrap;
+      color:#94A3B8;
+      font-size:.8rem;
+    }
+    .pagination-controls {
+      display:flex;
+      align-items:center;
+      gap:.5rem;
+      flex-wrap:wrap;
+    }
+    @media (max-width: 768px) {
+      .stat-grid { grid-template-columns:repeat(2,1fr); }
+      .page-header, .card-header, .pagination-bar { flex-direction:column; align-items:stretch; }
+      .toolbar { flex-direction:column; }
+      .input.search { width:100%; }
+      .live-item { grid-template-columns:1fr; }
+    }
   `]
 })
 export class EventsPage {
   readonly state = inject(StateService);
-  tab = signal<string>('all');
-  searchText = '';
+  tab = signal<'all' | 'error' | 'warn' | 'info' | 'live'>('all');
+  searchText = signal('');
   sourceFilter = signal('');
   timeFilter = signal('');
+  pageSize = signal(100);
+  currentPage = signal(1);
+  totalEvents = signal(0);
+  loading = signal(false);
   expandedEvent = signal<EventItem | null>(null);
 
+  constructor() {
+    void this.reloadEvents(1);
+  }
+
   filteredEvents() {
-    let list = this.state.derivedEvents();
-    if (this.tab() !== 'all') {
-      list = list.filter(e => e.level === this.tab());
-    }
-    if (this.sourceFilter()) {
-      list = list.filter(e => e.source === this.sourceFilter());
-    }
-    if (this.timeFilter()) {
-      const now = Date.now();
-      const windowMs = this.timeFilter() === 'hour'
-        ? 60 * 60 * 1000
-        : this.timeFilter() === 'day'
-          ? 24 * 60 * 60 * 1000
-          : 7 * 24 * 60 * 60 * 1000;
-      list = list.filter((event) => {
-        const parsed = Date.parse(event.time);
-        return Number.isFinite(parsed) && now - parsed <= windowMs;
-      });
-    }
-    if (this.searchText) {
-      list = list.filter(e => e.event.includes(this.searchText) || e.detail.includes(this.searchText));
-    }
-    return list;
+    return this.state.events();
   }
 
   filteredLiveEvents() {
-    return this.state.liveEvents().slice(-50);
+    return this.state.liveEvents().slice(0, 50);
   }
 
-  toggleDetail(ev: EventItem) {
+  async reloadEvents(page = this.currentPage()): Promise<void> {
+    if (this.tab() === 'live') {
+      return;
+    }
+    this.loading.set(true);
+    const nextPage = Math.max(1, page);
+    this.currentPage.set(nextPage);
+    try {
+      await this.state.loadEvents(this.buildQuery(nextPage), { gracefulOffline: true });
+      this.totalEvents.set(this.state.eventStats().today);
+      if (this.currentPage() > this.totalPages()) {
+        this.currentPage.set(this.totalPages());
+      }
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  async goToPage(page: number): Promise<void> {
+    const nextPage = Math.max(1, Math.min(page, this.totalPages()));
+    if (nextPage === this.currentPage() && this.totalEvents() > 0) {
+      return;
+    }
+    await this.reloadEvents(nextPage);
+  }
+
+  toggleDetail(ev: EventItem): void {
     this.expandedEvent.set(this.expandedEvent()?.id === ev.id ? null : ev);
   }
 
-  clearFilters() {
+  clearFilters(): void {
     this.tab.set('all');
-    this.searchText = '';
+    this.searchText.set('');
     this.sourceFilter.set('');
     this.timeFilter.set('');
     this.expandedEvent.set(null);
+    void this.reloadEvents(1);
   }
 
   exportEvents(): void {
@@ -215,5 +279,67 @@ export class EventsPage {
     anchor.click();
     URL.revokeObjectURL(url);
   }
-}
 
+  onTabChange(value: 'all' | 'error' | 'warn' | 'info' | 'live'): void {
+    this.tab.set(value);
+    this.expandedEvent.set(null);
+    if (value === 'live') {
+      return;
+    }
+    void this.reloadEvents(1);
+  }
+
+  onSearchChange(value: string): void {
+    this.searchText.set(value);
+    void this.reloadEvents(1);
+  }
+
+  onSourceFilterChange(value: string): void {
+    this.sourceFilter.set(value);
+    void this.reloadEvents(1);
+  }
+
+  onTimeFilterChange(value: string): void {
+    this.timeFilter.set(value);
+    void this.reloadEvents(1);
+  }
+
+  onPageSizeChange(value: string): void {
+    const parsed = Number.parseInt(value, 10);
+    this.pageSize.set(Number.isFinite(parsed) && parsed > 0 ? parsed : 100);
+    void this.reloadEvents(1);
+  }
+
+  totalPages(): number {
+    return Math.max(1, Math.ceil((this.totalEvents() || this.state.eventStats().today) / Math.max(1, this.pageSize())));
+  }
+
+  pageItemRange(): string {
+    const total = this.totalEvents() || this.state.eventStats().today;
+    if (total === 0) {
+      return '暂无记录';
+    }
+    const start = (this.currentPage() - 1) * this.pageSize() + 1;
+    const end = Math.min(total, this.currentPage() * this.pageSize());
+    return `显示 ${start}-${end}`;
+  }
+
+  private buildQuery(page: number): Record<string, string | number | undefined> {
+    const timeWindow = this.timeFilter();
+    const from = timeWindow === 'hour'
+      ? new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      : timeWindow === 'day'
+        ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        : timeWindow === 'week'
+          ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+          : undefined;
+    return {
+      page,
+      limit: this.pageSize(),
+      level: this.tab() === 'all' || this.tab() === 'live' ? undefined : this.tab(),
+      source: this.sourceFilter() || undefined,
+      from,
+      q: this.searchText().trim() || undefined,
+    };
+  }
+}

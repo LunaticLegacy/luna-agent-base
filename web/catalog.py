@@ -515,7 +515,7 @@ def build_agent_catalog(swarm, runs: Iterable[Any]) -> tuple[List[Dict[str, Any]
         elif node is not None:
             avg_response_time_ms = 300 + len(_agent_capabilities(agent_id, node, agent)) * 25
         success_rate = 100.0 if executions == 0 else round((completed / max(executions, 1)) * 100.0, 1)
-        status = "busy" if active_run_ids else ("error" if failed and not completed else ("offline" if executions == 0 else "online"))
+        status = "running" if active_run_ids else ("error" if failed and not completed else ("offline" if executions == 0 else "online"))
         token_usage = _estimate_token_usage(agent) + (executions * 1200)
         last_activity = entry.get("last_seen") or graph_mtime
         role = _agent_role(agent_id, node)
@@ -537,7 +537,7 @@ def build_agent_catalog(swarm, runs: Iterable[Any]) -> tuple[List[Dict[str, Any]
         total_success_rate += success_rate
         total_response_time += avg_response_time_ms
         total_token_usage += token_usage
-        if status == "busy":
+        if status == "running":
             active_count += 1
 
     stats = {

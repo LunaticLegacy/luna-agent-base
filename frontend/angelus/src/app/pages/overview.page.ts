@@ -44,7 +44,7 @@ import { MiniChartComponent } from '../components/mini-chart.component';
         </div>
         <div class="stat-card">
           <div class="stat-label">当前任务</div>
-          <div class="stat-value">{{ state.activeRun() ? '运行中' : '空闲' }}</div>
+          <div class="stat-value">{{ state.activeRunStatusText() }}</div>
           <div class="stat-sub">{{ state.streamState() || '等待中' }}</div>
         </div>
         <div class="stat-card">
@@ -100,26 +100,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
                 <button class="btn btn-secondary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
                   启动结构
                 </button>
-                <details #detailRunMenu class="run-menu">
-                  <summary
-                    class="btn btn-primary run-menu-toggle"
-                    [class.disabled]="state.loading() || !state.selectedSwarm()"
-                    [attr.aria-disabled]="state.loading() || !state.selectedSwarm()"
-                    title="更多启动方式"
-                  >
-                    更多
-                  </summary>
-                  <div class="run-menu-panel">
-                    <button
-                      type="button"
-                      class="run-menu-item"
-                      (click)="state.startSwarmBackground(); detailRunMenu.open = false"
-                      [disabled]="state.loading() || !state.selectedSwarm()"
-                    >
-                      后台启动
-                    </button>
-                  </div>
-                </details>
               </div>
             </div>
 
@@ -127,7 +107,7 @@ import { MiniChartComponent } from '../components/mini-chart.component';
               <h4>拓扑视图</h4>
               <div class="graph-container">
                 @if (state.resolvedGraph()) {
-                  <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
+                  <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
                 } @else {
                   <div class="empty-state">加载 Graph 中...</div>
                 }
@@ -221,26 +201,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
               <button class="btn btn-primary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
                 启动结构
               </button>
-              <details #consoleRunMenu class="run-menu">
-                <summary
-                  class="btn btn-secondary run-menu-toggle"
-                  [class.disabled]="state.loading() || !state.selectedSwarm()"
-                  [attr.aria-disabled]="state.loading() || !state.selectedSwarm()"
-                  title="更多启动方式"
-                >
-                  更多
-                </summary>
-                <div class="run-menu-panel">
-                  <button
-                    type="button"
-                    class="run-menu-item"
-                    (click)="state.startSwarmBackground(); consoleRunMenu.open = false"
-                    [disabled]="state.loading() || !state.selectedSwarm()"
-                  >
-                    后台启动
-                  </button>
-                </div>
-              </details>
             </div>
           </div>
 

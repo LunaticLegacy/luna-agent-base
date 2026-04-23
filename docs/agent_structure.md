@@ -187,13 +187,29 @@ agents/deepseek_demo/
 - `tool` 是运行时能力扩展
 - `core` 是 runtime 解释器
 
+## 8. 运行态边界
+
+这里有一个很重要的实现约束：`agent` 对象本身是长生命周期的，不会为每次请求自动重建。
+
+因此，当前运行态可以分成两类：
+
+- 请求级运行态
+  - `ExecutionState` 会在每次 `graph.run()` 时新建
+  - `RunRecord` 只负责后台 run 的事件和快照，不会回灌到模型
+- agent 级运行态
+  - `Agent._context.messages` 会保留历史消息
+  - `Agent._context.metadata` 会保留 `last_round`、`turns`
+  - `Agent.cognitive_graph` 会持续累积工具调用和推理痕迹
+
+为了防止上一轮内容污染下一轮，当前路由层会在 swarm run 开始前调用 `core.reset_runtime_state()`，把这些可变状态清空后再执行图。
+
 这意味着：
 
-- `agents/*.py` 不承担执行逻辑
-- 执行逻辑由 `graph.py` 和 `core/` 共同完成
-- `skills/` 可单独迭代，不必改 agent 行为代码
+- `run` / `start` / `runs` 适合做“单次任务执行”
+- 如果你在调试单个 agent，`/agents/<agent_id>/round` 仍然可能保留上下文，这是为了保留交互式调试体验
+- 如果你希望完全无状态，需要在路由层或调用方显式重置，而不是假设 agent 默认短生命周期
 
-## 8. 未来扩展建议
+## 9. 未来扩展建议
 
 如果后续继续扩展这个 swarm，建议优先考虑：
 
@@ -202,4 +218,3 @@ agents/deepseek_demo/
 - 给 skill contract 增加更严格的 schema 校验
 - 给 tool 增加分类和权限标记
 - 给 graph editor 增加更细粒度的审计日志
-
