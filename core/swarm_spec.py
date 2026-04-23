@@ -417,6 +417,11 @@ def _resolve_env_vars(value: str) -> str:
     def replacer(match: re.Match[str]) -> str:
         var_name = match.group(1) or match.group(2)
         env_value = os.getenv(var_name, "")
+        if env_value == "":
+            raise SwarmLoaderError(
+                f"Environment variable '{var_name}' is required but not set. "
+                f"Please export it before starting the runtime."
+            )
         return env_value
 
     return pattern.sub(replacer, value)

@@ -6,6 +6,7 @@ from typing import Dict, Optional
 
 from core.swarm_loader import LoadedSwarm, SwarmLoaderError, build_core_from_package, load_all_swarms
 from core.swarm_spec import SwarmAppConfig, discover_swarm_packages, load_root_config, load_swarm_manifest
+from core.task_graph import TaskGraph
 from web.errors import ConflictError, NotFoundError
 from web.runs import RunRegistry
 
@@ -30,12 +31,28 @@ class RuntimeRegistry:
             registry.load_error = str(exc)
         return registry
 
+    def _task_graph_path(self, swarm_name: str) -> Path:
+        return self.config_path.parent / "data" / f"tasks_{swarm_name}.json"
+
+    def _load_task_graph(self, swarm: LoadedSwarm) -> None:
+        path = self._task_graph_path(swarm.manifest.swarm_name)
+        task_graph = TaskGraph.load(path)
+        task_graph.graph_id = f"tasks_{swarm.manifest.swarm_name}"
+        swarm.core.set_task_graph(task_graph, persist_path=path)
+
+    def _save_task_graph(self, swarm_name: str) -> None:
+        swarm = self.swarms.get(swarm_name)
+        if swarm and swarm.core.task_graph is not None:
+            swarm.core.task_graph.save(self._task_graph_path(swarm_name))
+
     def reload_all(self) -> None:
         """Reload every discovered swarm package from disk."""
         if self.root_config is None:
             raise SwarmLoaderError("Root config is not available.")
         swarms = load_all_swarms(self.root_config.swarm_root)
         self.swarms = {swarm.manifest.swarm_name: swarm for swarm in swarms}
+        for swarm in self.swarms.values():
+            self._load_task_graph(swarm)
         self.load_error = None
 
     def list_swarms(self) -> Dict[str, LoadedSwarm]:
@@ -62,13 +79,14 @@ class RuntimeRegistry:
             manifest_path=manifest_path,
         )
         self.swarms[manifest.swarm_name] = loaded
+        self._load_task_graph(loaded)
         self.load_error = None
         return loaded
 
     def unload_swarm(self, swarm_name: str, *, force: bool = False) -> LoadedSwarm:
         """Remove one swarm from the registry."""
         swarm = self.get_swarm(swarm_name)
-        if self.runs.count_active_runs(swarm_name) > 0 and not force:
+        if self.runs.active_run_count(swarm_name) > 0 and not force:
             raise ConflictError(
                 f"Swarm '{swarm_name}' still has active runs; use force=true to unload it."
             )
@@ -84,7 +102,7 @@ class RuntimeRegistry:
     ) -> LoadedSwarm:
         """Reload one swarm atomically."""
         current = self.get_swarm(swarm_name)
-        if self.runs.count_active_runs(swarm_name) > 0 and not force:
+        if self.runs.active_run_count(swarm_name) > 0 and not force:
             raise ConflictError(
                 f"Swarm '{swarm_name}' still has active runs; use force=true to reload it."
             )
@@ -102,6 +120,7 @@ class RuntimeRegistry:
             manifest_path=manifest_path,
         )
         self.swarms[manifest.swarm_name] = loaded
+        self._load_task_graph(loaded)
         self.load_error = None
         return loaded
 

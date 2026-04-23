@@ -1,11 +1,10 @@
 {
-  "action": "set_execution_graph",
+  "action": "set_task_graph",
   "agent_name": "docs_verifier",
   "detail": {
-    "entry_node_id": 1,
-    "exit_node_id": 7
+    "task_count": 0
   },
-  "sequence": 16,
+  "sequence": 17,
   "snapshot": {
     "agent_name": "docs_verifier",
     "agents": [
@@ -24,10 +23,10 @@
       "node_count": 7
     },
     "last_event": {
-      "action": "set_execution_graph",
-      "sequence": 16,
-      "subject_id": "docs_verifier",
-      "subject_kind": "graph"
+      "action": "set_task_graph",
+      "sequence": 17,
+      "subject_id": "tasks_docs_verifier",
+      "subject_kind": "task_graph"
     },
     "skills": [
       "backend_verifier_prompt",
@@ -47,9 +46,9 @@
       "echo",
       "file_writer"
     ],
-    "updated_at": "2026-04-23T12:17:54.311972+00:00"
+    "updated_at": "2026-04-23T13:17:28.754056+00:00"
   },
-  "subject_id": "docs_verifier",
-  "subject_kind": "graph",
-  "timestamp": "2026-04-23T12:17:54.311968+00:00"
+  "subject_id": "tasks_docs_verifier",
+  "subject_kind": "task_graph",
+  "timestamp": "2026-04-23T13:17:28.754053+00:00"
 }
