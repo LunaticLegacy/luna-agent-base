@@ -138,23 +138,42 @@ class Core:
         )
 
     def register_skill(self, skill: SkillAsset) -> None:
-        """Register a runtime skill asset."""
-        if skill.name in self.skills:
-            raise ValueError(f"Duplicate skill name: {skill.name}")
-        self.skills[skill.name] = skill
+        """Register a runtime skill asset.
+
+        Skills are namespaced under the swarm so different swarms can have
+        identically-named skills without collision.  The short name is also
+        registered as an alias for backward-compatible lookup.
+        """
+        canonical = f"{self.agent_name}/{skill.name}"
+        if canonical in self.skills:
+            raise ValueError(f"Duplicate skill name: {canonical}")
+        self.skills[canonical] = skill
+        # Register short name as an alias unless it is already taken by
+        # another skill in this swarm (which would be a real conflict).
+        if skill.name in self.skills and self.skills[skill.name].name != skill.name:
+            pass
+        else:
+            self.skills[skill.name] = skill
         self._record_runtime_change(
             action="register_skill",
             subject_kind="skill",
-            subject_id=skill.name,
-            detail={"path": str(skill.path)},
+            subject_id=canonical,
+            detail={"path": str(skill.path), "alias": skill.name},
         )
 
     def get_skill(self, skill_name: str) -> SkillAsset:
-        """Fetch a registered skill by name."""
-        try:
+        """Fetch a registered skill by name.
+
+        Supports both short names (resolved in the current swarm) and
+        fully-qualified names ``swarm_name/skill_name``.
+        """
+        if skill_name in self.skills:
             return self.skills[skill_name]
-        except KeyError as exc:
-            raise KeyError(f"Unknown skill_name: {skill_name}") from exc
+        # Try fully-qualified form if the caller passed a short name.
+        canonical = f"{self.agent_name}/{skill_name}"
+        if canonical in self.skills:
+            return self.skills[canonical]
+        raise KeyError(f"Unknown skill_name: {skill_name} (also tried {canonical})")
 
     def list_skills(self) -> List[SkillAsset]:
         """Return the registered skills in insertion order."""

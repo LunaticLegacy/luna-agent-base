@@ -11,17 +11,11 @@ agent_files = [
 ]
 skill_files = [
   "skills/orchestrator.prompt.md",
-  "skills/orchestrator.prompt.toml",
   "skills/backend_verifier.prompt.md",
-  "skills/backend_verifier.prompt.toml",
   "skills/frontend_verifier.prompt.md",
-  "skills/frontend_verifier.prompt.toml",
   "skills/structure_verifier.prompt.md",
-  "skills/structure_verifier.prompt.toml",
   "skills/reviewer.prompt.md",
-  "skills/reviewer.prompt.toml",
   "skills/publisher.prompt.md",
-  "skills/publisher.prompt.toml",
 ]
 tool_files = [
   "tools.file_writer_tool",
