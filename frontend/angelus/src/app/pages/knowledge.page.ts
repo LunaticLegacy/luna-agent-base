@@ -131,6 +131,7 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
                     <div class="row-actions">
                       <button class="icon-btn" title="查看" (click)="selectEntry(entry); $event.stopPropagation()">👁</button>
                       <button class="icon-btn" title="编辑" (click)="editEntry(entry); $event.stopPropagation()">✎</button>
+                      <button class="icon-btn danger" title="删除" (click)="deleteEntry(entry); $event.stopPropagation()">🗑</button>
                     </div>
                   </td>
                 </tr>
@@ -178,6 +179,59 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
           }
         </div>
       </div>
+
+      <!-- Editor Modal -->
+      @if (editorOpen()) {
+        <div class="modal-overlay" (click)="closeEditor()"></div>
+        <div class="modal">
+          <div class="modal-header">
+            <div>
+              <h3>{{ editorMode() === 'create' ? '新建条目' : '编辑条目' }}</h3>
+              <div class="modal-sub">{{ editorMode() === 'create' ? '创建新的知识记录' : editorId() }}</div>
+            </div>
+            <button class="icon-btn close" (click)="closeEditor()">✕</button>
+          </div>
+          <div class="modal-body">
+            <label class="field">
+              <span>标题</span>
+              <input class="input" [value]="editorTitle()" (input)="editorTitle.set($any($event).target.value)" />
+            </label>
+            <label class="field">
+              <span>类型</span>
+              <select class="input" [value]="editorType()" (change)="editorType.set($any($event).target.value)">
+                <option value="document">文档</option>
+                <option value="vector">向量</option>
+                <option value="rule">规则</option>
+                <option value="snippet">片段</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>来源</span>
+              <input class="input" [value]="editorSource()" (input)="editorSource.set($any($event).target.value)" />
+            </label>
+            <label class="field">
+              <span>标签</span>
+              <input class="input" [value]="editorTags()" (input)="editorTags.set($any($event).target.value)" placeholder="用逗号分隔" />
+            </label>
+            <label class="field">
+              <span>状态</span>
+              <select class="input" [value]="editorStatus()" (change)="editorStatus.set($any($event).target.value)">
+                <option value="active">活跃</option>
+                <option value="draft">草稿</option>
+                <option value="archived">归档</option>
+              </select>
+            </label>
+            <label class="field full">
+              <span>内容</span>
+              <textarea class="textarea" rows="10" [value]="editorContent()" (input)="editorContent.set($any($event).target.value)"></textarea>
+            </label>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" (click)="closeEditor()">取消</button>
+            <button class="btn btn-primary" (click)="saveEntry()" [disabled]="state.loadingDetails()">{{ state.loadingDetails() ? '保存中...' : '保存' }}</button>
+          </div>
+        </div>
+      }
 
       <!-- Right Drawer -->
       @if (selectedEntry()) {
@@ -301,6 +355,14 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
     }
     .btn-primary:hover:not(:disabled) {
       background: #7c3aed;
+    }
+    .btn-secondary {
+      background: #1e293b;
+      border-color: rgba(148,163,184,0.2);
+      color: #F1F5F9;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: #243244;
     }
     .stat-cards-row {
       display: grid;
@@ -453,6 +515,14 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
     .icon-btn.close {
       font-size: 14px;
       padding: 6px 10px;
+    }
+    .icon-btn.danger {
+      color: #FCA5A5;
+    }
+    .icon-btn.danger:hover {
+      background: rgba(239,68,68,0.18);
+      border-color: rgba(239,68,68,0.3);
+      color: #FEE2E2;
     }
     .empty-cell {
       text-align: center;
@@ -639,6 +709,79 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       background: #0B0F19;
       border-radius: 8px;
     }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.72);
+      backdrop-filter: blur(8px);
+      z-index: 40;
+    }
+    .modal {
+      position: fixed;
+      inset: 50% auto auto 50%;
+      transform: translate(-50%, -50%);
+      width: min(720px, calc(100vw - 32px));
+      max-height: min(90vh, 900px);
+      overflow: auto;
+      background: #0F172A;
+      border: 1px solid rgba(148,163,184,0.14);
+      border-radius: 16px;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+      z-index: 41;
+    }
+    .modal-header, .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+    }
+    .modal-header {
+      border-bottom: 1px solid rgba(148,163,184,0.12);
+    }
+    .modal-footer {
+      border-top: 1px solid rgba(148,163,184,0.12);
+    }
+    .modal-header h3 {
+      margin: 0;
+      color: #F1F5F9;
+      font-size: 18px;
+    }
+    .modal-sub {
+      margin-top: 4px;
+      color: #94A3B8;
+      font-size: 12px;
+    }
+    .modal-body {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      padding: 18px 20px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      color: #CBD5E1;
+      font-size: 13px;
+    }
+    .field.full {
+      grid-column: 1 / -1;
+    }
+    .input, .textarea {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,0.16);
+      background: #0B0F19;
+      color: #F1F5F9;
+      padding: 10px 12px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    .textarea {
+      resize: vertical;
+      min-height: 180px;
+    }
     @media (max-width: 1200px) {
       .stat-cards-row { grid-template-columns: repeat(3, 1fr); }
       .graph-stats { grid-template-columns: repeat(2, 1fr); }
@@ -661,6 +804,15 @@ export class KnowledgePageComponent {
   readonly filterSource = signal('');
   readonly filterTag = signal('');
   readonly filterDateRange = signal('');
+  readonly editorOpen = signal(false);
+  readonly editorMode = signal<'create' | 'edit'>('create');
+  readonly editorId = signal<string | null>(null);
+  readonly editorTitle = signal('');
+  readonly editorType = signal<KnowledgeEntry['type']>('document');
+  readonly editorSource = signal('');
+  readonly editorTags = signal('');
+  readonly editorStatus = signal<KnowledgeEntry['status']>('draft');
+  readonly editorContent = signal('');
 
 
 
@@ -671,6 +823,19 @@ export class KnowledgePageComponent {
     if (this.filterType()) list = list.filter(e => e.type === this.filterType());
     if (this.filterSource()) list = list.filter(e => e.source === this.filterSource());
     if (this.filterTag()) list = list.filter(e => e.tags.includes(this.filterTag()));
+    if (this.filterDateRange()) {
+      const now = Date.now();
+      const windowMs = this.filterDateRange() === 'today'
+        ? 24 * 60 * 60 * 1000
+        : this.filterDateRange() === 'week'
+          ? 7 * 24 * 60 * 60 * 1000
+          : 30 * 24 * 60 * 60 * 1000;
+      list = list.filter((entry) => {
+        const raw = entry.meta.updatedAt || entry.createdAt;
+        const parsed = Date.parse(raw);
+        return Number.isFinite(parsed) && now - parsed <= windowMs;
+      });
+    }
     return list;
   });
 
@@ -696,11 +861,78 @@ export class KnowledgePageComponent {
   }
 
   createEntry(): void {
-    alert('新建条目功能待实现');
+    this.editorMode.set('create');
+    this.editorId.set(null);
+    this.editorTitle.set('');
+    this.editorType.set('document');
+    this.editorSource.set('手动录入');
+    this.editorTags.set('');
+    this.editorStatus.set('draft');
+    this.editorContent.set('');
+    this.editorOpen.set(true);
   }
 
   editEntry(entry: KnowledgeEntry): void {
-    alert('编辑条目: ' + entry.id);
+    this.editorMode.set('edit');
+    this.editorId.set(entry.id);
+    this.editorTitle.set(entry.title);
+    this.editorType.set(entry.type);
+    this.editorSource.set(entry.source);
+    this.editorTags.set(entry.tags.join(', '));
+    this.editorStatus.set(entry.status);
+    this.editorContent.set(entry.content);
+    this.editorOpen.set(true);
+  }
+
+  closeEditor(): void {
+    this.editorOpen.set(false);
+  }
+
+  async saveEntry(): Promise<void> {
+    const payload = {
+      title: this.editorTitle().trim(),
+      type: this.editorType(),
+      source: this.editorSource().trim(),
+      tags: this.editorTags().split(',').map((tag) => tag.trim()).filter(Boolean),
+      status: this.editorStatus(),
+      content: this.editorContent(),
+    };
+    if (!payload.title) return;
+    const editorId = this.editorId();
+    const saved = this.editorMode() === 'create'
+      ? await this.state.createKnowledgeEntry(payload)
+      : editorId
+        ? await this.state.updateKnowledgeEntry(editorId, payload)
+        : null;
+    if (saved) {
+      this.closeEditor();
+      this.selectedEntry.set({
+        id: saved.id,
+        title: saved.title,
+        type: saved.type as KnowledgeEntry['type'],
+        source: saved.source,
+        tags: [...saved.tags],
+        status: saved.status as KnowledgeEntry['status'],
+        citations: saved.citations,
+        createdAt: saved.created_at,
+        content: saved.content,
+        meta: {
+          author: saved.meta?.author ?? 'System',
+          version: saved.meta?.version ?? '1.0',
+          updatedAt: saved.meta?.updated_at ?? saved.created_at,
+          size: saved.meta?.size ?? '-',
+        },
+        related: [...saved.related],
+      });
+    }
+  }
+
+  async deleteEntry(entry: KnowledgeEntry): Promise<void> {
+    if (!window.confirm(`删除知识条目 "${entry.title}" 吗？`)) return;
+    const ok = await this.state.deleteKnowledgeEntry(entry.id);
+    if (ok && this.selectedEntry()?.id === entry.id) {
+      this.closeDrawer();
+    }
   }
 
   typeLabel(type: KnowledgeEntry['type']): string {

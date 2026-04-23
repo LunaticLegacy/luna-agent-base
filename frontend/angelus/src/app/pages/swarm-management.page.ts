@@ -21,8 +21,8 @@ import { GraphViewerComponent } from '../graph-viewer.component';
           <p class="subtitle">ID: {{ state.selectedSwarm()?.swarm_name || '—' }} · 最后更新: —</p>
         </div>
         <div class="header-actions">
-          <button class="btn btn-secondary" (click)="state.reloadSelectedSwarm()" [disabled]="state.loading()">
-            编辑配置
+          <button class="btn btn-secondary" (click)="reloadSwarm()" [disabled]="state.loadingDetails() || state.loading()">
+            重新加载
           </button>
           <div class="dropdown">
             <button class="btn btn-secondary" (click)="showOpsDropdown.set(!showOpsDropdown())">
@@ -30,10 +30,11 @@ import { GraphViewerComponent } from '../graph-viewer.component';
             </button>
             @if (showOpsDropdown()) {
               <div class="dropdown-menu">
+                <div class="dropdown-item" (click)="loadSwarm(); showOpsDropdown.set(false)">加载 Swarm</div>
                 <div class="dropdown-item" (click)="state.refreshGraph(); showOpsDropdown.set(false)">刷新 Graph</div>
                 <div class="dropdown-item" (click)="state.refreshAll(); showOpsDropdown.set(false)">刷新全部</div>
                 <div class="dropdown-divider"></div>
-                <div class="dropdown-item danger" (click)="showOpsDropdown.set(false)">删除 Swarm</div>
+                <div class="dropdown-item danger" (click)="unloadSwarm(); showOpsDropdown.set(false)">删除 Swarm</div>
               </div>
             }
           </div>
@@ -832,5 +833,22 @@ export class SwarmManagementPageComponent {
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
   readonly tabs = ['概览', '拓扑视图', 'Agents', '任务', '活动', '知识', '记忆', '设置'];
+
+  async loadSwarm(): Promise<void> {
+    const source = window.prompt('输入要加载的 Swarm 路径或名称');
+    if (!source) return;
+    await this.state.loadSwarmFromSource(source);
+  }
+
+  async reloadSwarm(): Promise<void> {
+    await this.state.reloadCurrentSwarm();
+  }
+
+  async unloadSwarm(): Promise<void> {
+    const swarmName = this.state.selectedSwarmName();
+    if (!swarmName) return;
+    if (!window.confirm(`确认卸载 Swarm "${swarmName}" 吗？`)) return;
+    await this.state.unloadCurrentSwarm();
+  }
 
 }

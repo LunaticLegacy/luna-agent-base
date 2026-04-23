@@ -1303,6 +1303,155 @@ export class StateService {
     }
   }
 
+  async loadSwarmFromSource(source: string, replace = false): Promise<void> {
+    const trimmed = source.trim();
+    if (!trimmed) {
+      this.error.set(makeUserError('加载 Swarm 前请输入来源路径或名称。'));
+      return;
+    }
+    this.loading.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.loadSwarm(this.baseUrl(), { source: trimmed, replace });
+      this.pushFeed(`Swarm 加载 · ${response.swarm.swarm_name}`, 'POST', `${this.baseUrl()}/swarms/load`, 'success', response);
+      this.selectedSwarmName.set(response.swarm.swarm_name);
+      await this.loadOverview();
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`Swarm 加载失败 · ${trimmed}`, 'POST', `${this.baseUrl()}/swarms/load`, 'error', { error: errorSummary(error) });
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  async reloadCurrentSwarm(force = false): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.error.set(makeUserError('重新加载前请选择一个 Swarm。'));
+      return;
+    }
+    this.loadingDetails.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.reloadSwarm(this.baseUrl(), swarmName, { force });
+      this.pushFeed(`Swarm 重载 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}/reload`, 'success', response);
+      await this.reloadSelectedSwarm({ clearError: false });
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`Swarm 重载失败 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}/reload`, 'error', { error: errorSummary(error) });
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
+  async unloadCurrentSwarm(force = false): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.error.set(makeUserError('卸载前请选择一个 Swarm。'));
+      return;
+    }
+    this.loadingDetails.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.unloadSwarm(this.baseUrl(), swarmName, force);
+      this.pushFeed(`Swarm 卸载 · ${swarmName}`, 'DELETE', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}`, 'success', response);
+      if (this.selectedSwarmName() === swarmName) {
+        this.selectedSwarmName.set(null);
+      }
+      await this.loadOverview();
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`Swarm 卸载失败 · ${swarmName}`, 'DELETE', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}`, 'error', { error: errorSummary(error) });
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
+  async createKnowledgeEntry(payload: Record<string, unknown>): Promise<KnowledgeCatalogItem | null> {
+    this.loadingDetails.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.createKnowledge(this.baseUrl(), payload);
+      this.pushFeed(`知识创建 · ${response.knowledge.id}`, 'POST', `${this.baseUrl()}/knowledge`, 'success', response);
+      await this.loadKnowledge();
+      return response.knowledge;
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('知识创建失败', 'POST', `${this.baseUrl()}/knowledge`, 'error', { error: errorSummary(error) });
+      return null;
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
+  async updateKnowledgeEntry(knowledgeId: string, payload: Record<string, unknown>): Promise<KnowledgeCatalogItem | null> {
+    this.loadingDetails.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.updateKnowledge(this.baseUrl(), knowledgeId, payload);
+      this.pushFeed(`知识更新 · ${knowledgeId}`, 'PUT', `${this.baseUrl()}/knowledge/${knowledgeId}`, 'success', response);
+      await this.loadKnowledge();
+      return response.knowledge;
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`知识更新失败 · ${knowledgeId}`, 'PUT', `${this.baseUrl()}/knowledge/${knowledgeId}`, 'error', { error: errorSummary(error) });
+      return null;
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
+  async deleteKnowledgeEntry(knowledgeId: string): Promise<boolean> {
+    this.loadingDetails.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.deleteKnowledge(this.baseUrl(), knowledgeId);
+      this.pushFeed(`知识删除 · ${knowledgeId}`, 'DELETE', `${this.baseUrl()}/knowledge/${knowledgeId}`, 'success', response);
+      await this.loadKnowledge();
+      return true;
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`知识删除失败 · ${knowledgeId}`, 'DELETE', `${this.baseUrl()}/knowledge/${knowledgeId}`, 'error', { error: errorSummary(error) });
+      return false;
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
+  async createMemoryEntry(payload: Record<string, unknown>): Promise<MemoryItem | null> {
+    this.loadingDetails.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.createMemory(this.baseUrl(), payload);
+      this.pushFeed(`记忆创建 · ${response.memory.id}`, 'POST', `${this.baseUrl()}/memory`, 'success', response);
+      await this.loadMemory();
+      return this.mapMemoryCatalogItem(response.memory);
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed('记忆创建失败', 'POST', `${this.baseUrl()}/memory`, 'error', { error: errorSummary(error) });
+      return null;
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
+  async deleteMemoryEntry(memoryId: string): Promise<boolean> {
+    this.loadingDetails.set(true);
+    this.error.set(null);
+    try {
+      const response = await this.apiService.deleteMemory(this.baseUrl(), memoryId);
+      this.pushFeed(`记忆删除 · ${memoryId}`, 'DELETE', `${this.baseUrl()}/memory/${memoryId}`, 'success', response);
+      await this.loadMemory();
+      return true;
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`记忆删除失败 · ${memoryId}`, 'DELETE', `${this.baseUrl()}/memory/${memoryId}`, 'error', { error: errorSummary(error) });
+      return false;
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
   async startSwarmStructure(): Promise<void> {
     const swarmName = this.selectedSwarmName();
     if (!swarmName) { this.error.set(makeUserError('启动结构前请选择一个 Swarm。')); return; }
@@ -1315,8 +1464,8 @@ export class StateService {
         rounds: this.swarmRounds(),
         meta_mode: this.metaMode(),
       });
-      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start`), 'success', response);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start`), 'error', { error: errorSummary(error) }); }
+      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start`), 'success', response);
+    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start`), 'error', { error: errorSummary(error) }); }
     finally { this.loading.set(false); }
   }
 
@@ -1333,9 +1482,9 @@ export class StateService {
         meta_mode: this.metaMode(),
       });
       this.activeRun.set(response.run);
-      this.pushFeed(`后台结构已启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start/background`), 'success', response);
+      this.pushFeed(`后台结构已启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'success', response);
       this.watchRun(response.run);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`后台结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${swarmName}/start/background`), 'error', { error: errorSummary(error) }); }
+    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`后台结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'error', { error: errorSummary(error) }); }
     finally { this.loading.set(false); }
   }
 
@@ -1351,7 +1500,8 @@ export class StateService {
     try {
       const response = await this.apiService.getRun(this.baseUrl(), runId);
       this.activeRun.set(response.run);
-      this.pushFeed(`运行快照 · ${runId}`, 'GET', joinUrl(this.baseUrl(), `/swarms/runs/${runId}`), 'info', response);
+      const endpoint = this.resolveRunUrl(response.run, 'status');
+      this.pushFeed(`运行快照 · ${runId}`, 'GET', endpoint, 'info', response);
     } catch (error) { this.error.set(formatErrorDetail(error)); }
   }
 
@@ -1426,7 +1576,7 @@ export class StateService {
 
   private watchRun(run: RunSnapshot): void {
     this.closeStream();
-    const sourceUrl = joinUrl(this.baseUrl(), `/swarms/runs/${run.run_id}/events`);
+    const sourceUrl = this.resolveRunUrl(run, 'events');
     this.streamState.set('connecting');
     this.streamNote.set(`正在监听 ${run.run_id}`);
     const source = new EventSource(sourceUrl);
@@ -1454,6 +1604,25 @@ export class StateService {
     this.streamState.set('closed');
   }
 
+  private resolveRunUrl(run: RunSnapshot, kind: 'status' | 'events'): string {
+    const legacyPattern = /\/api\/runs\//;
+    const rawUrl = kind === 'status' ? run.status_url : run.events_url;
+    const canonicalPath = kind === 'status'
+      ? `/swarms/runs/${encodeURIComponent(run.run_id)}`
+      : `/swarms/runs/${encodeURIComponent(run.run_id)}/events`;
+    const normalizedBase = this.baseUrl().replace(/\/$/, '');
+    const trimmedUrl = rawUrl?.trim();
+
+    if (trimmedUrl && !legacyPattern.test(trimmedUrl)) {
+      if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
+        return trimmedUrl;
+      }
+      return `${normalizedBase}${trimmedUrl.startsWith('/') ? trimmedUrl : `/${trimmedUrl}`}`;
+    }
+
+    return joinUrl(this.baseUrl(), canonicalPath);
+  }
+
   feedPreview(item: FeedItem): string { return valuePreview(item.payload); }
 
   swarmOverview(): string {
@@ -1464,10 +1633,6 @@ export class StateService {
   graphSummary(): string {
     const graph = this.resolvedGraph();
     return graph ? `${graph.node_count} 节点 · ${graph.edge_count} 边` : '图未加载';
-  }
-
-  payloadText(): string {
-    return JSON.stringify(this.buildSwarmExecutionInput(), null, 2);
   }
 
   selectedRunHint(): string {

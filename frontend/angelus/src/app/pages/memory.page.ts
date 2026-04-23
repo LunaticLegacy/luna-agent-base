@@ -15,6 +15,7 @@ import { StateService, MemoryItem } from '../services/state.service';
           <p class="subtitle">Agent 记忆检索、管理与持久化</p>
         </div>
         <div class="header-actions">
+          <button class="btn btn-secondary" (click)="createMemory()">+ 新建记忆</button>
           <button class="btn btn-primary" (click)="state.refreshAll()" [disabled]="state.loading()">
             {{ state.loading() ? '刷新中...' : '刷新记忆' }}
           </button>
@@ -111,11 +112,14 @@ import { StateService, MemoryItem } from '../services/state.service';
 
         <!-- Right: Memory Detail -->
         <div class="column-right">
-          <div class="panel-card detail-card">
+      <div class="panel-card detail-card">
             @if (selectedMemory(); as mem) {
               <div class="detail-header">
                 <h3>{{ mem.summary }}</h3>
-                <div class="detail-id">{{ mem.id }}</div>
+                <div class="detail-id-row">
+                  <div class="detail-id">{{ mem.id }}</div>
+                  <button class="btn btn-sm danger" (click)="deleteMemory(mem)">删除</button>
+                </div>
               </div>
               <div class="detail-body">
                 <div class="detail-content">{{ mem.content }}</div>
@@ -177,6 +181,59 @@ import { StateService, MemoryItem } from '../services/state.service';
           </div>
         </div>
       </div>
+
+      <!-- Memory Editor Modal -->
+      @if (editorOpen()) {
+        <div class="modal-overlay" (click)="closeEditor()"></div>
+        <div class="modal">
+          <div class="modal-header">
+            <div>
+              <h3>新建记忆</h3>
+              <div class="modal-sub">创建一条新的持久化记忆</div>
+            </div>
+            <button class="icon-btn close" (click)="closeEditor()">✕</button>
+          </div>
+          <div class="modal-body">
+            <label class="field">
+              <span>摘要</span>
+              <input class="input" [value]="editorSummary()" (input)="editorSummary.set($any($event).target.value)" />
+            </label>
+            <label class="field">
+              <span>类型</span>
+              <select class="input" [value]="editorType()" (change)="editorType.set($any($event).target.value)">
+                <option value="episodic">情景</option>
+                <option value="semantic">语义</option>
+                <option value="procedural">程序</option>
+                <option value="working">工作</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>来源</span>
+              <input class="input" [value]="editorSource()" (input)="editorSource.set($any($event).target.value)" />
+            </label>
+            <label class="field">
+              <span>情感</span>
+              <input class="input" type="number" step="0.1" [value]="editorSentiment()" (input)="editorSentiment.set($any($event).target.value)" />
+            </label>
+            <label class="field">
+              <span>重要性</span>
+              <input class="input" type="number" min="0" max="100" [value]="editorImportance()" (input)="editorImportance.set($any($event).target.value)" />
+            </label>
+            <label class="field">
+              <span>关联 IDs</span>
+              <input class="input" [value]="editorRelatedIds()" (input)="editorRelatedIds.set($any($event).target.value)" placeholder="用逗号分隔" />
+            </label>
+            <label class="field full">
+              <span>内容</span>
+              <textarea class="textarea" rows="8" [value]="editorContent()" (input)="editorContent.set($any($event).target.value)"></textarea>
+            </label>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" (click)="closeEditor()">取消</button>
+            <button class="btn btn-primary" (click)="saveMemory()" [disabled]="state.loadingDetails()">{{ state.loadingDetails() ? '保存中...' : '保存' }}</button>
+          </div>
+        </div>
+      }
 
       <!-- System Memory Panel -->
       <div class="panel-card system-memory">
@@ -269,6 +326,26 @@ import { StateService, MemoryItem } from '../services/state.service';
     }
     .btn-primary:hover:not(:disabled) {
       background: #7c3aed;
+    }
+    .btn-secondary {
+      background: #1e293b;
+      border-color: rgba(148,163,184,0.2);
+      color: #F1F5F9;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: #243244;
+    }
+    .btn-sm {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    .btn-sm.danger {
+      background: rgba(239,68,68,0.15);
+      border-color: rgba(239,68,68,0.25);
+      color: #FCA5A5;
+    }
+    .btn-sm.danger:hover:not(:disabled) {
+      background: rgba(239,68,68,0.22);
     }
     .stat-cards-row {
       display: grid;
@@ -611,6 +688,85 @@ import { StateService, MemoryItem } from '../services/state.service';
       color: #64748b;
       font-size: 13px;
     }
+    .detail-id-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.72);
+      backdrop-filter: blur(8px);
+      z-index: 40;
+    }
+    .modal {
+      position: fixed;
+      inset: 50% auto auto 50%;
+      transform: translate(-50%, -50%);
+      width: min(680px, calc(100vw - 32px));
+      max-height: min(90vh, 860px);
+      overflow: auto;
+      background: #0F172A;
+      border: 1px solid rgba(148,163,184,0.14);
+      border-radius: 16px;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+      z-index: 41;
+    }
+    .modal-header, .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+    }
+    .modal-header {
+      border-bottom: 1px solid rgba(148,163,184,0.12);
+    }
+    .modal-footer {
+      border-top: 1px solid rgba(148,163,184,0.12);
+    }
+    .modal-header h3 {
+      margin: 0;
+      color: #F1F5F9;
+      font-size: 18px;
+    }
+    .modal-sub {
+      margin-top: 4px;
+      color: #94A3B8;
+      font-size: 12px;
+    }
+    .modal-body {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      padding: 18px 20px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      color: #CBD5E1;
+      font-size: 13px;
+    }
+    .field.full {
+      grid-column: 1 / -1;
+    }
+    .input, .textarea {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,0.16);
+      background: #0B0F19;
+      color: #F1F5F9;
+      padding: 10px 12px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    .textarea {
+      resize: vertical;
+      min-height: 160px;
+    }
     @media (max-width: 1200px) {
       .stat-cards-row { grid-template-columns: repeat(3, 1fr); }
       .two-column-layout { grid-template-columns: 1fr; }
@@ -630,6 +786,14 @@ export class MemoryPageComponent {
   readonly selectedMemory = signal<MemoryItem | null>(null);
   readonly searchQuery = signal('');
   readonly filterType = signal('');
+  readonly editorOpen = signal(false);
+  readonly editorSummary = signal('');
+  readonly editorType = signal<MemoryItem['type']>('working');
+  readonly editorSource = signal('');
+  readonly editorSentiment = signal('0');
+  readonly editorImportance = signal('50');
+  readonly editorRelatedIds = signal('');
+  readonly editorContent = signal('');
   readonly memories = computed(() => this.state.derivedMemories());
   readonly avgImportance = computed(() => {
     if (!this.memories().length) return '0';
@@ -689,6 +853,47 @@ export class MemoryPageComponent {
 
   selectMemory(mem: MemoryItem): void {
     this.selectedMemory.set(mem);
+  }
+
+  createMemory(): void {
+    this.editorSummary.set('');
+    this.editorType.set('working');
+    this.editorSource.set('system');
+    this.editorSentiment.set('0');
+    this.editorImportance.set('50');
+    this.editorRelatedIds.set('');
+    this.editorContent.set('');
+    this.editorOpen.set(true);
+  }
+
+  closeEditor(): void {
+    this.editorOpen.set(false);
+  }
+
+  async saveMemory(): Promise<void> {
+    const payload = {
+      summary: this.editorSummary().trim(),
+      type: this.editorType(),
+      source: this.editorSource().trim(),
+      sentiment: Number.parseFloat(this.editorSentiment()),
+      importance: Number.parseInt(this.editorImportance(), 10),
+      related_ids: this.editorRelatedIds().split(',').map((item) => item.trim()).filter(Boolean),
+      content: this.editorContent(),
+    };
+    if (!payload.summary) return;
+    const saved = await this.state.createMemoryEntry(payload);
+    if (saved) {
+      this.selectedMemory.set(saved);
+      this.closeEditor();
+    }
+  }
+
+  async deleteMemory(mem: MemoryItem): Promise<void> {
+    if (!window.confirm(`删除记忆 "${mem.summary}" 吗？`)) return;
+    const ok = await this.state.deleteMemoryEntry(mem.id);
+    if (ok && this.selectedMemory()?.id === mem.id) {
+      this.selectedMemory.set(null);
+    }
   }
 
   importanceColor(value: number): string {
