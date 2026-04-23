@@ -217,15 +217,15 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
   "run": {
     "run_id": "9f2c...",
     "status": "running",
-    "events_url": "/api/runs/9f2c.../events",
-    "status_url": "/api/runs/9f2c..."
+    "events_url": "/api/swarms/runs/9f2c.../events",
+    "status_url": "/api/swarms/runs/9f2c..."
   }
 }
 ```
 
 这个接口不会等待图执行结束，而是返回一个 `run_id` 供后续查询和订阅。
 
-### 3.11 `GET /api/runs/<run_id>`
+### 3.11 `GET /api/swarms/runs/<run_id>`
 
 查询一个异步 run session 的当前状态。
 
@@ -245,7 +245,7 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 
 这个接口适合轮询式前端，也适合调试当前执行进度。
 
-### 3.12 `GET /api/runs/<run_id>/events`
+### 3.12 `GET /api/swarms/runs/<run_id>/events`
 
 订阅一个异步 run session 的 SSE 事件流。
 
@@ -266,7 +266,7 @@ SSE 事件体是 JSON 字符串，前端可用来实时高亮当前节点、更�
 
 更详细的实时执行协议见：
 
-- [docs/backend_live_execution.md](/run/media/luna/数据和游戏/Codes/Python/angelus/docs/backend_live_execution.md)
+- [docs/backend/runs.md](/run/media/luna/数据和游戏/Codes/Python/angelus/docs/backend/runs.md)
 
 ## 4. 错误处理
 

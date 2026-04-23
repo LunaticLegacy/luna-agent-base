@@ -173,11 +173,10 @@ Used by the frontend to draw the static graph before overlaying runtime state.
 
 Starts an async run session and returns a `run_id` immediately.
 
-### `GET /api/runs/<run_id>`
+### `GET /api/swarms/runs/<run_id>`
 
 Returns the current state snapshot of an async run session.
 
-### `GET /api/runs/<run_id>/events`
+### `GET /api/swarms/runs/<run_id>/events`
 
 Subscribes to the SSE event stream for a run session.
-

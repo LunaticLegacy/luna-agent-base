@@ -182,6 +182,8 @@ class RunRecord:
     def snapshot(self) -> Dict[str, Any]:
         """Return a JSON-ready view of the run."""
         with self._condition:
+            events_url = f"/api/swarms/runs/{self.run_id}/events"
+            status_url = f"/api/swarms/runs/{self.run_id}"
             return {
                 "success": self.status == "completed",
                 "run_id": self.run_id,
@@ -198,8 +200,8 @@ class RunRecord:
                 "final_state": to_jsonable(self.final_state),
                 "error": self.error,
                 "event_count": len(self.events),
-                "events_url": f"/api/runs/{self.run_id}/events",
-                "status_url": f"/api/runs/{self.run_id}",
+                "events_url": events_url,
+                "status_url": status_url,
             }
 
     def stream_events(self, *, after: int = 0, heartbeat_seconds: float = 15.0) -> Iterator[str]:
