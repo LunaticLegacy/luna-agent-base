@@ -27,13 +27,19 @@ tool_files = [
   "tools.web_search_tool",
 ]
 
+[tool_capabilities]
+agent_manager = ["agent_lifecycle"]
+graph_editor = ["graph_mutation"]
+file_writer = ["file_write"]
+web_search = ["network_access"]
+
 [llm.default]
 name = "deepseek"
 provider = "openai"
 api_url = "https://api.deepseek.com"
-api_key = "sk-076ea11fbb2741948a9b60b6ca7efca2"
+api_key = "${DEEPSEEK_API_KEY}"
 model = "deepseek-reasoner"
 
 [workspace]
 default_mode = "workspace"
-default_root = "."
+default_root = "../.."

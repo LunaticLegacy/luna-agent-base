@@ -45,6 +45,7 @@ class RuntimeInfoManager:
     ) -> Dict[str, Any]:
         """Record one runtime change and refresh the latest snapshot."""
         self._counter += 1
+        safe_detail = _sanitize_detail(detail or {})
         current_event = {
             "sequence": self._counter,
             "timestamp": _utc_now_iso(),
@@ -52,7 +53,7 @@ class RuntimeInfoManager:
             "action": action,
             "subject_kind": subject_kind,
             "subject_id": subject_id,
-            "detail": detail or {},
+            "detail": safe_detail,
         }
         self.last_event = current_event
         snapshot = self._build_snapshot(core=core, current_event=current_event)
@@ -114,3 +115,28 @@ class RuntimeInfoManager:
             encoding="utf-8",
         )
         tmp_path.replace(self.state_path)
+
+
+def _sanitize_detail(value: Any, *, max_string_length: int = 500) -> Any:
+    if isinstance(value, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            if any(token in normalized_key for token in ("api_key", "token", "secret", "password")):
+                sanitized[key] = "[redacted]"
+            elif any(token in normalized_key for token in ("prompt", "content")):
+                sanitized[key] = _truncate_string(str(item), max_string_length)
+            else:
+                sanitized[key] = _sanitize_detail(item, max_string_length=max_string_length)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_detail(item, max_string_length=max_string_length) for item in value]
+    if isinstance(value, str):
+        return _truncate_string(value, max_string_length)
+    return value
+
+
+def _truncate_string(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return f"{value[:max_length].rstrip()}...[truncated]"

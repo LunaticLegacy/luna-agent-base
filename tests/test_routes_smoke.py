@@ -40,6 +40,7 @@ sys.modules.setdefault("openai", openai_module)
 sys.modules.setdefault("openai.types", openai_types_module)
 sys.modules.setdefault("openai.types.chat", openai_chat_module)
 
+from core.swarm_spec import ApiConfig, SwarmAppConfig
 from web.app_factory import create_app
 from web.runs import RunRecord
 
@@ -156,6 +157,7 @@ class DummyRuntimeRegistry:
         self.runs = DummyRunRegistry()
         self.load_error = None
         self.config_path = config_path
+        self.root_config = SwarmAppConfig(swarm_root=Path("agents"))
 
     def get_swarm(self, swarm_name: str):
         if swarm_name not in self.swarms:
@@ -256,6 +258,33 @@ class RouteSmokeTest(unittest.TestCase):
         self.assertIn('timeout_seconds = 42', config_text)
         self.assertIn('sse_reconnect_interval_seconds = 9', config_text)
         self.assertIn('auto_reconnect = false', config_text)
+        self.assertIn('require_auth = false', config_text)
+
+    def test_mutating_routes_require_token_when_auth_enabled(self) -> None:
+        self.runtime.root_config.api = ApiConfig(require_auth=True, api_token="secret-token")
+
+        unauthorized = self.client.post("/api/swarms/demo/run", json={"input": "hello"})
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertFalse(unauthorized.get_json()["success"])
+        self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 0)
+
+        authorized = self.client.post(
+            "/api/swarms/demo/run",
+            json={"input": "hello"},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        self.assertEqual(authorized.status_code, 200)
+        self.assertTrue(authorized.get_json()["success"])
+        self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 1)
+
+    def test_cors_respects_allowlist(self) -> None:
+        self.runtime.root_config.api = ApiConfig(cors_allowed_origins=["http://allowed.example"])
+
+        allowed = self.client.get("/api", headers={"Origin": "http://allowed.example"})
+        self.assertEqual(allowed.headers.get("Access-Control-Allow-Origin"), "http://allowed.example")
+
+        denied = self.client.get("/api", headers={"Origin": "http://blocked.example"})
+        self.assertNotIn("Access-Control-Allow-Origin", denied.headers)
 
     def test_rejects_concurrent_run_for_same_swarm(self) -> None:
         active = RunRecord(run_id="run-active", swarm_name="demo", status="running")

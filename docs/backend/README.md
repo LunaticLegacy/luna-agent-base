@@ -7,6 +7,7 @@
 - [App and Routes](./app-and-routes.md)
 - [Runtime](./runtime.md)
 - [Runs](./runs.md)
+- [Workflow Hardening Plan](./workflow-hardening.md)
 - [Catalog and Content](./catalog-and-content.md)
 - [Errors and Health](./errors-and-health.md)
 

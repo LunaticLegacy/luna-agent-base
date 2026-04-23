@@ -110,12 +110,17 @@ class RuntimeRegistry:
         if self.root_config is None:
             raise SwarmLoaderError("Root config is not available.")
         candidate = Path(source)
+        swarm_root = self.root_config.swarm_root.resolve()
         if candidate.exists() and candidate.is_dir():
-            return candidate.resolve()
+            resolved_candidate = candidate.resolve()
+            if not self._path_is_within_root(resolved_candidate, swarm_root):
+                raise NotFoundError(f"Swarm package must be inside swarm_root: {source}")
+            return resolved_candidate
 
-        swarm_root = self.root_config.swarm_root
         direct = (swarm_root / candidate).resolve()
         if direct.exists() and direct.is_dir():
+            if not self._path_is_within_root(direct, swarm_root):
+                raise NotFoundError(f"Swarm package must be inside swarm_root: {source}")
             return direct
 
         for package_path in discover_swarm_packages(swarm_root):
@@ -127,3 +132,10 @@ class RuntimeRegistry:
                 return package_path
 
         raise NotFoundError(f"Unable to resolve swarm package: {source}")
+
+    def _path_is_within_root(self, path: Path, root: Path) -> bool:
+        try:
+            path.relative_to(root)
+        except ValueError:
+            return False
+        return True

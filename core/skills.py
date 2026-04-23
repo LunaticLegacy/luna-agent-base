@@ -64,7 +64,11 @@ def load_skill_asset(path: Path) -> SkillAsset:
         content = str(skill_section.get("content", "")).strip()
         content_file = skill_section.get("content_file")
         if content_file:
-            content_path = path.parent / str(content_file)
+            content_path = (path.parent / str(content_file)).resolve()
+            try:
+                content_path.relative_to(path.parent.resolve())
+            except ValueError as exc:
+                raise ValueError(f"Skill content_file escapes skill directory: {content_file}") from exc
             content = content_path.read_text(encoding="utf-8").strip()
         if not content:
             raise ValueError(f"Skill file is missing content: {path}")

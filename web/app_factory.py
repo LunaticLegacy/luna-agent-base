@@ -12,19 +12,13 @@ from web.runs import serialize_graph_snapshot
 
 from .errors import register_error_handlers
 from .routes import catalog_bp, content_bp, health_bp, settings_bp, swarms_bp
+from .security import install_api_security
 
 
 def create_app(config_path: str | Path = "config.toml") -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
     config_path = Path(config_path)
-
-    @app.after_request
-    def add_cors_headers(response):
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        return response
 
     @app.route("/<path:path>", methods=["OPTIONS"])
     @app.route("/", methods=["OPTIONS"])
@@ -41,6 +35,7 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
         )
 
     app.extensions["angelus_runtime"] = runtime_registry
+    install_api_security(app)
     app.extensions["angelus_content"] = ContentStore.from_runtime_registry(
         data_dir=config_path.parent / "data",
         runtime_registry=runtime_registry,

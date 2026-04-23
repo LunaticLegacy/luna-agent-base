@@ -25,6 +25,10 @@ class ApiConfig:
     timeout_seconds: int = 30
     sse_reconnect_interval_seconds: int = 5
     auto_reconnect: bool = True
+    require_auth: bool = False
+    api_token: Optional[str] = None
+    api_token_env: str = "ANGELUS_API_TOKEN"
+    cors_allowed_origins: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -78,6 +82,7 @@ class SwarmManifest:
     graph_file: str
     agent_files: List[str]
     tool_files: List[str] = field(default_factory=list)
+    tool_capabilities: Dict[str, List[str]] = field(default_factory=dict)
     skill_files: List[str] = field(default_factory=list)
     default_backend: Optional[str] = None
     default_llm: Optional[LLMBackendConfig] = None
@@ -109,6 +114,13 @@ def load_root_config(path: Path) -> SwarmAppConfig:
         fallback=5,
     )
     auto_reconnect = _coerce_bool(api_section.get("auto_reconnect", True), fallback=True)
+    require_auth = _coerce_bool(api_section.get("require_auth", False), fallback=False)
+    api_token = _resolve_env_vars(str(api_section.get("api_token", "")).strip()) or None
+    api_token_env = str(api_section.get("api_token_env", "ANGELUS_API_TOKEN")).strip() or "ANGELUS_API_TOKEN"
+    cors_allowed_origins = _normalize_string_list(
+        api_section.get("cors_allowed_origins", []),
+        field_name="[api].cors_allowed_origins",
+    )
 
     return SwarmAppConfig(
         swarm_root=Path(swarm_root),
@@ -117,6 +129,10 @@ def load_root_config(path: Path) -> SwarmAppConfig:
             timeout_seconds=timeout_seconds,
             sse_reconnect_interval_seconds=sse_reconnect_interval_seconds,
             auto_reconnect=auto_reconnect,
+            require_auth=require_auth,
+            api_token=api_token,
+            api_token_env=api_token_env,
+            cors_allowed_origins=cors_allowed_origins,
         ),
     )
 
@@ -142,6 +158,32 @@ def _coerce_bool(raw: Any, *, fallback: bool) -> bool:
     if value in {"0", "false", "no", "n", "off"}:
         return False
     return fallback
+
+
+def _normalize_string_list(raw: Any, *, field_name: str) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        raise SwarmLoaderError(f"{field_name} must be a string array.")
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
+def _parse_tool_capabilities(raw: Any, source: Path) -> Dict[str, List[str]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise SwarmLoaderError(f"[tool_capabilities] must be a TOML table in {source}")
+    capabilities: Dict[str, List[str]] = {}
+    for tool_name, raw_values in raw.items():
+        capabilities[str(tool_name).strip()] = _normalize_string_list(
+            raw_values,
+            field_name=f"[tool_capabilities].{tool_name}",
+        )
+    return capabilities
 
 
 def discover_swarm_packages(root: Path) -> List[Path]:
@@ -189,6 +231,7 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         raise SwarmLoaderError(f"[swarm].agent_files contains no usable entries in {manifest_path}")
 
     tool_files = _normalize_path_list(swarm_section.get("tool_files", []), field_name="[swarm].tool_files")
+    tool_capabilities = _parse_tool_capabilities(raw.get("tool_capabilities", {}), manifest_path)
     skill_files = _normalize_path_list(swarm_section.get("skill_files", []), field_name="[swarm].skill_files")
 
     default_backend = swarm_section.get("default_backend")
@@ -214,6 +257,7 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         graph_file=graph_file,
         agent_files=agent_files,
         tool_files=tool_files,
+        tool_capabilities=tool_capabilities,
         skill_files=skill_files,
         default_backend=default_backend,
         default_llm=default_llm,
@@ -227,16 +271,27 @@ def load_agent_blueprints(package_path: Path, manifest: SwarmManifest) -> List[A
     blueprints: List[AgentBlueprint] = []
 
     for file_name in manifest.agent_files:
-        module = _load_module_from_path(package_path / file_name)
+        agent_path = _resolve_package_local_path(package_path, file_name)
+        module = _load_module_from_path(agent_path)
         raw_specs = _extract_agent_specs(module)
         if not raw_specs:
             raise SwarmLoaderError(
                 f"Agent file '{file_name}' in {package_path} must define AGENT, AGENT_SPEC, or AGENTS."
             )
         for raw_spec in raw_specs:
-            blueprints.append(_coerce_agent_blueprint(raw_spec, package_path / file_name))
+            blueprints.append(_coerce_agent_blueprint(raw_spec, agent_path))
 
     return blueprints
+
+
+def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
+    path = Path(value)
+    resolved = path.resolve() if path.is_absolute() else (package_path / path).resolve()
+    try:
+        resolved.relative_to(package_path.resolve())
+    except ValueError as exc:
+        raise SwarmLoaderError(f"Path '{value}' escapes swarm package '{package_path}'.") from exc
+    return resolved
 
 
 def _load_module_from_path(path: Path) -> ModuleType:
@@ -437,6 +492,6 @@ def load_skill_assets(package_path: Path, manifest: SwarmManifest) -> List[Skill
     """Load all skill assets referenced by the manifest."""
     skills: List[SkillAsset] = []
     for file_name in manifest.skill_files:
-        skill_path = package_path / file_name
+        skill_path = _resolve_package_local_path(package_path, file_name)
         skills.append(load_skill_asset(skill_path))
     return skills
