@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, ElementRef, ViewChild, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StateService, LogItem } from '../services/state.service';
@@ -17,7 +17,7 @@ import { StateService, LogItem } from '../services/state.service';
         <button class="btn btn-sm" (click)="autoScroll.set(!autoScroll())">
           {{ autoScroll() ? '暂停滚动' : '自动滚动' }}
         </button>
-        <button class="btn btn-sm btn-primary">导出</button>
+        <button class="btn btn-sm btn-primary" (click)="exportLogs()">导出</button>
       </div>
     </div>
 
@@ -40,7 +40,12 @@ import { StateService, LogItem } from '../services/state.service';
         </div>
         <div class="toolbar">
           <input class="input search" placeholder="搜索日志内容..." [(ngModel)]="searchText" />
-          <select class="input"><option>所有服务</option><option>backend</option><option>agent</option><option>graph</option></select>
+          <select class="input" [value]="serviceFilter()" (change)="serviceFilter.set($any($event).target.value)">
+            <option value="">所有服务</option>
+            <option value="backend">backend</option>
+            <option value="agent">agent</option>
+            <option value="graph">graph</option>
+          </select>
         </div>
       </div>
 
@@ -104,16 +109,47 @@ export class LogsPage {
   readonly state = inject(StateService);
   levelFilter = signal<string>('all');
   searchText = '';
+  serviceFilter = signal('');
   autoScroll = signal(true);
+  @ViewChild('logContainer') logContainer?: ElementRef<HTMLDivElement>;
+
+  constructor() {
+    effect(() => {
+      this.filteredLogs();
+      if (this.autoScroll()) {
+        queueMicrotask(() => this.scrollToBottom());
+      }
+    });
+  }
 
   filteredLogs() {
     let list = this.state.derivedLogs();
     if (this.levelFilter() !== 'all') {
       list = list.filter(l => l.level === this.levelFilter());
     }
+    if (this.serviceFilter()) {
+      list = list.filter(l => l.service === this.serviceFilter());
+    }
     if (this.searchText) {
       list = list.filter(l => l.message.toLowerCase().includes(this.searchText.toLowerCase()));
     }
     return list;
+  }
+
+  exportLogs(): void {
+    const data = JSON.stringify(this.filteredLogs(), null, 2);
+    const blob = new Blob([data], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `logs-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private scrollToBottom(): void {
+    const element = this.logContainer?.nativeElement;
+    if (!element || !this.autoScroll()) return;
+    element.scrollTop = element.scrollHeight;
   }
 }

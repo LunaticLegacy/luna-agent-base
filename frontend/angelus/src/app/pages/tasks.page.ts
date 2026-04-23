@@ -15,7 +15,7 @@ import { StateService, TaskItem } from '../services/state.service';
           <p class="subtitle">管理、监控与调度所有 Agent 任务</p>
         </div>
         <div class="header-actions">
-          <button class="btn btn-primary" (click)="createTask()">+ 创建任务</button>
+          <button class="btn btn-primary" (click)="refreshTasks()">刷新任务</button>
         </div>
       </div>
 
@@ -116,14 +116,13 @@ import { StateService, TaskItem } from '../services/state.service';
                   </td>
                   <td>{{ task.executor }}</td>
                   <td>{{ task.duration }}</td>
-                  <td>{{ task.createdAt }}</td>
-                  <td>
-                    <div class="row-actions">
-                      <button class="icon-btn" title="查看" (click)="selectTask(task); $event.stopPropagation()">👁</button>
-                      <button class="icon-btn" title="重试" (click)="retryTask(task); $event.stopPropagation()">↻</button>
-                    </div>
-                  </td>
-                </tr>
+                    <td>{{ task.createdAt }}</td>
+                    <td>
+                      <div class="row-actions">
+                        <button class="icon-btn" title="查看" (click)="selectTask(task); $event.stopPropagation()">👁</button>
+                      </div>
+                    </td>
+                  </tr>
               } @empty {
                 <tr>
                   <td colspan="7" class="empty-cell">暂无匹配任务</td>
@@ -634,12 +633,8 @@ export class TasksPageComponent {
     this.selectedTask.set(null);
   }
 
-  createTask(): void {
-    alert('创建任务功能待实现');
-  }
-
-  retryTask(task: TaskItem): void {
-    console.log('Retry', task.id);
+  async refreshTasks(): Promise<void> {
+    await this.state.loadTasks();
   }
 
   statusLabel(status: TaskItem['status']): string {

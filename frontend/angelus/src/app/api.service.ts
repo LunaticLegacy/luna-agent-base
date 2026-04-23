@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
 import type {
   AgentListResponse,
   AgentRoundRequest,
@@ -84,6 +85,18 @@ export class ApiService {
 
   listSwarms(baseUrl = '/api'): Promise<SwarmListResponse> {
     return firstValueFrom(this.http.get<SwarmListResponse>(joinUrl(baseUrl, '/swarms')));
+  }
+
+  loadSwarm(
+    baseUrl: string,
+    request: { package_path?: string; source?: string; swarm_name?: string; replace?: boolean }
+  ): Promise<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }>(
+        joinUrl(baseUrl, '/swarms/load'),
+        request
+      )
+    );
   }
 
   getSwarm(baseUrl: string, swarmName: string): Promise<SwarmDetailResponse> {
@@ -224,6 +237,33 @@ export class ApiService {
     );
   }
 
+  reloadSwarm(
+    baseUrl: string,
+    swarmName: string,
+    request: { force?: boolean; package_path?: string; source?: string } = {}
+  ): Promise<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/reload`),
+        request
+      )
+    );
+  }
+
+  unloadSwarm(
+    baseUrl: string,
+    swarmName: string,
+    force = false
+  ): Promise<{ success: boolean; action: string; swarm: { swarm_name: string; package_path: string } }> {
+    const query = force ? { force: true } : {};
+    return firstValueFrom(
+      this.http.delete<{ success: boolean; action: string; swarm: { swarm_name: string; package_path: string } }>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}`),
+        { params: query as Record<string, string | number | boolean> }
+      )
+    );
+  }
+
   runSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunSwarmResponse> {
     return firstValueFrom(
       this.http.post<RunSwarmResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/run`), request)
@@ -231,9 +271,15 @@ export class ApiService {
   }
 
   startSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunSwarmResponse> {
-    return firstValueFrom(
-      this.http.post<RunSwarmResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/start`), request)
-    );
+    const encoded = encodeURIComponent(swarmName);
+    const preferred = joinUrl(baseUrl, `/swarms/${encoded}/start`);
+    const fallback = joinUrl(baseUrl, `/swarms/${encoded}/run`);
+    return firstValueFrom(this.http.post<RunSwarmResponse>(preferred, request)).catch((error: unknown) => {
+      if (error instanceof HttpErrorResponse && error.status === 405) {
+        return firstValueFrom(this.http.post<RunSwarmResponse>(fallback, request));
+      }
+      throw error;
+    });
   }
 
   startRun(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStartResponse> {

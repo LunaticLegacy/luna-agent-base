@@ -15,7 +15,7 @@ import { StateService, EventItem } from '../services/state.service';
       </div>
       <div class="header-actions">
         <button class="btn btn-sm" (click)="clearFilters()">清除筛选</button>
-        <button class="btn btn-sm btn-primary">导出日志</button>
+        <button class="btn btn-sm btn-primary" (click)="exportEvents()">导出</button>
       </div>
     </div>
 
@@ -38,8 +38,18 @@ import { StateService, EventItem } from '../services/state.service';
         </div>
         <div class="toolbar">
           <input class="input search" placeholder="搜索事件..." [(ngModel)]="searchText" />
-          <select class="input"><option>所有来源</option><option>系统</option><option>Swarm</option><option>Agent</option></select>
-          <select class="input"><option>最近1小时</option><option>今天</option><option>最近7天</option></select>
+          <select class="input" [value]="sourceFilter()" (change)="sourceFilter.set($any($event).target.value)">
+            <option value="">所有来源</option>
+            <option value="System">系统</option>
+            <option value="Swarm">Swarm</option>
+            <option value="Agent">Agent</option>
+          </select>
+          <select class="input" [value]="timeFilter()" (change)="timeFilter.set($any($event).target.value)">
+            <option value="">全部时间</option>
+            <option value="hour">最近1小时</option>
+            <option value="day">今天</option>
+            <option value="week">最近7天</option>
+          </select>
         </div>
       </div>
 
@@ -149,12 +159,29 @@ export class EventsPage {
   readonly state = inject(StateService);
   tab = signal<string>('all');
   searchText = '';
+  sourceFilter = signal('');
+  timeFilter = signal('');
   expandedEvent = signal<EventItem | null>(null);
 
   filteredEvents() {
     let list = this.state.derivedEvents();
     if (this.tab() !== 'all') {
       list = list.filter(e => e.level === this.tab());
+    }
+    if (this.sourceFilter()) {
+      list = list.filter(e => e.source === this.sourceFilter());
+    }
+    if (this.timeFilter()) {
+      const now = Date.now();
+      const windowMs = this.timeFilter() === 'hour'
+        ? 60 * 60 * 1000
+        : this.timeFilter() === 'day'
+          ? 24 * 60 * 60 * 1000
+          : 7 * 24 * 60 * 60 * 1000;
+      list = list.filter((event) => {
+        const parsed = Date.parse(event.time);
+        return Number.isFinite(parsed) && now - parsed <= windowMs;
+      });
     }
     if (this.searchText) {
       list = list.filter(e => e.event.includes(this.searchText) || e.detail.includes(this.searchText));
@@ -173,7 +200,20 @@ export class EventsPage {
   clearFilters() {
     this.tab.set('all');
     this.searchText = '';
+    this.sourceFilter.set('');
+    this.timeFilter.set('');
+    this.expandedEvent.set(null);
+  }
+
+  exportEvents(): void {
+    const data = JSON.stringify(this.filteredEvents(), null, 2);
+    const blob = new Blob([data], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `events-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 }
-
 

@@ -145,7 +145,7 @@ import { StateService, AgentRow } from '../services/state.service';
                     <td>{{ agent.tokenUsage }}</td>
                     <td class="time-cell">{{ agent.lastActivity }}</td>
                     <td>
-                      <button class="btn btn-sm" (click)="$event.stopPropagation(); onAction(agent, 'run')">运行</button>
+                      <button class="btn btn-sm" (click)="$event.stopPropagation(); onAction(agent, 'run')">调试</button>
                     </td>
                   </tr>
                 } @empty {
@@ -634,7 +634,9 @@ export class AgentsPageComponent {
     this.selectedAgent.set(agent);
   }
 
-  onAction(agent: AgentRow, action: string): void {
-    console.log('Action', action, 'on', agent.id);
+  async onAction(agent: AgentRow, action: string): Promise<void> {
+    if (action !== 'run') return;
+    this.state.setSelectedAgentId(agent.id);
+    await this.state.runAgentRound();
   }
 }
