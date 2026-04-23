@@ -244,10 +244,10 @@ angelus/
 ## 📚 文档入口
 
 - [文档索引](docs/index.md)
-- [英文总览](docs/README.en.md)
+- [英文总览](docs/en/README.md)
 - [API 结构](docs/api_structure.md)
-- [后端参考](docs/backend_reference.md)
-- [前端参考](docs/frontend_reference.md)
+- [后端文档](docs/backend/README.md)
+- [前端文档](docs/frontend/README.md)
 - [metadata 约定](docs/metadata_reference.md)
 - [agent 目录结构](docs/agent_structure.md)
 

@@ -1,12 +1,11 @@
 import { Component, ElementRef, ViewChild, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { StateService, LogItem } from '../services/state.service';
 
 @Component({
   selector: 'app-logs-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule],
   template: `
     <div class="page-header">
       <div>
@@ -32,19 +31,26 @@ import { StateService, LogItem } from '../services/state.service';
     <div class="card">
       <div class="card-header">
         <div class="level-filters">
-          <button class="level-btn" [class.active]="levelFilter()==='all'" (click)="levelFilter.set('all')">全部</button>
-          <button class="level-btn error" [class.active]="levelFilter()==='ERROR'" (click)="levelFilter.set('ERROR')">ERROR</button>
-          <button class="level-btn warn" [class.active]="levelFilter()==='WARN'" (click)="levelFilter.set('WARN')">WARN</button>
-          <button class="level-btn info" [class.active]="levelFilter()==='INFO'" (click)="levelFilter.set('INFO')">INFO</button>
-          <button class="level-btn debug" [class.active]="levelFilter()==='DEBUG'" (click)="levelFilter.set('DEBUG')">DEBUG</button>
+          <button class="level-btn" [class.active]="levelFilter()==='all'" (click)="onLevelFilterChange('all')">全部</button>
+          <button class="level-btn error" [class.active]="levelFilter()==='ERROR'" (click)="onLevelFilterChange('ERROR')">ERROR</button>
+          <button class="level-btn warn" [class.active]="levelFilter()==='WARN'" (click)="onLevelFilterChange('WARN')">WARN</button>
+          <button class="level-btn info" [class.active]="levelFilter()==='INFO'" (click)="onLevelFilterChange('INFO')">INFO</button>
+          <button class="level-btn debug" [class.active]="levelFilter()==='DEBUG'" (click)="onLevelFilterChange('DEBUG')">DEBUG</button>
         </div>
         <div class="toolbar">
-          <input class="input search" placeholder="搜索日志内容..." [(ngModel)]="searchText" />
-          <select class="input" [value]="serviceFilter()" (change)="serviceFilter.set($any($event).target.value)">
+          <input class="input search" placeholder="搜索日志内容..." [value]="searchText()" (input)="onSearchChange($any($event).target.value)" />
+          <select class="input" [value]="serviceFilter()" (change)="onServiceFilterChange($any($event).target.value)">
             <option value="">所有服务</option>
             <option value="backend">backend</option>
             <option value="agent">agent</option>
             <option value="graph">graph</option>
+          </select>
+          <select class="input" [value]="pageSize()" (change)="pageSize.set(+$any($event).target.value); goToPage(1)">
+            <option [value]="20">20 / 页</option>
+            <option [value]="50">50 / 页</option>
+            <option [value]="100">100 / 页</option>
+            <option [value]="200">200 / 页</option>
+            <option [value]="500">500 / 页</option>
           </select>
         </div>
       </div>
@@ -60,6 +66,21 @@ import { StateService, LogItem } from '../services/state.service';
         } @empty {
           <div class="empty">暂无日志记录</div>
         }
+      </div>
+
+      <div class="pagination-bar">
+        <div class="pagination-summary">
+          <span>共 {{ totalLogs() }} 条</span>
+          <span>第 {{ currentPage() }} / {{ totalPages() }} 页</span>
+          <span>{{ pageItemRange() }}</span>
+        </div>
+        <div class="pagination-controls">
+          <button class="btn btn-sm" (click)="goToPage(currentPage() - 1)" [disabled]="loading() || currentPage() <= 1">上一页</button>
+          <button class="btn btn-sm" (click)="goToPage(currentPage() + 1)" [disabled]="loading() || currentPage() >= totalPages()">下一页</button>
+          <button class="btn btn-sm" (click)="reloadLogs(currentPage())" [disabled]="loading()">
+            {{ loading() ? '加载中...' : '刷新当前页' }}
+          </button>
+        </div>
       </div>
     </div>
   `,
@@ -103,37 +124,82 @@ import { StateService, LogItem } from '../services/state.service';
     .log-service { color:#A78BFA; }
     .log-msg { color:#E2E8F0; }
     .empty { text-align:center; padding:3rem; color:#64748B; }
+    .pagination-bar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:1rem;
+      padding:1rem 1.25rem 1.1rem;
+      border-top:1px solid rgba(148,163,184,.08);
+      flex-wrap:wrap;
+    }
+    .pagination-summary {
+      display:flex;
+      align-items:center;
+      gap:.9rem;
+      flex-wrap:wrap;
+      color:#94A3B8;
+      font-size:.8rem;
+    }
+    .pagination-controls {
+      display:flex;
+      align-items:center;
+      gap:.5rem;
+      flex-wrap:wrap;
+    }
   `]
 })
 export class LogsPage {
   readonly state = inject(StateService);
   levelFilter = signal<string>('all');
-  searchText = '';
+  searchText = signal('');
   serviceFilter = signal('');
+  pageSize = signal(100);
+  currentPage = signal(1);
+  totalLogs = signal(0);
+  loading = signal(false);
   autoScroll = signal(true);
   @ViewChild('logContainer') logContainer?: ElementRef<HTMLDivElement>;
 
   constructor() {
+    void this.reloadLogs(1);
     effect(() => {
-      this.filteredLogs();
+      this.state.logs();
       if (this.autoScroll()) {
         queueMicrotask(() => this.scrollToBottom());
       }
     });
   }
 
+  async reloadLogs(page = this.currentPage()): Promise<void> {
+    this.loading.set(true);
+    const nextPage = Math.max(1, page);
+    this.currentPage.set(nextPage);
+    try {
+      await this.state.loadLogs(this.buildQuery(nextPage));
+      this.totalLogs.set(this.state.logStats().total);
+      if (this.currentPage() > this.totalPages()) {
+        this.currentPage.set(this.totalPages());
+      }
+      if (this.autoScroll()) {
+        queueMicrotask(() => this.scrollToBottom());
+      }
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  async goToPage(page: number): Promise<void> {
+    const totalPages = this.totalPages();
+    const nextPage = Math.max(1, Math.min(page, totalPages));
+    if (nextPage === this.currentPage() && this.totalLogs() > 0) {
+      return;
+    }
+    await this.reloadLogs(nextPage);
+  }
+
   filteredLogs() {
-    let list = this.state.derivedLogs();
-    if (this.levelFilter() !== 'all') {
-      list = list.filter(l => l.level === this.levelFilter());
-    }
-    if (this.serviceFilter()) {
-      list = list.filter(l => l.service === this.serviceFilter());
-    }
-    if (this.searchText) {
-      list = list.filter(l => l.message.toLowerCase().includes(this.searchText.toLowerCase()));
-    }
-    return list;
+    return this.state.derivedLogs();
   }
 
   exportLogs(): void {
@@ -145,6 +211,46 @@ export class LogsPage {
     anchor.download = `logs-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  onLevelFilterChange(value: string): void {
+    this.levelFilter.set(value);
+    void this.reloadLogs(1);
+  }
+
+  onSearchChange(value: string): void {
+    this.searchText.set(value);
+    void this.reloadLogs(1);
+  }
+
+  onServiceFilterChange(value: string): void {
+    this.serviceFilter.set(value);
+    void this.reloadLogs(1);
+  }
+
+  totalPages(): number {
+    const total = this.state.logStats().total || this.totalLogs();
+    return Math.max(1, Math.ceil(total / Math.max(1, this.pageSize())));
+  }
+
+  pageItemRange(): string {
+    const total = this.state.logStats().total || this.totalLogs();
+    if (total === 0) {
+      return '暂无记录';
+    }
+    const start = (this.currentPage() - 1) * this.pageSize() + 1;
+    const end = Math.min(total, this.currentPage() * this.pageSize());
+    return `显示 ${start}-${end}`;
+  }
+
+  private buildQuery(page: number): Record<string, string | number | undefined> {
+    return {
+      page,
+      limit: this.pageSize(),
+      level: this.levelFilter() === 'all' ? undefined : this.levelFilter().toLowerCase(),
+      service: this.serviceFilter() || undefined,
+      q: this.searchText().trim() || undefined,
+    };
   }
 
   private scrollToBottom(): void {

@@ -96,13 +96,30 @@ import { MiniChartComponent } from '../components/mini-chart.component';
                 <h3>{{ state.selectedSwarmName() || '未选择 Swarm' }}</h3>
                 <div class="swarm-meta">{{ state.swarmOverview() || '选择一个 Swarm 查看详情' }}</div>
               </div>
-              <div class="run-buttons">
+              <div class="run-actions">
                 <button class="btn btn-secondary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
                   启动结构
                 </button>
-                <button class="btn btn-primary" (click)="state.startSwarmBackground()" [disabled]="state.loading() || !state.selectedSwarm()">
-                  后台启动
-                </button>
+                <details #detailRunMenu class="run-menu">
+                  <summary
+                    class="btn btn-primary run-menu-toggle"
+                    [class.disabled]="state.loading() || !state.selectedSwarm()"
+                    [attr.aria-disabled]="state.loading() || !state.selectedSwarm()"
+                    title="更多启动方式"
+                  >
+                    更多
+                  </summary>
+                  <div class="run-menu-panel">
+                    <button
+                      type="button"
+                      class="run-menu-item"
+                      (click)="state.startSwarmBackground(); detailRunMenu.open = false"
+                      [disabled]="state.loading() || !state.selectedSwarm()"
+                    >
+                      后台启动
+                    </button>
+                  </div>
+                </details>
               </div>
             </div>
 
@@ -204,9 +221,26 @@ import { MiniChartComponent } from '../components/mini-chart.component';
               <button class="btn btn-primary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
                 启动结构
               </button>
-              <button class="btn btn-secondary" (click)="state.startSwarmBackground()" [disabled]="state.loading() || !state.selectedSwarm()">
-                后台启动
-              </button>
+              <details #consoleRunMenu class="run-menu">
+                <summary
+                  class="btn btn-secondary run-menu-toggle"
+                  [class.disabled]="state.loading() || !state.selectedSwarm()"
+                  [attr.aria-disabled]="state.loading() || !state.selectedSwarm()"
+                  title="更多启动方式"
+                >
+                  更多
+                </summary>
+                <div class="run-menu-panel">
+                  <button
+                    type="button"
+                    class="run-menu-item"
+                    (click)="state.startSwarmBackground(); consoleRunMenu.open = false"
+                    [disabled]="state.loading() || !state.selectedSwarm()"
+                  >
+                    后台启动
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
 
@@ -514,9 +548,58 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       color: #64748b;
       margin-top: 4px;
     }
-    .run-buttons {
+    .run-actions {
       display: flex;
       gap: 8px;
+    }
+    .run-menu {
+      position: relative;
+    }
+    .run-menu > summary {
+      list-style: none;
+    }
+    .run-menu > summary::-webkit-details-marker {
+      display: none;
+    }
+    .run-menu-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 72px;
+    }
+    .run-menu-toggle.disabled {
+      pointer-events: none;
+      opacity: 0.5;
+    }
+    .run-menu-panel {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      min-width: 132px;
+      padding: 6px;
+      background: #0f1525;
+      border: 1px solid rgba(148,163,184,0.12);
+      border-radius: 10px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.28);
+      z-index: 20;
+    }
+    .run-menu-item {
+      width: 100%;
+      border: none;
+      background: transparent;
+      color: #e2e8f0;
+      font-size: 13px;
+      text-align: left;
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .run-menu-item:hover:not(:disabled) {
+      background: rgba(148,163,184,0.1);
+    }
+    .run-menu-item:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
     .topology-section {
       padding: 16px 20px;

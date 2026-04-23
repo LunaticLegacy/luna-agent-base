@@ -9,6 +9,8 @@ import type {
   HealthResponse,
   KnowledgeCatalogItem,
   LogCatalogItem,
+  LogCatalogStats,
+  LogListResponse,
   MemoryCatalogItem,
   TaskCatalogItem,
   MetricsResponse,
@@ -292,6 +294,7 @@ export class StateService {
   readonly eventsLoaded = signal(false);
   readonly logs = signal<LogItem[]>([]);
   readonly logsLoaded = signal(false);
+  readonly logsResponse = signal<LogListResponse | null>(null);
   readonly metrics = signal<MetricsResponse | null>(null);
   readonly metricsLoaded = signal(false);
   readonly metricsWindow = signal('1h');
@@ -507,13 +510,15 @@ export class StateService {
   });
 
   readonly logStats = computed(() => {
+    const response = this.logsResponse();
     const logs = this.derivedLogs();
+    const stats: LogCatalogStats | null = response?.stats ?? null;
     return {
-      total: logs.length,
-      error: logs.filter(l => l.level === 'ERROR').length,
-      warn: logs.filter(l => l.level === 'WARN').length,
-      info: logs.filter(l => l.level === 'INFO').length,
-      debug: logs.filter(l => l.level === 'DEBUG').length,
+      total: response?.total ?? logs.length,
+      error: stats?.error ?? logs.filter(l => l.level === 'ERROR').length,
+      warn: stats?.warn ?? logs.filter(l => l.level === 'WARN').length,
+      info: stats?.info ?? logs.filter(l => l.level === 'INFO').length,
+      debug: stats?.debug ?? logs.filter(l => l.level === 'DEBUG').length,
     };
   });
 
@@ -1249,13 +1254,18 @@ export class StateService {
     }
   }
 
-  async loadLogs(): Promise<void> {
+  async loadLogs(
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<void> {
     try {
-      const response = await this.apiService.listLogs(this.baseUrl(), { page: 1, limit: 200 });
+      const response = await this.apiService.listLogs(this.baseUrl(), query);
       this.logs.set(response.items.map((item) => this.mapLogCatalogItem(item)));
+      this.logsResponse.set(response);
       this.logsLoaded.set(true);
       this.pushFeed('日志列表', 'GET', `${this.baseUrl()}/logs`, 'info', response);
     } catch (error) {
+      this.logsResponse.set(null);
+      this.logsLoaded.set(false);
       this.error.set(formatErrorDetail(error));
       this.pushFeed('日志列表失败', 'GET', `${this.baseUrl()}/logs`, 'error', { error: errorSummary(error) });
     }
@@ -1610,13 +1620,16 @@ export class StateService {
     const canonicalPath = kind === 'status'
       ? `/swarms/runs/${encodeURIComponent(run.run_id)}`
       : `/swarms/runs/${encodeURIComponent(run.run_id)}/events`;
-    const normalizedBase = this.baseUrl().replace(/\/$/, '');
     const trimmedUrl = rawUrl?.trim();
 
     if (trimmedUrl && !legacyPattern.test(trimmedUrl)) {
       if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
         return trimmedUrl;
       }
+      if (trimmedUrl.startsWith('/api/')) {
+        return trimmedUrl;
+      }
+      const normalizedBase = this.baseUrl().replace(/\/$/, '');
       return `${normalizedBase}${trimmedUrl.startsWith('/') ? trimmedUrl : `/${trimmedUrl}`}`;
     }
 

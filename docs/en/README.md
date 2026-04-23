@@ -11,9 +11,9 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-async-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com)
 [![Angular](https://img.shields.io/badge/Angular-frontend-DD0031?logo=angular&logoColor=white)](https://angular.dev)
-[![Runtime](https://img.shields.io/badge/Runtime-swarm%20orchestration-4B5563)](./index.md)
+[![Runtime](https://img.shields.io/badge/Runtime-swarm%20orchestration-4B5563)](#docs-index)
 
-[📖 Docs Index](./index.md) · [🧭 API Structure](./api_structure.md) · [🧠 Metadata Reference](./metadata_reference.md) · [📦 Agent Layout](./agent_structure.md)
+[📖 Docs Index](#docs-index) · [🧭 API Structure](./api_structure.md) · [🧠 Metadata Reference](./metadata_reference.md) · [📦 Agent Layout](./agent_structure.md)
 
 <br />
 
@@ -70,6 +70,42 @@ The backend runs at `http://127.0.0.1:5000` and all APIs are mounted under `/api
 ### Open the console
 
 Start the Angular frontend under `frontend/angelus/` and point its API base URL at `/api`.
+
+## Docs Index
+
+This page is the consolidated English documentation entry point for Angelus.
+
+## Overview
+
+- [API Structure](./api_structure.md)
+  - High-level description of the Flask API, routes, error handling, and runtime binding
+- [Metadata Reference](./metadata_reference.md)
+  - Metadata conventions for graph nodes, runtime state, agents, tools, and skills
+
+## Backend
+
+- [Backend Docs](../backend/README.md)
+  - Current implementation notes for backend entrypoints, runtime, runs, catalog/content, and errors
+
+## Frontend
+
+- [Frontend Docs](../frontend/README.md)
+  - Current implementation notes for each frontend board, split by page
+
+## Structure
+
+- [Agent Structure](./agent_structure.md)
+  - Directory layout and swarm package conventions
+- [Dynamic Graph Editing Protocol](./dynamic_graph_protocol.md)
+  - Dynamic graph mutation mechanism, known issues, and fix priorities
+
+## Suggested Reading Order
+
+- If you want to see the API shape first, start with `api_structure.md`
+- If you want to understand backend execution, start with `../backend/README.md`
+- If you want to understand frontend consumption, start with `../frontend/README.md`
+- If you want to understand graph metadata, start with `metadata_reference.md`
+- If you want to understand swarm packaging, start with `agent_structure.md`
 
 ## Core Features
 
@@ -222,10 +258,10 @@ This task exercises:
 
 ## Documentation
 
-- [Docs Index](./index.md)
+- [Docs Index](#docs-index)
 - [API Structure](./api_structure.md)
-- [Backend Reference](./backend_reference.md)
-- [Frontend Reference](./frontend_reference.md)
+- [Backend Docs](../backend/README.md)
+- [Frontend Docs](../frontend/README.md)
 
 ## License
 
@@ -233,4 +269,3 @@ Angelus Lunae is released under the Apache 2.0 license.
 
 - [LICENSE](../LICENSE)
 - [LICENSE.zh-CN.md](../LICENSE.zh-CN.md)
-
