@@ -23,8 +23,8 @@ tool_files = [
 ]
 
 [llm.default]
-name = "deepseek"
-provider = "openai"
-api_url = "https://api.deepseek.com"
-api_key = "sk-076ea11fbb2741948a9b60b6ca7efca2"
-model = "deepseek-reasoner"
+name = "kimi"
+provider = "litellm"
+api_url = "https://api.moonshot.ai/v1"
+api_key = "${MOONSHOT_API_KEY}"
+model = "moonshot/kimi-k2.5"

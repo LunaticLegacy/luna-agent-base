@@ -5,6 +5,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Optional
 import importlib.util
+import os
+import re
 import tomllib
 
 from modules.llm_fetcher import LLMBackendConfig
@@ -16,10 +18,21 @@ class SwarmLoaderError(ValueError):
 
 
 @dataclass
+class ApiConfig:
+    """Mutable API/runtime settings persisted in config.toml."""
+
+    base_url: str = "/api"
+    timeout_seconds: int = 30
+    sse_reconnect_interval_seconds: int = 5
+    auto_reconnect: bool = True
+
+
+@dataclass
 class SwarmAppConfig:
     """Root application config for discovering swarm packages."""
 
     swarm_root: Path = Path("agents")
+    api: ApiConfig = field(default_factory=ApiConfig)
 
 
 @dataclass
@@ -66,8 +79,51 @@ def load_root_config(path: Path) -> SwarmAppConfig:
     if not isinstance(app_section, dict):
         raise SwarmLoaderError("[app] must be a TOML table.")
 
+    api_section = raw.get("api", {})
+    if not isinstance(api_section, dict):
+        raise SwarmLoaderError("[api] must be a TOML table.")
+
     swarm_root = str(app_section.get("swarm_root", "agents")).strip() or "agents"
-    return SwarmAppConfig(swarm_root=Path(swarm_root))
+    base_url = str(api_section.get("base_url", "/api")).strip() or "/api"
+    timeout_seconds = _coerce_positive_int(api_section.get("timeout_seconds", 30), fallback=30)
+    sse_reconnect_interval_seconds = _coerce_positive_int(
+        api_section.get("sse_reconnect_interval_seconds", 5),
+        fallback=5,
+    )
+    auto_reconnect = _coerce_bool(api_section.get("auto_reconnect", True), fallback=True)
+
+    return SwarmAppConfig(
+        swarm_root=Path(swarm_root),
+        api=ApiConfig(
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            sse_reconnect_interval_seconds=sse_reconnect_interval_seconds,
+            auto_reconnect=auto_reconnect,
+        ),
+    )
+
+
+def _coerce_positive_int(raw: Any, *, fallback: int) -> int:
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _coerce_bool(raw: Any, *, fallback: bool) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if raw is None:
+        return fallback
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    return fallback
 
 
 def discover_swarm_packages(root: Path) -> List[Path]:
@@ -226,6 +282,18 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
     )
 
 
+def _resolve_env_vars(value: str) -> str:
+    """Replace ${VAR_NAME} or $VAR_NAME with environment variable values."""
+    pattern = re.compile(r"\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+    def replacer(match: re.Match[str]) -> str:
+        var_name = match.group(1) or match.group(2)
+        env_value = os.getenv(var_name, "")
+        return env_value
+
+    return pattern.sub(replacer, value)
+
+
 def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendConfig]:
     if raw is None:
         return None
@@ -237,8 +305,10 @@ def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendCo
     backend_name = str(raw.get("name", fallback_name)).strip() or fallback_name
     provider = str(raw.get("provider", "openai")).strip() or "openai"
     model = str(raw.get("model", "")).strip()
-    api_key = str(raw.get("api_key", "")).strip()
+    api_key = _resolve_env_vars(str(raw.get("api_key", "")).strip())
     api_url = raw.get("api_url")
+    if api_url is not None:
+        api_url = _resolve_env_vars(str(api_url).strip()) or None
     timeout = float(raw.get("timeout", 60.0))
     max_retries = int(raw.get("max_retries", 0))
     extra = raw.get("extra", {})
@@ -257,7 +327,7 @@ def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendCo
         provider=provider,
         model=model,
         api_key=api_key,
-        api_url=str(api_url) if api_url is not None else None,
+        api_url=api_url,
         timeout=timeout,
         max_retries=max_retries,
         extra=dict(extra),

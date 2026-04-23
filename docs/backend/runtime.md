@@ -55,6 +55,37 @@
 
 如果这些条件不满足，就会抛 `SwarmLoaderError`，导致该 package 不能被加载。
 
+### LLM 配置与环境变量
+
+`[llm.default]` 和 `[[llm.backends]]` 支持以下字段：
+
+```toml
+[llm.default]
+name = "kimi"
+provider = "litellm"        # 可选: openai | litellm
+api_url = "https://api.moonshot.ai/v1"
+api_key = "${MOONSHOT_API_KEY}"  # 支持 ${VAR} 和 $VAR 环境变量替换
+model = "moonshot/kimi-k2.5"
+timeout = 120.0
+max_retries = 1
+```
+
+**Provider 说明：**
+
+- `openai`：使用 `openai` 库直接调用，适用于 OpenAI 兼容接口（如 DeepSeek）
+- `litellm`：通过 `litellm.completion()` 调用，支持 100+ 提供商（Moonshot、Anthropic、Gemini 等）
+
+**环境变量替换：**
+
+`api_key` 和 `api_url` 支持 `${VAR_NAME}` 或 `$VAR_NAME` 语法，在加载时自动替换为对应的环境变量值。如果环境变量不存在，替换为空字符串。`api_key` 替换后仍不能为空，否则加载会失败。
+
+这意味着敏感信息（如 API key）可以不硬编码在 TOML 中，而是通过环境变量注入：
+
+```bash
+export MOONSHOT_API_KEY="sk-..."
+python app.py
+```
+
 ### 全量加载时的额外动作
 
 `load_all_swarms()` 在真正构建每个 swarm 之前，会先收集所有工具模块旁边的 `tool_requirements.txt`，然后统一执行：
@@ -211,31 +242,41 @@
 
 ## 配置范围说明
 
-当前后端配置表面非常精简。根配置 `config.toml` 只包含一个显式字段：
+当前后端配置仍然比较精简，但已经分成两个表：
 
 ```toml
 [app]
 swarm_root = "agents"
+
+[api]
+base_url = "/api"
+timeout_seconds = 30
+sse_reconnect_interval_seconds = 5
+auto_reconnect = true
 ```
 
-### 前端设置与后端的关系
+### `app` 与 `api` 的分工
 
-前端 Settings 页面呈现的设置项（API 超时、SSE 重连间隔、深色模式等）**不会回写到后端配置**。它们以 `angelus_*` 为前缀保存在浏览器 `localStorage` 中，属于纯前端运行时偏好。
+- `[app]` 仍然只负责运行时发现 swarm 包
+- `[api]` 负责持久化 API 配置，并通过 `/api/settings` 对外读写
+- 前端的显示偏好（深色模式、紧凑布局、显示调试信息、语言）仍然保存在浏览器 `localStorage`
 
 这意味着：
 
-- 后端不负责消费这些前端设置
-- 服务重启后，前端设置不会丢失（因为存在浏览器本地）
-- 多设备/多浏览器之间不会自动同步
-- 如果需要后端级别的超时控制，需要单独扩展 `config.toml` schema 并在 `AgentConfig` 或执行层中读取
+- 后端现在会消费并持久化 API 配置
+- API 设置改动后会写回 `config.toml`
+- 前端显示偏好仍然是浏览器级别的本地设置
+- 多设备 / 多浏览器之间仍不会自动同步显示偏好
+- `api_base_url` 仍然先由前端本地值启动，再与后端 settings API 同步
 
 ### 扩展后端配置时的建议
 
 如果后续需要让后端也支持可配置的超时、重试策略或日志级别，建议：
 
-1. 在 `config.toml` 中新增对应表（例如 `[app.timeouts]`）
-2. 在 `core/config.py` 中扩展 `AgentConfig` 或新增配置 dataclass
-3. 在 `RuntimeRegistry.from_config_path()` 中读取并挂载到 registry
-4. 在 `web/app_factory.py` 中将配置对象注入 Flask app extensions，供路由层读取
+1. 继续把后端级设置放进 `[api]` 或新增独立表
+2. 在 `core/swarm_spec.py` 中扩展对应 dataclass
+3. 在 `web/routes/settings.py` 里同步读写接口
+4. 在 `web/app_factory.py` 中保持 settings blueprint 注册
+5. 必要时将读到的配置注入 `RuntimeRegistry` 或 `Flask.extensions`
 
 当前实现有意保持后端配置最小化，以降低部署复杂度。
