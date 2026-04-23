@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,8 @@ class Agent:
         core: Optional[Any] = None,
         max_tool_rounds: int = 5,
         cognitive_graph: Optional[CognitiveGraph] = None,
+        workspace_mode: str = "workspace",
+        workspace_root: Optional[Path] = None,
     ) -> None:
         self.agent_id = agent_id
         self.name = name or agent_id
@@ -49,6 +52,8 @@ class Agent:
         self.core = core
         self.max_tool_rounds = max_tool_rounds
         self.cognitive_graph = cognitive_graph or CognitiveGraph(graph_id=f"agent_{agent_id}")
+        self.workspace_mode = workspace_mode
+        self.workspace_root = Path(workspace_root).resolve() if workspace_root is not None else None
 
     def append_context(self, role: str, content: str) -> None:
         """Append one message into the agent-local context."""
@@ -141,6 +146,8 @@ class Agent:
             agent_id=self.agent_id,
             node_id=None,
             rounds=0,
+            workspace_mode=self.workspace_mode,
+            workspace_root=self.workspace_root,
             metadata={},
             core=self.core,
             graph=None,

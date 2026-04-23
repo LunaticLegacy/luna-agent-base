@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Iterable, List, Optional, Sequence
+from typing import Any, AsyncGenerator, Dict, Iterable, List, Optional, Sequence, TYPE_CHECKING
 
-from litellm import completion as litellm_completion
-from openai import OpenAI
-from openai.types.chat import ChatCompletion
+if TYPE_CHECKING:  # pragma: no cover - imported only for static analysis
+    from openai import OpenAI
+    from openai.types.chat import ChatCompletion
 
 
 @dataclass
@@ -78,7 +78,7 @@ class LLMFetcher:
         """
         self.backends: Dict[str, LLMBackendConfig] = {}
         self.backend_order: List[str] = []
-        self.openai_clients: Dict[str, OpenAI] = {}
+        self.openai_clients: Dict[str, Any] = {}
 
         if backends:
             for backend in backends:
@@ -118,6 +118,10 @@ class LLMFetcher:
         self.backends[backend.name] = backend
         self.backend_order.append(backend.name)
         if backend.provider == "openai":
+            try:
+                from openai import OpenAI
+            except ImportError as exc:  # pragma: no cover - depends on optional package
+                raise ValueError("openai provider requires the 'openai' package to be installed.") from exc
             self.openai_clients[backend.name] = OpenAI(
                 api_key=backend.api_key,
                 base_url=backend.api_url,
@@ -219,6 +223,12 @@ class LLMFetcher:
             return client.chat.completions.create(**kwargs)
 
         if backend.provider == "litellm":
+            try:
+                from litellm import completion as litellm_completion
+            except ImportError as exc:  # pragma: no cover - depends on optional package
+                raise ValueError(
+                    "litellm provider requires the 'litellm' package to be installed."
+                ) from exc
             kwargs: Dict[str, Any] = {
                 "model": backend.model,
                 "messages": messages,
@@ -336,7 +346,7 @@ class LLMFetcher:
         backend_name: Optional[str] = None,
         fallback_order: Optional[Sequence[str]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> ChatCompletion | Any:
+    ) -> Any:
         """执行一次非流式请求，并按顺序尝试后端回退。
 
         Args:

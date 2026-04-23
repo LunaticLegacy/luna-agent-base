@@ -179,6 +179,8 @@ def build_core_from_package(
             name=blueprint.name,
             llm_handler=llm_handler,
             tools=agent_tools if agent_tools else None,
+            workspace_mode=blueprint.workspace_mode,
+            workspace_root=Path(blueprint.workspace_root).resolve() if blueprint.workspace_root else None,
         )
         print(
             f"[angelus] loaded agent: swarm={manifest.swarm_name} agent={blueprint.agent_id}"

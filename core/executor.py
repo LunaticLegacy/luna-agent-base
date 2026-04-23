@@ -195,6 +195,8 @@ class GraphExecutor:
                     tool_context = ToolContext(
                         node_id=node.node_id,
                         rounds=state.rounds,
+                        workspace_mode=getattr(core, "workspace_mode", "workspace"),
+                        workspace_root=getattr(core, "workspace_root", None),
                         metadata=dict(state.metadata),
                         core=core,
                         graph=graph,

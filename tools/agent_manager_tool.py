@@ -47,6 +47,13 @@ class AgentManagerTool(ToolDefinition):
             name = self._pick_optional_value(control_source, runtime_metadata, "name", agent_id)
             skill_name = self._pick_optional_value(control_source, runtime_metadata, "skill_name")
             character_prompt = self._pick_optional_value(control_source, runtime_metadata, "character_prompt")
+            workspace_mode = str(
+                self._pick_optional_value(control_source, runtime_metadata, "workspace_mode", "workspace")
+            ).strip() or "workspace"
+            workspace_root_value = self._pick_optional_value(control_source, runtime_metadata, "workspace_root")
+            workspace_root = str(workspace_root_value).strip() if workspace_root_value is not None else None
+            if workspace_root == "":
+                workspace_root = None
             prompt_text = self._compose_prompt(
                 context,
                 skill_name=skill_name,
@@ -64,6 +71,8 @@ class AgentManagerTool(ToolDefinition):
                 agent_id=agent_id,
                 character_prompt=prompt_text,
                 name=str(name) if name is not None else None,
+                workspace_mode=workspace_mode,
+                workspace_root=workspace_root,
             )
 
             node_id = self._pick_optional_value(control_source, runtime_metadata, "node_id")
@@ -258,6 +267,8 @@ class AgentManagerTool(ToolDefinition):
             "skill_name": ["skill_name", "spawned_agent_skill"],
             "character_prompt": ["character_prompt", "spawned_agent_prompt"],
             "additional_prompt": ["additional_prompt"],
+            "workspace_mode": ["workspace_mode"],
+            "workspace_root": ["workspace_root"],
             "node_id": ["node_id", "spawned_agent_node_id", "cleanup_node_id"],
             "next_node_ids": ["next_node_ids", "spawned_agent_next_node_ids"],
             "replace_existing": ["replace_existing"],

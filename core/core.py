@@ -26,9 +26,12 @@ class Core:
         self,
         agent_name: str,
         agent_config: AgentConfig,
+        workspace_root: Optional[Path] = None,
     ) -> None:
         self.agent_name = agent_name
         self.agent_config = agent_config
+        self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
+        self.workspace_mode = "workspace"
         self.agents: Dict[str, AgentLike] = {}
         self.tools: Dict[str, ToolDefinition] = {}
         self.skills: Dict[str, SkillAsset] = {}
@@ -62,6 +65,8 @@ class Core:
         llm_handler: Optional[LLMFetcher] = None,
         tools: Optional[List[Any]] = None,
         cognitive_graph: Optional[CognitiveGraph] = None,
+        workspace_mode: str = "workspace",
+        workspace_root: Optional[Path] = None,
     ) -> Agent:
         """Create a new managed agent and register it immediately."""
         handler = llm_handler or LLMFetcher(
@@ -79,6 +84,8 @@ class Core:
             core=self,
             max_tool_rounds=5,
             cognitive_graph=cognitive_graph,
+            workspace_mode=workspace_mode,
+            workspace_root=workspace_root if workspace_root is not None else self.workspace_root,
         )
         self.add_agent(agent)
         return agent
