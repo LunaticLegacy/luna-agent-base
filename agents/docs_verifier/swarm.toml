@@ -1,0 +1,36 @@
+[swarm]
+name = "docs_verifier"
+graph_file = "graph.py"
+agent_files = [
+  "agents/orchestrator.py",
+  "agents/backend_verifier.py",
+  "agents/frontend_verifier.py",
+  "agents/structure_verifier.py",
+  "agents/reviewer.py",
+  "agents/publisher.py",
+]
+skill_files = [
+  "skills/orchestrator.prompt.md",
+  "skills/orchestrator.prompt.toml",
+  "skills/backend_verifier.prompt.md",
+  "skills/backend_verifier.prompt.toml",
+  "skills/frontend_verifier.prompt.md",
+  "skills/frontend_verifier.prompt.toml",
+  "skills/structure_verifier.prompt.md",
+  "skills/structure_verifier.prompt.toml",
+  "skills/reviewer.prompt.md",
+  "skills/reviewer.prompt.toml",
+  "skills/publisher.prompt.md",
+  "skills/publisher.prompt.toml",
+]
+tool_files = [
+  "tools.file_writer_tool",
+  "tools.echo_tool",
+]
+
+[llm.default]
+name = "deepseek"
+provider = "openai"
+api_url = "https://api.deepseek.com"
+api_key = "sk-076ea11fbb2741948a9b60b6ca7efca2"
+model = "deepseek-reasoner"

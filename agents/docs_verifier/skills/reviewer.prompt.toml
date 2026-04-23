@@ -1,0 +1,14 @@
+[skill]
+name = "reviewer_prompt"
+version = "1.0"
+capability = "verification_review"
+description = "Consolidate findings from all verifier branches and produce an overall assessment."
+content_file = "reviewer.prompt.md"
+input_schema = { type = "object", properties = { backend_findings = { type = "object" }, frontend_findings = { type = "object" }, structure_findings = { type = "object" } }, required = ["backend_findings", "frontend_findings", "structure_findings"] }
+output_schema = { type = "object", properties = { consolidated_findings = { type = "array" }, overall_assessment = { type = "object" }, remediation_priority = { type = "array" } }, required = ["consolidated_findings", "overall_assessment", "remediation_priority"] }
+requires_tools = []
+requires_skills = ["backend_verifier_prompt", "frontend_verifier_prompt", "structure_verifier_prompt"]
+preconditions = ["All three verifier branches have produced findings."]
+postconditions = ["A consolidated review with overall grade and remediation plan is produced."]
+failure_policy = "retry"
+parallelizable = false
