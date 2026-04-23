@@ -151,10 +151,11 @@ class DummyRunRegistry:
 
 
 class DummyRuntimeRegistry:
-    def __init__(self) -> None:
+    def __init__(self, config_path: Path) -> None:
         self.swarms = {"demo": DummySwarm()}
         self.runs = DummyRunRegistry()
         self.load_error = None
+        self.config_path = config_path
 
     def get_swarm(self, swarm_name: str):
         if swarm_name not in self.swarms:
@@ -164,9 +165,10 @@ class DummyRuntimeRegistry:
 
 class RouteSmokeTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.runtime = DummyRuntimeRegistry()
         self._tmpdir = tempfile.TemporaryDirectory()
         config_path = Path(self._tmpdir.name) / "config.toml"
+        config_path.write_text('[app]\nswarm_root = "agents"\n', encoding="utf-8")
+        self.runtime = DummyRuntimeRegistry(config_path)
         original_ensure_sync = Flask.ensure_sync
 
         def ensure_sync(self, func):
@@ -222,6 +224,38 @@ class RouteSmokeTest(unittest.TestCase):
         self.assertIn("event: run.snapshot", stream_text)
         self.assertIn(f"\"status_url\": \"/api/swarms/runs/{run_snapshot['run_id']}\"", stream_text)
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 2)
+
+    def test_settings_routes_round_trip_config_file(self) -> None:
+        response = self.client.get("/api/settings")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["settings"]["api"]["base_url"], "/api")
+        self.assertEqual(payload["settings"]["api"]["timeout_seconds"], 30)
+
+        update_response = self.client.put(
+            "/api/settings",
+            json={
+                "api": {
+                    "base_url": "/gateway",
+                    "timeout_seconds": 42,
+                    "sse_reconnect_interval_seconds": 9,
+                    "auto_reconnect": False,
+                }
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.get_json()
+        self.assertTrue(updated["success"])
+        self.assertEqual(updated["settings"]["api"]["base_url"], "/gateway")
+        self.assertEqual(updated["settings"]["api"]["timeout_seconds"], 42)
+
+        config_text = self.runtime.config_path.read_text(encoding="utf-8")
+        self.assertIn('[api]', config_text)
+        self.assertIn('base_url = "/gateway"', config_text)
+        self.assertIn('timeout_seconds = 42', config_text)
+        self.assertIn('sse_reconnect_interval_seconds = 9', config_text)
+        self.assertIn('auto_reconnect = false', config_text)
 
     def test_rejects_concurrent_run_for_same_swarm(self) -> None:
         active = RunRecord(run_id="run-active", swarm_name="demo", status="running")

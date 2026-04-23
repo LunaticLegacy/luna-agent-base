@@ -11,7 +11,7 @@ from web.routes.swarms import _serialize_swarm_with_runtime
 from web.runs import serialize_graph_snapshot
 
 from .errors import register_error_handlers
-from .routes import catalog_bp, content_bp, health_bp, swarms_bp
+from .routes import catalog_bp, content_bp, health_bp, settings_bp, swarms_bp
 
 
 def create_app(config_path: str | Path = "config.toml") -> Flask:
@@ -75,6 +75,7 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(catalog_bp, url_prefix="/api")
     app.register_blueprint(content_bp, url_prefix="/api")
+    app.register_blueprint(settings_bp, url_prefix="/api")
     # Keep swarm routes under /api/swarms so they match the documented public API.
     app.register_blueprint(swarms_bp, url_prefix="/api/swarms")
 

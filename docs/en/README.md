@@ -52,11 +52,20 @@ pip install -r requirements.txt
 
 ### Configure
 
-The root `config.toml` only tells the runtime where to discover swarm packages:
+The root `config.toml` now serves two purposes:
+
+- it tells the runtime where to discover swarm packages
+- it persists API settings and exposes them through `/api/settings`
 
 ```toml
 [app]
 swarm_root = "agents"
+
+[api]
+base_url = "/api"
+timeout_seconds = 30
+sse_reconnect_interval_seconds = 5
+auto_reconnect = true
 ```
 
 ### Start the backend

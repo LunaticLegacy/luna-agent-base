@@ -22,10 +22,12 @@ import type {
   RunStartResponse,
   RunSwarmRequest,
   RunSwarmResponse,
+  SettingsResponse,
   SwarmDetailResponse,
   SwarmListResponse,
   SwarmStatsResponse,
   ToolListResponse,
+  UpdateSettingsRequest,
 } from './api.types';
 
 export function joinUrl(baseUrl: string, path: string): string {
@@ -81,6 +83,14 @@ export class ApiService {
 
   ready(baseUrl = '/api'): Promise<ReadyResponse> {
     return firstValueFrom(this.http.get<ReadyResponse>(joinUrl(baseUrl, '/ready')));
+  }
+
+  getSettings(baseUrl = '/api'): Promise<SettingsResponse> {
+    return firstValueFrom(this.http.get<SettingsResponse>(joinUrl(baseUrl, '/settings')));
+  }
+
+  updateSettings(baseUrl = '/api', body: UpdateSettingsRequest): Promise<SettingsResponse> {
+    return firstValueFrom(this.http.put<SettingsResponse>(joinUrl(baseUrl, '/settings'), body));
   }
 
   listSwarms(baseUrl = '/api'): Promise<SwarmListResponse> {

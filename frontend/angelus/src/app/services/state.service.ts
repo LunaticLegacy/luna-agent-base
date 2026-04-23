@@ -4,6 +4,7 @@ import { ApiService, joinUrl } from '../api.service';
 import type {
   AgentCatalogItem,
   ApiIndexResponse,
+  ApiSettings,
   EventCatalogItem,
   EventListResponse,
   GraphSnapshot,
@@ -308,6 +309,9 @@ export class StateService {
   readonly memoriesLoaded = signal(false);
 
   /* ---------- Settings (localStorage-backed) ---------- */
+  readonly settingsLoading = signal<boolean>(false);
+  readonly settingsSaving = signal<boolean>(false);
+  readonly settingsError = signal<string | null>(null);
   readonly apiTimeout = signal<number>(30);
   readonly reconnectInterval = signal<number>(5);
   readonly autoReconnect = signal<boolean>(true);
@@ -1068,9 +1072,10 @@ export class StateService {
     this.showDebug.set(this._loadBool('showDebug', false));
     this.language.set(this._loadString('language', 'zh'));
     this.applyTheme();
+    void this.syncApiSettingsFromBackend();
   }
 
-  saveSettings(settings: {
+  private _persistLocalSettings(settings: {
     apiBaseUrl?: string;
     apiTimeout?: number;
     reconnectInterval?: number;
@@ -1114,10 +1119,96 @@ export class StateService {
         localStorage.setItem(`${this.LS_PREFIX}language`, settings.language);
       }
       this.applyTheme();
-      this.settingsSaved.set(true);
-      setTimeout(() => this.settingsSaved.set(false), 2000);
     } catch {
       // localStorage may be unavailable in some environments
+    }
+  }
+
+  private _applyApiSettings(settings: ApiSettings, persistLocal = false): void {
+    const normalized = {
+      base_url: (settings.base_url ?? '/api').trim() || '/api',
+      timeout_seconds: Number.isFinite(settings.timeout_seconds) && settings.timeout_seconds > 0 ? settings.timeout_seconds : 30,
+      sse_reconnect_interval_seconds:
+        Number.isFinite(settings.sse_reconnect_interval_seconds) && settings.sse_reconnect_interval_seconds > 0
+          ? settings.sse_reconnect_interval_seconds
+          : 5,
+      auto_reconnect: Boolean(settings.auto_reconnect),
+    };
+
+    this.apiBaseUrl.set(normalized.base_url);
+    this.apiTimeout.set(normalized.timeout_seconds);
+    this.reconnectInterval.set(normalized.sse_reconnect_interval_seconds);
+    this.autoReconnect.set(normalized.auto_reconnect);
+
+    if (!persistLocal) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(`${this.LS_PREFIX}apiBaseUrl`, this.apiBaseUrl());
+      localStorage.setItem(`${this.LS_PREFIX}apiTimeout`, String(this.apiTimeout()));
+      localStorage.setItem(`${this.LS_PREFIX}reconnectInterval`, String(this.reconnectInterval()));
+      localStorage.setItem(`${this.LS_PREFIX}autoReconnect`, String(this.autoReconnect()));
+    } catch {
+      // localStorage may be unavailable in some environments
+    }
+  }
+
+  private async syncApiSettingsFromBackend(): Promise<void> {
+    this.settingsLoading.set(true);
+    this.settingsError.set(null);
+    try {
+      const response = await this.apiService.getSettings(this.baseUrl());
+      if (response.success) {
+        this._applyApiSettings(response.settings.api, true);
+      }
+    } catch {
+      // Keep local settings when the backend settings endpoint is unavailable.
+    } finally {
+      this.settingsLoading.set(false);
+    }
+  }
+
+  async saveSettings(settings: {
+    apiBaseUrl?: string;
+    apiTimeout?: number;
+    reconnectInterval?: number;
+    autoReconnect?: boolean;
+    darkMode?: boolean;
+    compactMode?: boolean;
+    showDebug?: boolean;
+    language?: string;
+  }): Promise<void> {
+    this.settingsSaving.set(true);
+    this.settingsError.set(null);
+    try {
+      this._persistLocalSettings({
+        apiBaseUrl: settings.apiBaseUrl,
+        darkMode: settings.darkMode,
+        compactMode: settings.compactMode,
+        showDebug: settings.showDebug,
+        language: settings.language,
+      });
+
+      const apiPayload: ApiSettings = {
+        base_url: settings.apiBaseUrl !== undefined ? (settings.apiBaseUrl.trim() || '/api') : this.apiBaseUrl(),
+        timeout_seconds: settings.apiTimeout ?? this.apiTimeout(),
+        sse_reconnect_interval_seconds: settings.reconnectInterval ?? this.reconnectInterval(),
+        auto_reconnect: settings.autoReconnect ?? this.autoReconnect(),
+      };
+
+      const response = await this.apiService.updateSettings(this.baseUrl(), { api: apiPayload });
+      if (response.success) {
+        this._applyApiSettings(response.settings.api, true);
+      }
+
+      this.settingsSaved.set(true);
+      setTimeout(() => this.settingsSaved.set(false), 2000);
+    } catch (error) {
+      this.settingsError.set(error instanceof Error ? error.message : '保存设置失败');
+      throw error;
+    } finally {
+      this.settingsSaving.set(false);
     }
   }
 

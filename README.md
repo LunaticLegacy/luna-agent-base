@@ -52,11 +52,20 @@ pip install -r requirements.txt
 
 ### 配置
 
-根配置文件是 `config.toml`，它只负责告诉 runtime 去哪里找 swarm 包：
+根配置文件是 `config.toml`，它负责两件事：
+
+- 告诉 runtime 去哪里找 swarm 包
+- 持久化 API 配置，并通过 `/api/settings` 对外读写
 
 ```toml
 [app]
 swarm_root = "agents"
+
+[api]
+base_url = "/api"
+timeout_seconds = 30
+sse_reconnect_interval_seconds = 5
+auto_reconnect = true
 ```
 
 ### 启动后端

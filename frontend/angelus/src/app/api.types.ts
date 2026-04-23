@@ -150,6 +150,24 @@ export interface AgentRoundResponse {
   context: JsonValue;
 }
 
+export interface ApiSettings {
+  base_url: string;
+  timeout_seconds: number;
+  sse_reconnect_interval_seconds: number;
+  auto_reconnect: boolean;
+}
+
+export interface SettingsResponse {
+  success: boolean;
+  settings: {
+    api: ApiSettings;
+  };
+}
+
+export interface UpdateSettingsRequest {
+  api: ApiSettings;
+}
+
 export interface AgentCatalogItem {
   id: string;
   name: string;
