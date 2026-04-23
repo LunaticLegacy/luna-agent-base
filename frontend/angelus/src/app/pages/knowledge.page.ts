@@ -1,55 +1,32 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, KnowledgeEntry } from '../services/state.service';
+import { DrawerComponent, EmptyStateComponent, FilterBarComponent, ModalComponent, PageHeaderComponent, PanelCardComponent, StatCardGridComponent } from '../shared';
 
 @Component({
   selector: 'app-knowledge-page',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, PageHeaderComponent, StatCardGridComponent, PanelCardComponent, FilterBarComponent, EmptyStateComponent, ModalComponent, DrawerComponent],
   template: `
     <div class="page">
       <!-- Header -->
-      <div class="section-header">
-        <div>
-          <h1>知识库</h1>
-          <p class="subtitle">管理文档、向量、规则与代码片段</p>
-        </div>
-        <div class="header-actions">
+      <app-page-header title="知识库" subtitle="管理文档、向量、规则与代码片段">
+        <div actions>
           <button class="btn btn-primary" (click)="createEntry()">+ 新建条目</button>
         </div>
-      </div>
+      </app-page-header>
 
       <!-- Stat Cards -->
-      <div class="stat-cards-row">
-        <div class="stat-card">
-          <div class="stat-label">总条目</div>
-          <div class="stat-value">{{ state.knowledgeStats().total }}</div>
-          <div class="stat-sub">知识库规模</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">文档数</div>
-          <div class="stat-value">{{ state.knowledgeStats().documents }}</div>
-          <div class="stat-sub">文本类</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">向量条目</div>
-          <div class="stat-value accent-purple">{{ state.knowledgeStats().vectors }}</div>
-          <div class="stat-sub">Embedding</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">引用次数</div>
-          <div class="stat-value success">{{ state.knowledgeStats().citations }}</div>
-          <div class="stat-sub">被检索引用</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">最近更新</div>
-          <div class="stat-value">{{ state.knowledgeStats().recentUpdates }}</div>
-          <div class="stat-sub">活跃维护</div>
-        </div>
-      </div>
+      <app-stat-card-grid [cards]="[
+        { label: '总条目', value: state.knowledgeStats().total, subtitle: '知识库规模' },
+        { label: '文档数', value: state.knowledgeStats().documents, subtitle: '文本类' },
+        { label: '向量条目', value: state.knowledgeStats().vectors, subtitle: 'Embedding', tone: 'purple' },
+        { label: '引用次数', value: state.knowledgeStats().citations, subtitle: '被检索引用', tone: 'good' },
+        { label: '最近更新', value: state.knowledgeStats().recentUpdates, subtitle: '活跃维护' }
+      ]"></app-stat-card-grid>
 
       <!-- Filter Bar -->
-      <div class="filter-bar">
+      <app-filter-bar>
         <input
           type="text"
           class="filter-input search"
@@ -86,10 +63,10 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
           <option value="week">本周</option>
           <option value="month">本月</option>
         </select>
-      </div>
+      </app-filter-bar>
 
       <!-- Knowledge Table -->
-      <div class="panel-card table-panel">
+      <app-panel-card class="table-panel" [noPadding]="true">
         <div class="table-scroll">
           <table class="data-table">
             <thead>
@@ -143,14 +120,10 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
             </tbody>
           </table>
         </div>
-      </div>
+      </app-panel-card>
 
       <!-- Graph Knowledge Section -->
-      <div class="panel-card graph-section">
-        <div class="panel-header">
-          <h3>Graph 知识图谱</h3>
-          <span class="badge">{{ state.resolvedGraph() ? '已连接' : '未加载' }}</span>
-        </div>
+      <app-panel-card class="graph-section" title="Graph 知识图谱" [badge]="state.resolvedGraph() ? '已连接' : '未加载'">
         <div class="graph-body">
           @if (state.resolvedGraph()) {
             <div class="graph-stats">
@@ -175,233 +148,111 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
               当前图快照来自 <code>{{ state.selectedSwarmName() ?? '未选择' }}</code>，包含 {{ state.resolvedGraph()!.node_count }} 个节点与 {{ state.resolvedGraph()!.edge_count }} 条边。
             </div>
           } @else {
-            <div class="empty-state">尚未加载图数据，请在概览页选择 Swarm 以获取 Graph 快照。</div>
+            <app-empty-state message="尚未加载图数据，请在概览页选择 Swarm 以获取 Graph 快照。"></app-empty-state>
           }
         </div>
-      </div>
+      </app-panel-card>
 
       <!-- Editor Modal -->
-      @if (editorOpen()) {
-        <div class="modal-overlay" (click)="closeEditor()"></div>
-        <div class="modal">
-          <div class="modal-header">
-            <div>
-              <h3>{{ editorMode() === 'create' ? '新建条目' : '编辑条目' }}</h3>
-              <div class="modal-sub">{{ editorMode() === 'create' ? '创建新的知识记录' : editorId() }}</div>
-            </div>
-            <button class="icon-btn close" (click)="closeEditor()">✕</button>
-          </div>
-          <div class="modal-body">
-            <label class="field">
-              <span>标题</span>
-              <input class="input" [value]="editorTitle()" (input)="editorTitle.set($any($event).target.value)" />
-            </label>
-            <label class="field">
-              <span>类型</span>
-              <select class="input" [value]="editorType()" (change)="editorType.set($any($event).target.value)">
-                <option value="document">文档</option>
-                <option value="vector">向量</option>
-                <option value="rule">规则</option>
-                <option value="snippet">片段</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>来源</span>
-              <input class="input" [value]="editorSource()" (input)="editorSource.set($any($event).target.value)" />
-            </label>
-            <label class="field">
-              <span>标签</span>
-              <input class="input" [value]="editorTags()" (input)="editorTags.set($any($event).target.value)" placeholder="用逗号分隔" />
-            </label>
-            <label class="field">
-              <span>状态</span>
-              <select class="input" [value]="editorStatus()" (change)="editorStatus.set($any($event).target.value)">
-                <option value="active">活跃</option>
-                <option value="draft">草稿</option>
-                <option value="archived">归档</option>
-              </select>
-            </label>
-            <label class="field full">
-              <span>内容</span>
-              <textarea class="textarea" rows="10" [value]="editorContent()" (input)="editorContent.set($any($event).target.value)"></textarea>
-            </label>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-secondary" (click)="closeEditor()">取消</button>
-            <button class="btn btn-primary" (click)="saveEntry()" [disabled]="state.loadingDetails()">{{ state.loadingDetails() ? '保存中...' : '保存' }}</button>
-          </div>
+      <app-modal [open]="editorOpen()" [title]="editorMode() === 'create' ? '新建条目' : '编辑条目'" [subtitle]="editorMode() === 'create' ? '创建新的知识记录' : (editorId() ?? '')" [hasFooter]="true" (close)="closeEditor()">
+        <div class="editor-grid">
+          <label class="field">
+            <span>标题</span>
+            <input class="input" [value]="editorTitle()" (input)="editorTitle.set($any($event).target.value)" />
+          </label>
+          <label class="field">
+            <span>类型</span>
+            <select class="input" [value]="editorType()" (change)="editorType.set($any($event).target.value)">
+              <option value="document">文档</option>
+              <option value="vector">向量</option>
+              <option value="rule">规则</option>
+              <option value="snippet">片段</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>来源</span>
+            <input class="input" [value]="editorSource()" (input)="editorSource.set($any($event).target.value)" />
+          </label>
+          <label class="field">
+            <span>标签</span>
+            <input class="input" [value]="editorTags()" (input)="editorTags.set($any($event).target.value)" placeholder="用逗号分隔" />
+          </label>
+          <label class="field">
+            <span>状态</span>
+            <select class="input" [value]="editorStatus()" (change)="editorStatus.set($any($event).target.value)">
+              <option value="active">活跃</option>
+              <option value="draft">草稿</option>
+              <option value="archived">归档</option>
+            </select>
+          </label>
+          <label class="field full">
+            <span>内容</span>
+            <textarea class="textarea" rows="10" [value]="editorContent()" (input)="editorContent.set($any($event).target.value)"></textarea>
+          </label>
         </div>
-      }
+        <div footer>
+          <button class="btn btn-secondary" (click)="closeEditor()">取消</button>
+          <button class="btn btn-primary" (click)="saveEntry()" [disabled]="state.loadingDetails()">{{ state.loadingDetails() ? '保存中...' : '保存' }}</button>
+        </div>
+      </app-modal>
 
       <!-- Right Drawer -->
       @if (selectedEntry()) {
-        <div class="drawer-overlay" (click)="closeDrawer()"></div>
-        <div class="drawer">
-          <div class="drawer-header">
-            <div>
-              <h3>{{ selectedEntry()!.title }}</h3>
-              <div class="drawer-sub">{{ selectedEntry()!.id }}</div>
-            </div>
-            <button class="icon-btn close" (click)="closeDrawer()">✕</button>
+        <app-drawer [open]="true" [title]="selectedEntry()!.title" [subtitle]="selectedEntry()!.id" (close)="closeDrawer()">
+          <div class="drawer-section">
+            <h4>内容预览</h4>
+            <div class="preview-box">{{ selectedEntry()!.content }}</div>
           </div>
-          <div class="drawer-body">
-            <!-- Preview -->
-            <div class="drawer-section">
-              <h4>内容预览</h4>
-              <div class="preview-box">{{ selectedEntry()!.content }}</div>
-            </div>
-            <!-- Meta -->
-            <div class="drawer-section">
-              <h4>元信息</h4>
-              <div class="info-list">
-                <div class="info-row">
-                  <span class="info-key">作者</span>
-                  <span class="info-val">{{ selectedEntry()!.meta.author }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-key">版本</span>
-                  <span class="info-val">{{ selectedEntry()!.meta.version }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-key">更新时间</span>
-                  <span class="info-val">{{ selectedEntry()!.meta.updatedAt }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-key">大小</span>
-                  <span class="info-val">{{ selectedEntry()!.meta.size }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-key">状态</span>
-                  <span class="badge" [class]="'badge-status-' + selectedEntry()!.status">{{ statusLabel(selectedEntry()!.status) }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-key">引用</span>
-                  <span class="info-val">{{ selectedEntry()!.citations }} 次</span>
-                </div>
+          <div class="drawer-section">
+            <h4>元信息</h4>
+            <div class="info-list">
+              <div class="info-row">
+                <span class="info-key">作者</span>
+                <span class="info-val">{{ selectedEntry()!.meta.author }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">版本</span>
+                <span class="info-val">{{ selectedEntry()!.meta.version }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">更新时间</span>
+                <span class="info-val">{{ selectedEntry()!.meta.updatedAt }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">大小</span>
+                <span class="info-val">{{ selectedEntry()!.meta.size }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">状态</span>
+                <span class="badge" [class]="'badge-status-' + selectedEntry()!.status">{{ statusLabel(selectedEntry()!.status) }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">引用</span>
+                <span class="info-val">{{ selectedEntry()!.citations }} 次</span>
               </div>
             </div>
-            <!-- Related -->
-            <div class="drawer-section">
-              <h4>相关条目</h4>
-              @if (relatedEntries().length) {
-                <div class="related-list">
-                  @for (rel of relatedEntries(); track rel.id) {
-                    <div class="related-item" (click)="selectEntry(rel)">
-                      <div class="related-title">{{ rel.title }}</div>
-                      <span class="badge" [class]="'badge-type-' + rel.type">{{ typeLabel(rel.type) }}</span>
-                    </div>
-                  }
-                </div>
-              } @else {
-                <div class="empty-state">暂无相关条目</div>
-              }
-            </div>
           </div>
-        </div>
+          <div class="drawer-section">
+            <h4>相关条目</h4>
+            @if (relatedEntries().length) {
+              <div class="related-list">
+                @for (rel of relatedEntries(); track rel.id) {
+                  <div class="related-item" (click)="selectEntry(rel)">
+                    <div class="related-title">{{ rel.title }}</div>
+                    <span class="badge" [class]="'badge-type-' + rel.type">{{ typeLabel(rel.type) }}</span>
+                  </div>
+                }
+              </div>
+            } @else {
+              <app-empty-state message="暂无相关条目"></app-empty-state>
+            }
+          </div>
+        </app-drawer>
       }
     </div>
   `,
   styles: [`
-    .page {
-      padding: 24px;
-      color: #F1F5F9;
-      font-family: 'Noto Sans SC', sans-serif;
-      background: #0B0F19;
-      min-height: 100vh;
-    }
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-    .section-header h1 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 600;
-      color: #F1F5F9;
-    }
-    .subtitle {
-      margin: 4px 0 0;
-      color: #94A3B8;
-      font-size: 14px;
-    }
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .btn {
-      padding: 8px 16px;
-      border-radius: 8px;
-      border: 1px solid rgba(148,163,184,0.2);
-      background: #131827;
-      color: #F1F5F9;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: 'Noto Sans SC', sans-serif;
-    }
-    .btn:hover:not(:disabled) {
-      background: #1e293b;
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .btn-primary {
-      background: #8B5CF6;
-      border-color: #8B5CF6;
-      color: #fff;
-    }
-    .btn-primary:hover:not(:disabled) {
-      background: #7c3aed;
-    }
-    .btn-secondary {
-      background: #1e293b;
-      border-color: rgba(148,163,184,0.2);
-      color: #F1F5F9;
-    }
-    .btn-secondary:hover:not(:disabled) {
-      background: #243244;
-    }
-    .stat-cards-row {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .stat-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      padding: 16px;
-    }
-    .stat-label {
-      font-size: 12px;
-      color: #94A3B8;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #F1F5F9;
-      margin-bottom: 4px;
-    }
-    .stat-value.success { color: #10B981; }
-    .stat-value.accent-purple { color: #8B5CF6; }
-    .stat-sub {
-      font-size: 12px;
-      color: #64748b;
-    }
-    .filter-bar {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
-    .filter-input, .filter-select {
+                                    .filter-input, .filter-select {
       background: #131827;
       border: 1px solid rgba(148,163,184,0.12);
       border-radius: 8px;
@@ -423,40 +274,12 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       cursor: pointer;
     }
     .table-panel {
-      overflow: hidden;
       margin-bottom: 24px;
     }
     .table-scroll {
       overflow-x: auto;
     }
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    .data-table thead th {
-      text-align: left;
-      padding: 12px 16px;
-      color: #94A3B8;
-      font-weight: 500;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-      background: #131827;
-      white-space: nowrap;
-    }
-    .data-table tbody tr {
-      border-bottom: 1px solid rgba(148,163,184,0.05);
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .data-table tbody tr:hover {
-      background: rgba(148,163,184,0.04);
-    }
-    .data-table tbody td {
-      padding: 12px 16px;
-      color: #F1F5F9;
-      white-space: nowrap;
-    }
-    .entry-title {
+                        .entry-title {
       font-weight: 500;
       color: #F1F5F9;
     }
@@ -466,16 +289,7 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       font-family: 'JetBrains Mono', monospace;
       margin-top: 2px;
     }
-    .badge {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-    .badge-type-document { background: rgba(59,130,246,0.12); color: #60a5fa; }
+        .badge-type-document { background: rgba(59,130,246,0.12); color: #60a5fa; }
     .badge-type-vector { background: rgba(139,92,246,0.12); color: #a78bfa; }
     .badge-type-rule { background: rgba(245,158,11,0.12); color: #F59E0B; }
     .badge-type-snippet { background: rgba(16,185,129,0.12); color: #10B981; }
@@ -498,25 +312,7 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       display: flex;
       gap: 6px;
     }
-    .icon-btn {
-      background: transparent;
-      border: 1px solid rgba(148,163,184,0.15);
-      border-radius: 6px;
-      color: #94A3B8;
-      cursor: pointer;
-      padding: 4px 8px;
-      font-size: 12px;
-      transition: all 0.2s;
-    }
-    .icon-btn:hover {
-      background: rgba(148,163,184,0.08);
-      color: #F1F5F9;
-    }
-    .icon-btn.close {
-      font-size: 14px;
-      padding: 6px 10px;
-    }
-    .icon-btn.danger {
+                .icon-btn.danger {
       color: #FCA5A5;
     }
     .icon-btn.danger:hover {
@@ -531,19 +327,6 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
     }
     .graph-section {
       margin-bottom: 24px;
-    }
-    .graph-section .panel-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 16px 20px;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-    }
-    .graph-section .panel-header h3 {
-      margin: 0;
-      font-size: 16px;
-      font-weight: 600;
-      color: #f8fafc;
     }
     .graph-body {
       padding: 16px 20px;
@@ -585,65 +368,6 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       padding: 1px 5px;
       border-radius: 4px;
       font-size: 12px;
-    }
-    .drawer-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 40;
-    }
-    .drawer {
-      position: fixed;
-      top: 0;
-      right: 0;
-      width: 480px;
-      max-width: 90vw;
-      height: 100vh;
-      background: #131827;
-      border-left: 1px solid rgba(148,163,184,0.08);
-      z-index: 50;
-      display: flex;
-      flex-direction: column;
-      animation: slideIn 0.25s ease;
-    }
-    @keyframes slideIn {
-      from { transform: translateX(100%); }
-      to { transform: translateX(0); }
-    }
-    .drawer-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      padding: 20px 24px;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-    }
-    .drawer-header h3 {
-      margin: 0;
-      font-size: 16px;
-      font-weight: 600;
-      color: #F1F5F9;
-    }
-    .drawer-sub {
-      font-size: 12px;
-      color: #64748b;
-      font-family: 'JetBrains Mono', monospace;
-      margin-top: 4px;
-    }
-    .drawer-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px 24px;
-    }
-    .drawer-section {
-      margin-bottom: 24px;
-    }
-    .drawer-section h4 {
-      margin: 0 0 12px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #94A3B8;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
     }
     .preview-box {
       background: #0B0F19;
@@ -701,62 +425,10 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       color: #F1F5F9;
       font-weight: 500;
     }
-    .empty-state {
-      padding: 20px;
-      text-align: center;
-      color: #64748b;
-      font-size: 13px;
-      background: #0B0F19;
-      border-radius: 8px;
-    }
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(2, 6, 23, 0.72);
-      backdrop-filter: blur(8px);
-      z-index: 40;
-    }
-    .modal {
-      position: fixed;
-      inset: 50% auto auto 50%;
-      transform: translate(-50%, -50%);
-      width: min(720px, calc(100vw - 32px));
-      max-height: min(90vh, 900px);
-      overflow: auto;
-      background: #0F172A;
-      border: 1px solid rgba(148,163,184,0.14);
-      border-radius: 16px;
-      box-shadow: 0 30px 80px rgba(0,0,0,0.45);
-      z-index: 41;
-    }
-    .modal-header, .modal-footer {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 16px 20px;
-    }
-    .modal-header {
-      border-bottom: 1px solid rgba(148,163,184,0.12);
-    }
-    .modal-footer {
-      border-top: 1px solid rgba(148,163,184,0.12);
-    }
-    .modal-header h3 {
-      margin: 0;
-      color: #F1F5F9;
-      font-size: 18px;
-    }
-    .modal-sub {
-      margin-top: 4px;
-      color: #94A3B8;
-      font-size: 12px;
-    }
-    .modal-body {
+    .editor-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 14px;
-      padding: 18px 20px;
     }
     .field {
       display: flex;
@@ -782,15 +454,22 @@ import { StateService, KnowledgeEntry } from '../services/state.service';
       resize: vertical;
       min-height: 180px;
     }
+    .drawer-section {
+      margin-bottom: 24px;
+    }
+    .drawer-section h4 {
+      margin: 0 0 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
     @media (max-width: 1200px) {
-      .stat-cards-row { grid-template-columns: repeat(3, 1fr); }
       .graph-stats { grid-template-columns: repeat(2, 1fr); }
     }
     @media (max-width: 768px) {
-      .stat-cards-row { grid-template-columns: repeat(2, 1fr); }
-      .filter-bar { flex-direction: column; }
       .filter-input.search { width: 100%; min-width: unset; }
-      .drawer { width: 100vw; max-width: 100vw; }
       .graph-stats { grid-template-columns: repeat(2, 1fr); }
     }
   `]

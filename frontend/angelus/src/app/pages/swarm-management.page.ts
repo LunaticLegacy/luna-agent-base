@@ -3,14 +3,15 @@ import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
+import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent } from '../shared';
 
 @Component({
   selector: 'app-swarm-management-page',
   standalone: true,
-  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent],
+  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent, StatCardGridComponent, TabBarComponent, PanelCardComponent, EmptyStateComponent],
   template: `
     <div class="page">
-      <!-- Header -->
+      <!-- Header (kept inline due to custom status badge inline with title) -->
       <div class="page-header">
         <div class="header-left">
           <div class="swarm-title-row">
@@ -46,51 +47,23 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
       </div>
 
       <!-- Stat Cards -->
-      <div class="stat-cards-row">
-        <div class="stat-card">
-          <div class="stat-label">状态</div>
-          <div class="stat-value" [class.success]="state.health()?.status === 'ok'">{{ state.health()?.status === 'ok' ? '健康' : '异常' }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Agents</div>
-          <div class="stat-value">{{ state.totalAgents() ?? 0 }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">当前任务</div>
-          <div class="stat-value">{{ state.activeRunStatusText() }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">成功率</div>
-          <div class="stat-value success">{{ state.swarmMgmtStats().successRate }}%</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">任务吞吐量</div>
-          <div class="stat-value">{{ state.swarmMgmtStats().throughput }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Token 使用</div>
-          <div class="stat-value">{{ state.swarmMgmtStats().tokenUsage }}</div>
-        </div>
-      </div>
+      <app-stat-card-grid [cards]="[
+        { label: '状态', value: state.health()?.status === 'ok' ? '健康' : '异常', tone: state.health()?.status === 'ok' ? 'good' : 'bad' },
+        { label: 'Agents', value: state.totalAgents() },
+        { label: '当前任务', value: state.activeRunStatusText() },
+        { label: '成功率', value: state.swarmMgmtStats().successRate + '%', tone: 'good' },
+        { label: '任务吞吐量', value: state.swarmMgmtStats().throughput },
+        { label: 'Token 使用', value: state.swarmMgmtStats().tokenUsage }
+      ]"></app-stat-card-grid>
 
       <!-- Tab Bar -->
-      <div class="tab-bar">
-        @for (tab of tabs; track tab) {
-          <div
-            class="tab-item"
-            [class.active]="activeTab() === tab"
-            (click)="activeTab.set(tab)"
-          >
-            {{ tab }}
-          </div>
-        }
-      </div>
+      <app-tab-bar [tabs]="tabs" [activeTab]="activeTab()" (tabChange)="activeTab.set($event)"></app-tab-bar>
 
       @switch (activeTab()) {
         @case ('概览') {
 
       <!-- Topology Canvas -->
-        <div class="panel-card topology-canvas">
+        <div class="topology-canvas">
         <div class="panel-header">
           <h3>Swarm 拓扑</h3>
           <div class="panel-actions">
@@ -101,7 +74,7 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
           @if (state.resolvedGraph()) {
             <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
           } @else {
-            <div class="empty-state">暂无拓扑数据</div>
+            <app-empty-state message="暂无拓扑数据"></app-empty-state>
           }
         </div>
       </div>
@@ -109,10 +82,7 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
       <!-- Main Content Grid -->
       <div class="main-grid">
         <!-- Left: Node Type Legend -->
-        <div class="panel-card legend-panel">
-          <div class="panel-header">
-            <h3>节点图例</h3>
-          </div>
+        <app-panel-card title="节点图例" [noPadding]="true">
           <div class="legend-list">
             @for (item of state.topologyLegendItems(); track item.label) {
               <div class="legend-item">
@@ -128,14 +98,11 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
               </div>
             }
           </div>
-        </div>
+        </app-panel-card>
 
         <!-- Right: Info + Charts -->
         <div class="right-stack">
-          <div class="panel-card info-panel">
-            <div class="panel-header">
-              <h3>Swarm 信息</h3>
-            </div>
+          <app-panel-card title="Swarm 信息" [noPadding]="true">
             <div class="info-body">
               <div class="info-row">
                 <span class="info-key">名称</span>
@@ -164,12 +131,9 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                 </div>
               </div>
             </div>
-          </div>
+          </app-panel-card>
 
-          <div class="panel-card chart-panel">
-            <div class="panel-header">
-              <h3>资源使用趋势</h3>
-            </div>
+          <app-panel-card title="资源使用趋势" [noPadding]="true">
             <div class="chart-body">
               @for (item of state.swarmMgmtResourceTrends(); track item.label) {
                 <div class="mini-spark">
@@ -179,12 +143,9 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                 </div>
               }
             </div>
-          </div>
+          </app-panel-card>
 
-          <div class="panel-card chart-panel">
-            <div class="panel-header">
-              <h3>任务状态分布</h3>
-            </div>
+          <app-panel-card title="任务状态分布" [noPadding]="true">
             <div class="donut-body">
               <div class="donut-chart" [style.background]="state.swarmMgmtTaskGradient()">
                 <div class="donut-ring"></div>
@@ -199,17 +160,13 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                 }
               </div>
             </div>
-          </div>
+          </app-panel-card>
         </div>
       </div>
 
       <!-- Bottom Tables -->
       <div class="bottom-tables">
-        <div class="panel-card">
-          <div class="panel-header">
-            <h3>正在运行的任务</h3>
-            <span class="badge">{{ (state.activeRun() ? 1 : 0) }}</span>
-          </div>
+        <app-panel-card title="正在运行的任务" [badge]="state.activeRun() ? 1 : 0" [noPadding]="true">
           <div class="table-wrap">
             <table class="data-table">
               <thead>
@@ -244,12 +201,12 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
               </tbody>
             </table>
           </div>
-        </div>
+        </app-panel-card>
 
       </div>
         }
         @case ('拓扑视图') {
-          <div class="panel-card topology-canvas topology-fullscreen">
+          <div class="topology-canvas topology-fullscreen">
             <div class="panel-header">
               <h3>Swarm 拓扑</h3>
               <div class="panel-actions">
@@ -260,13 +217,13 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
               @if (state.resolvedGraph()) {
                 <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
               } @else {
-                <div class="empty-state">暂无拓扑数据</div>
+                <app-empty-state message="暂无拓扑数据"></app-empty-state>
               }
             </div>
           </div>
         }
         @case ('思考图') {
-          <div class="panel-card topology-canvas topology-fullscreen thought-fullscreen">
+          <div class="topology-canvas topology-fullscreen thought-fullscreen">
             <div class="panel-header">
               <h3>Swarm 思考图</h3>
               <div class="panel-actions">
@@ -277,15 +234,14 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
               @if (state.resolvedThoughtGraph()) {
                 <app-thought-graph-viewer [graph]="state.resolvedThoughtGraph()"></app-thought-graph-viewer>
               } @else {
-                <div class="empty-state">暂无思考图数据</div>
+                <app-empty-state message="暂无思考图数据"></app-empty-state>
               }
             </div>
           </div>
         }
         @case ('Agents') {
           <div class="tab-content">
-            <div class="panel-card">
-              <div class="panel-header"><h3>Agent 列表</h3><span class="badge">{{ state.derivedAgents().length }}</span></div>
+            <app-panel-card title="Agent 列表" [badge]="state.derivedAgents().length" [noPadding]="true">
               <div class="table-wrap">
                 <table class="data-table">
                   <thead><tr><th>ID</th><th>状态</th><th>类型</th><th>任务执行</th><th>成功率</th><th>响应时间</th><th>最后活动</th></tr></thead>
@@ -298,13 +254,12 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                   </tbody>
                 </table>
               </div>
-            </div>
+            </app-panel-card>
           </div>
         }
         @case ('任务') {
           <div class="tab-content">
-            <div class="panel-card">
-              <div class="panel-header"><h3>任务列表</h3><span class="badge">{{ state.derivedTasks().length }}</span></div>
+            <app-panel-card title="任务列表" [badge]="state.derivedTasks().length" [noPadding]="true">
               <div class="table-wrap">
                 <table class="data-table">
                   <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>优先级</th><th>执行者</th><th>耗时</th></tr></thead>
@@ -317,13 +272,12 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                   </tbody>
                 </table>
               </div>
-            </div>
+            </app-panel-card>
           </div>
         }
         @case ('知识') {
           <div class="tab-content">
-            <div class="panel-card">
-              <div class="panel-header"><h3>知识条目</h3><span class="badge">{{ state.derivedKnowledge().length }}</span></div>
+            <app-panel-card title="知识条目" [badge]="state.derivedKnowledge().length" [noPadding]="true">
               <div class="table-wrap">
                 <table class="data-table">
                   <thead><tr><th>ID</th><th>标题</th><th>类型</th><th>来源</th><th>状态</th></tr></thead>
@@ -334,13 +288,12 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                   </tbody>
                 </table>
               </div>
-            </div>
+            </app-panel-card>
           </div>
         }
         @case ('记忆') {
           <div class="tab-content">
-            <div class="panel-card">
-              <div class="panel-header"><h3>记忆列表</h3><span class="badge">{{ state.derivedMemories().length }}</span></div>
+            <app-panel-card title="记忆列表" [badge]="state.derivedMemories().length" [noPadding]="true">
               <div class="activity-list">
                 @for (mem of state.derivedMemories(); track mem.id) {
                   <div class="activity-item">
@@ -350,15 +303,14 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                       <div class="activity-time">{{ mem.timestamp }} · {{ mem.type }} · 重要性 {{ mem.importance }}</div>
                     </div>
                   </div>
-                } @empty { <div class="empty-state">暂无记忆</div> }
+                } @empty { <app-empty-state message="暂无记忆"></app-empty-state> }
               </div>
-            </div>
+            </app-panel-card>
           </div>
         }
         @case ('设置') {
           <div class="tab-content">
-            <div class="panel-card">
-              <div class="panel-header"><h3>Swarm 设置</h3></div>
+            <app-panel-card title="Swarm 设置" [noPadding]="true">
               <div class="info-body">
                 <div class="info-row"><span class="info-key">Swarm 名称</span><span class="info-val">{{ state.selectedSwarmName() || '—' }}</span></div>
                 <div class="info-row"><span class="info-key">Graph 文件</span><span class="info-val mono">{{ state.selectedSwarm()?.graph_file || '—' }}</span></div>
@@ -367,19 +319,14 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                 <div class="info-row"><span class="info-key">工具数量</span><span class="info-val">{{ state.selectedSwarm()?.tool_count ?? 0 }}</span></div>
                 <div class="info-row"><span class="info-key">Graph 有效</span><span class="info-val">{{ state.selectedSwarm()?.graph_valid ? '是' : '否' }}</span></div>
               </div>
-            </div>
+            </app-panel-card>
           </div>
         }
       }
     </div>
   `,
   styles: [`
-    .page {
-      padding: 24px;
-      color: #e2e8f0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    .page-header {
+        .page-header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
@@ -421,25 +368,8 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
       gap: 8px;
       align-items: center;
     }
-    .btn {
-      padding: 8px 16px;
-      border-radius: 8px;
-      border: 1px solid rgba(148,163,184,0.2);
-      background: #1e293b;
-      color: #e2e8f0;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .btn:hover:not(:disabled) { background: #334155; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-primary { background: #8B5CF6; border-color: #8B5CF6; color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: #7c3aed; }
-    .btn-secondary { background: #1e293b; }
-    .btn-danger { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.3); color: #ef4444; }
-    .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.25); }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
-    .dropdown { position: relative; }
+                                .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.25); }
+        .dropdown { position: relative; }
     .dropdown-menu {
       position: absolute;
       top: calc(100% + 6px);
@@ -462,65 +392,11 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
     .dropdown-item:hover { background: rgba(148,163,184,0.1); }
     .dropdown-item.danger { color: #ef4444; }
     .dropdown-divider { height: 1px; background: rgba(148,163,184,0.1); margin: 4px 0; }
-    .stat-cards-row {
-      display: grid;
-      grid-template-columns: repeat(6, 1fr);
-      gap: 16px;
-      margin-bottom: 20px;
-    }
-    .stat-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      padding: 16px;
-    }
-    .stat-label {
-      font-size: 12px;
-      color: #94a3b8;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .stat-value {
-      font-size: 20px;
-      font-weight: 700;
-      color: #f8fafc;
-    }
-    .stat-value.success { color: #10B981; }
-    .tab-bar {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 20px;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-      padding-bottom: 1px;
-    }
-    .tab-item {
-      padding: 10px 18px;
-      font-size: 14px;
-      color: #94a3b8;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-      transition: all 0.2s;
-      white-space: nowrap;
-    }
-    .tab-item:hover { color: #e2e8f0; }
-    .tab-item.active {
-      color: #8B5CF6;
-      border-bottom-color: #8B5CF6;
-      font-weight: 600;
-    }
     .main-grid {
       display: grid;
       grid-template-columns: 240px 1fr;
       gap: 24px;
       margin-bottom: 20px;
-    }
-    .panel-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      overflow: hidden;
     }
     .panel-header {
       display: flex;
@@ -536,14 +412,6 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
       color: #f8fafc;
     }
     .panel-actions { display: flex; gap: 6px; }
-    .badge {
-      background: rgba(139,92,246,0.15);
-      color: #8B5CF6;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 12px;
-    }
     .legend-list { padding: 12px 18px; }
     .legend-item {
       display: flex;
@@ -626,8 +494,7 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
     }
     .info-key { color: #94a3b8; min-width: 70px; }
     .info-val { color: #e2e8f0; text-align: right; word-break: break-word; }
-    .info-val.mono { font-family: monospace; font-size: 12px; }
-    .tags { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+    .info-val    .tags { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
     .tag {
       background: rgba(139,92,246,0.12);
       color: #a78bfa;
@@ -706,37 +573,10 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
       gap: 16px;
     }
     .table-wrap { overflow-x: auto; }
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    .data-table th {
-      text-align: left;
-      padding: 10px 18px;
-      color: #94a3b8;
-      font-weight: 500;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-      white-space: nowrap;
-    }
-    .data-table td {
-      padding: 10px 18px;
-      color: #cbd5e1;
-      border-bottom: 1px solid rgba(148,163,184,0.05);
-      white-space: nowrap;
-    }
-    .data-table tr:hover td { background: rgba(148,163,184,0.03); }
-    .mono { font-family: monospace; font-size: 12px; }
-    .tab-content { padding: 16px 0; }
+                .data-table tr:hover td { background: rgba(148,163,184,0.03); }
+        .tab-content { padding: 16px 0; }
     .topology-fullscreen { height: calc(100vh - 220px); min-height: 480px; }
-    .pill {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
+        .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.busy { background: rgba(139,92,246,0.15); color: #a78bfa; }
@@ -772,37 +612,18 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
       padding: 10px 0;
       border-bottom: 1px solid rgba(148,163,184,0.05);
     }
-    .activity-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: rgba(139,92,246,0.12);
-      color: #a78bfa;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 700;
-      flex-shrink: 0;
-    }
-    .activity-icon.success { background: rgba(16,185,129,0.12); color: #10B981; }
-    .activity-icon.error { background: rgba(239,68,68,0.12); color: #ef4444; }
     .activity-body { flex: 1; min-width: 0; }
     .activity-title { font-size: 13px; font-weight: 600; color: #e2e8f0; margin-bottom: 2px; }
     .activity-desc { font-size: 12px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .activity-time { font-size: 11px; color: #64748b; margin-top: 2px; }
-    .empty-state { padding: 24px; text-align: center; color: #64748b; font-size: 13px; }
     @media (max-width: 1200px) {
-      .stat-cards-row { grid-template-columns: repeat(3, 1fr); }
       .main-grid { grid-template-columns: 1fr; }
       .bottom-tables { grid-template-columns: 1fr; }
       .right-stack { flex-direction: row; flex-wrap: wrap; }
-      .right-stack .panel-card { flex: 1; min-width: 240px; }
+      .right-stack app-panel-card { flex: 1; min-width: 240px; }
     }
     @media (max-width: 768px) {
-      .stat-cards-row { grid-template-columns: repeat(2, 1fr); }
       .page-header { flex-direction: column; gap: 12px; }
-      .tab-bar { overflow-x: auto; }
     }
   `]
 })

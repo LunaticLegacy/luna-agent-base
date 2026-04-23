@@ -1,34 +1,31 @@
 import { Component, ElementRef, ViewChild, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, LogItem } from '../services/state.service';
+import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, PaginationComponent, EmptyStateComponent } from '../shared';
 
 @Component({
   selector: 'app-logs-page',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, PageHeaderComponent, StatCardGridComponent, PanelCardComponent, PaginationComponent, EmptyStateComponent],
   template: `
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">系统日志</h1>
-        <p class="page-subtitle">结构化日志查询与分析</p>
-      </div>
-      <div class="header-actions">
+    <app-page-header title="系统日志" subtitle="结构化日志查询与分析">
+      <div actions>
         <button class="btn btn-sm" (click)="autoScroll.set(!autoScroll())">
           {{ autoScroll() ? '暂停滚动' : '自动滚动' }}
         </button>
         <button class="btn btn-sm btn-primary" (click)="exportLogs()">导出</button>
       </div>
-    </div>
+    </app-page-header>
 
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-label">总日志数</div><div class="stat-value">{{ state.logStats().total }}</div><div class="stat-sub">条记录</div></div>
-      <div class="stat-card"><div class="stat-label">ERROR</div><div class="stat-value stat-red">{{ state.logStats().error }}</div><div class="stat-sub">严重</div></div>
-      <div class="stat-card"><div class="stat-label">WARN</div><div class="stat-value stat-amber">{{ state.logStats().warn }}</div><div class="stat-sub">警告</div></div>
-      <div class="stat-card"><div class="stat-label">INFO</div><div class="stat-value stat-green">{{ state.logStats().info }}</div><div class="stat-sub">信息</div></div>
-      <div class="stat-card"><div class="stat-label">DEBUG</div><div class="stat-value stat-blue">{{ state.logStats().debug }}</div><div class="stat-sub">调试</div></div>
-    </div>
+    <app-stat-card-grid [cards]="[
+      { label: '总日志数', value: state.logStats().total, subtitle: '条记录' },
+      { label: 'ERROR', value: state.logStats().error, subtitle: '严重', tone: 'red' },
+      { label: 'WARN', value: state.logStats().warn, subtitle: '警告', tone: 'amber' },
+      { label: 'INFO', value: state.logStats().info, subtitle: '信息', tone: 'green' },
+      { label: 'DEBUG', value: state.logStats().debug, subtitle: '调试', tone: 'blue' }
+    ]" />
 
-    <div class="card">
+    <app-panel-card [noPadding]="true">
       <div class="card-header">
         <div class="level-filters">
           <button class="level-btn" [class.active]="levelFilter()==='all'" (click)="onLevelFilterChange('all')">全部</button>
@@ -64,43 +61,25 @@ import { StateService, LogItem } from '../services/state.service';
             <span class="log-msg">{{ log.message }}</span>
           </div>
         } @empty {
-          <div class="empty">暂无日志记录</div>
+          <app-empty-state message="暂无日志记录"></app-empty-state>
         }
       </div>
 
-      <div class="pagination-bar">
-        <div class="pagination-summary">
-          <span>共 {{ totalLogs() }} 条</span>
-          <span>第 {{ currentPage() }} / {{ totalPages() }} 页</span>
-          <span>{{ pageItemRange() }}</span>
-        </div>
-        <div class="pagination-controls">
-          <button class="btn btn-sm" (click)="goToPage(currentPage() - 1)" [disabled]="loading() || currentPage() <= 1">上一页</button>
-          <button class="btn btn-sm" (click)="goToPage(currentPage() + 1)" [disabled]="loading() || currentPage() >= totalPages()">下一页</button>
-          <button class="btn btn-sm" (click)="reloadLogs(currentPage())" [disabled]="loading()">
-            {{ loading() ? '加载中...' : '刷新当前页' }}
-          </button>
-        </div>
-      </div>
-    </div>
+      <app-pagination
+        [currentPage]="currentPage()"
+        [totalItems]="totalLogs()"
+        [pageSize]="pageSize()"
+        [loading]="loading()"
+        (pageChange)="goToPage($event)">
+        <button class="btn btn-sm" extra (click)="reloadLogs(currentPage())" [disabled]="loading()">
+          {{ loading() ? '加载中...' : '刷新当前页' }}
+        </button>
+      </app-pagination>
+    </app-panel-card>
   `,
   styles: [`
     :host { display:block; }
-    .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; }
-    .page-title { font-size:1.35rem; font-weight:700; color:#F1F5F9; margin:0; }
-    .page-subtitle { font-size:.82rem; color:#94A3B8; margin:.25rem 0 0; }
-    .header-actions { display:flex; gap:.5rem; }
-    .btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1rem; border-radius:8px; border:none; color:#fff; font-size:.82rem; font-weight:600; cursor:pointer; }
-    .btn-primary { background:linear-gradient(135deg,#7C3AED,#A78BFA); }
-    .btn-sm { padding:.35rem .7rem; font-size:.78rem; background:rgba(255,255,255,.06); color:#94A3B8; }
-    .btn-sm:hover { background:rgba(255,255,255,.1); color:#F1F5F9; }
-    .stat-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:1rem; margin-bottom:1.25rem; }
-    .stat-card { background:#131827; border:1px solid rgba(148,163,184,.08); border-radius:12px; padding:1rem 1.1rem; }
-    .stat-label { font-size:.72rem; color:#94A3B8; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.4rem; }
-    .stat-value { font-size:1.4rem; font-weight:700; color:#F1F5F9; }
-    .stat-green { color:#10B981; } .stat-purple { color:#A78BFA; } .stat-amber { color:#F59E0B; } .stat-red { color:#EF4444; } .stat-blue { color:#60A5FA; }
-    .stat-sub { font-size:.72rem; color:#64748B; margin-top:.2rem; }
-    .card { background:#131827; border:1px solid rgba(148,163,184,.08); border-radius:12px; overflow:hidden; }
+                .btn-sm:hover { background:rgba(255,255,255,.1); color:#F1F5F9; }
     .card-header { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem; border-bottom:1px solid rgba(148,163,184,.08); flex-wrap:wrap; gap:.75rem; }
     .level-filters { display:flex; gap:.25rem; }
     .level-btn { padding:.4rem .8rem; border-radius:6px; border:none; background:transparent; color:#94A3B8; font-size:.78rem; cursor:pointer; font-family:'JetBrains Mono',monospace; }
@@ -123,30 +102,6 @@ import { StateService, LogItem } from '../services/state.service';
     .log-debug .log-level { color:#94A3B8; }
     .log-service { color:#A78BFA; }
     .log-msg { color:#E2E8F0; }
-    .empty { text-align:center; padding:3rem; color:#64748B; }
-    .pagination-bar {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:1rem;
-      padding:1rem 1.25rem 1.1rem;
-      border-top:1px solid rgba(148,163,184,.08);
-      flex-wrap:wrap;
-    }
-    .pagination-summary {
-      display:flex;
-      align-items:center;
-      gap:.9rem;
-      flex-wrap:wrap;
-      color:#94A3B8;
-      font-size:.8rem;
-    }
-    .pagination-controls {
-      display:flex;
-      align-items:center;
-      gap:.5rem;
-      flex-wrap:wrap;
-    }
   `]
 })
 export class LogsPage {
