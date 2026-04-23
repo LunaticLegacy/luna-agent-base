@@ -28,6 +28,7 @@ import type {
   SwarmStatsResponse,
   ToolListResponse,
   UpdateSettingsRequest,
+  ThoughtGraphResponse,
 } from './api.types';
 
 export function joinUrl(baseUrl: string, path: string): string {
@@ -244,6 +245,12 @@ export class ApiService {
       this.http.get<{ success: boolean; swarm: string; graph: GraphSnapshot }>(
         joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph`)
       )
+    );
+  }
+
+  getThoughtGraph(baseUrl: string, swarmName: string): Promise<ThoughtGraphResponse> {
+    return firstValueFrom(
+      this.http.get<ThoughtGraphResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/thought-graph`))
     );
   }
 
