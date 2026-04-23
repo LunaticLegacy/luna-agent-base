@@ -1,0 +1,14 @@
+[skill]
+name = "publisher_prompt"
+version = "1.0"
+capability = "report_publishing"
+description = "Transform consolidated review into a clean Markdown report."
+content_file = "publisher.prompt.md"
+input_schema = { type = "object", properties = { consolidated_findings = { type = "array" }, overall_assessment = { type = "object" }, remediation_priority = { type = "array" } }, required = ["consolidated_findings", "overall_assessment", "remediation_priority"] }
+output_schema = { type = "object", properties = { final_answer = { type = "string" }, content = { type = "string" } }, required = ["final_answer", "content"] }
+requires_tools = ["file_writer"]
+requires_skills = ["reviewer_prompt"]
+preconditions = ["Consolidated review is available."]
+postconditions = ["A Markdown report is produced in final_answer."]
+failure_policy = "retry"
+parallelizable = false
