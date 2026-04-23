@@ -1,341 +1,175 @@
 # Next Plan
 
-This file records the next round of work so we can continue without depending on the full conversation context.
+This file is an implementation checklist for the next concrete feature. Keep it version-clean and do not mix older planning threads into it.
 
-## Current Situation
+## Baseline
 
-We need a mixed settings model:
+- `config.toml` already persists API runtime settings under `[api]`.
+- The frontend Settings page already uses a mixed model:
+  - API settings go through the backend settings API.
+  - UI preferences stay in browser `localStorage`.
+- `docs_verifier` has already been migrated to:
+  - `provider = "litellm"`
+  - `name = "kimi"`
+  - Moonshot / Kimi Code API
+  - environment-variable based API key resolution
 
-- `config.toml` should persist API configuration.
-- `localStorage` should persist frontend-only preferences.
-- The Settings page should use a real settings API instead of pretending everything is already backed by storage.
+## Implementation Checklist: Agent Workspace Access
 
-Right now the Settings page shows more options than the backend actually supports, and the save button only updates frontend runtime state.
+### 1. Define the access model
 
-## What Is Real Today
+- [ ] Add a filesystem access mode field to agent blueprints.
+- [ ] Support exactly these modes:
+  - [ ] `workspace`
+  - [ ] `full_access`
+- [ ] Make `workspace` the default mode.
+- [ ] Decide whether `workspace_root` is mandatory for `workspace` mode.
+- [ ] Document the intended meaning of both modes in the code comments or docs.
 
-### Frontend settings shown in the UI
+### 2. Extend the agent schema
 
-- `后端 API 地址`
-- `API 超时 (秒)`
-- `SSE 重连间隔 (秒)`
-- `自动重连 SSE 流`
-- `深色模式`
-- `紧凑布局`
-- `显示调试信息`
-- `语言`
+Target file:
 
-### Current behavior
+- [ ] [`core/swarm_spec.py`](/run/media/luna/数据和游戏/Codes/Python/angelus/core/swarm_spec.py)
 
-- `后端 API 地址` currently affects runtime behavior in the frontend.
-- The other API-related controls are visible but not yet backed by real config persistence.
-- The display controls are visible but not yet fully tied to browser persistence in a consistent way.
+Checklist:
 
-### Current backend config
+- [ ] Add `workspace_mode` to `AgentBlueprint`.
+- [ ] Add `workspace_root` to `AgentBlueprint`.
+- [ ] Parse the new fields in `_coerce_agent_blueprint()`.
+- [ ] Validate `workspace_mode` values and reject unknown modes.
+- [ ] Decide what happens when `workspace_mode = "workspace"` but `workspace_root` is missing.
+- [ ] Keep the current agent loading behavior unchanged for agents that do not declare the new fields yet.
 
-`config.toml` currently only exposes:
+### 3. Thread workspace data into runtime
 
-- `[app].swarm_root = "agents"`
+Target files:
 
-So the backend config surface is too small for the settings UI that the frontend is presenting.
+- [ ] [`core/core.py`](/run/media/luna/数据和游戏/Codes/Python/angelus/core/core.py)
+- [ ] [`core/agent.py`](/run/media/luna/数据和游戏/Codes/Python/angelus/core/agent.py)
+- [ ] [`core/toodefl.py`](/run/media/luna/数据和游戏/Codes/Python/angelus/core/toodefl.py)
 
-## Target Split
+Checklist:
 
-### Save to `config.toml`
+- [ ] Extend `ToolContext` with filesystem scope metadata.
+- [ ] Include the current agent workspace root in `ToolContext`.
+- [ ] Include the current access mode in `ToolContext`.
+- [ ] Pass the workspace info into agent creation or agent metadata.
+- [ ] Make the runtime able to tell whether a tool call is `workspace`-scoped or `full_access`.
 
-API configuration should be persisted to the backend config file:
+### 4. Enforce access in file tools
 
-- `api_base_url`
-- `api_timeout`
-- `sse_reconnect_interval`
-- `auto_reconnect`
+Target files:
 
-### Save to `localStorage`
+- [ ] [`tools/file_writer_tool.py`](/run/media/luna/数据和游戏/Codes/Python/angelus/tools/file_writer_tool.py)
+- [ ] Future file-reading tools
 
-Frontend preferences should be kept in the browser:
+Checklist:
 
-- `dark_mode`
-- `compact_mode`
-- `show_debug`
-- `language`
+- [ ] Add path normalization before any write.
+- [ ] Refuse writes outside the permitted workspace when in `workspace` mode.
+- [ ] Allow broader writes only when the agent is explicitly in `full_access` mode.
+- [ ] Return a clear error message when a path violates the allowed scope.
+- [ ] Add the same access checks to any future file reader tool.
+- [ ] Keep tool behavior unchanged for agents that already run with full project access.
 
-### Keep runtime-only in memory
+### 5. Decide the workspace directory convention
 
-Some values can still be used in memory at runtime, but should not be treated as durable settings unless they are explicitly saved:
+Checklist:
 
-- the active API base URL while the app is running
-- live SSE connection state
-- temporary UI loading state
+- [ ] Pick one canonical workspace root layout.
+- [ ] Prefer a per-swarm or per-agent directory structure.
+- [ ] Make the chosen layout easy to audit and easy to clean up.
+- [ ] Ensure the layout does not collide with existing swarm package files.
+- [ ] Decide whether `workspace_root` is relative to the swarm package or to the repository root.
 
-## Implementation Goals
+Suggested shape:
 
-1. Make the Settings page reflect the real storage model.
-2. Add a settings API that can read and write the API config portion.
-3. Persist API settings into `config.toml`.
-4. Persist frontend preferences in `localStorage`.
-5. Make the save button clearly meaningful.
-6. Keep timeout and reconnect behavior connected to the values the user edits.
-7. Update the docs so they match the actual behavior.
-
-## Task Breakdown
-
-### 1. Define the settings contract
-
-Split the current settings into two logical groups:
-
-- API configuration
-- frontend preferences
-
-For each field, decide:
-
-- whether it belongs in `config.toml`
-- whether it belongs in `localStorage`
-- whether it should be visible but disabled until support exists
-
-Expected outcome:
-
-- We have one authoritative storage location per field.
-- The UI no longer implies that every control is already backed by durable storage.
-
-### 2. Add a backend settings API
-
-Introduce a small settings API that can expose and update the API config portion.
-
-Suggested endpoints:
-
-- `GET /api/settings`
-- `PUT /api/settings`
-
-Suggested response shape:
-
-```json
-{
-  "success": true,
-  "settings": {
-    "api": {
-      "base_url": "/api",
-      "timeout_seconds": 30,
-      "sse_reconnect_interval_seconds": 5,
-      "auto_reconnect": true
-    },
-    "ui": {
-      "dark_mode": true,
-      "compact_mode": false,
-      "show_debug": false,
-      "language": "zh"
-    }
-  }
-}
+```text
+agents/<swarm_name>/workspace/<agent_id>/
 ```
 
-Expected outcome:
+### 6. Update swarm manifests
 
-- Frontend can fetch settings on startup.
-- Save operations can update the backend API config portion.
-- `config.toml` becomes the source of truth for API settings.
+Target files:
 
-### 3. Persist API configuration into `config.toml`
+- [ ] [`agents/docs_verifier/swarm.toml`](/run/media/luna/数据和游戏/Codes/Python/angelus/agents/docs_verifier/swarm.toml)
+- [ ] [`agents/deepseek_demo/swarm.toml`](/run/media/luna/数据和游戏/Codes/Python/angelus/agents/deepseek_demo/swarm.toml)
+- [ ] Other swarm manifests that should opt in later
 
-Add a dedicated backend config section for API settings.
+Checklist:
 
-Recommended shape:
+- [ ] Add `workspace_mode = "workspace"` to agents that should be sandboxed.
+- [ ] Add `workspace_root` where needed.
+- [ ] Leave trusted system agents on `full_access` only when necessary.
+- [ ] Keep current backend names and model routing unchanged while adding workspace metadata.
 
-```toml
-[app]
-swarm_root = "agents"
+### 7. Update agent files
 
-[api]
-base_url = "/api"
-timeout_seconds = 30
-sse_reconnect_interval_seconds = 5
-auto_reconnect = true
-```
+Target files:
 
-Expected outcome:
+- [ ] `agents/*/agents/*.py`
 
-- API configuration survives restart.
-- Settings changes are visible to all clients using the same backend.
-- The backend can enforce and validate API-related settings centrally.
+Checklist:
 
-### 4. Persist frontend preferences locally
+- [ ] Add workspace fields to agent definitions.
+- [ ] Keep the existing `AGENT` / `AGENT_SPEC` / `AGENTS` format intact.
+- [ ] Avoid changing unrelated prompt or backend configuration while wiring workspace access.
 
-Use `localStorage` for browser-only preferences.
+### 8. Add tests
 
-Suggested keys:
+Target files:
 
-- `angelus_darkMode`
-- `angelus_compactMode`
-- `angelus_showDebug`
-- `angelus_language`
+- [ ] Existing runtime tests
+- [ ] New tests under `tests/`
 
-Expected outcome:
+Checklist:
 
-- A browser refresh preserves the user’s visual preferences.
-- These preferences do not need backend support.
-- The backend config file stays focused on system settings.
+- [ ] Verify `workspace` mode blocks writes outside the allowed root.
+- [ ] Verify `full_access` mode still permits normal writes.
+- [ ] Verify invalid `workspace_mode` values are rejected at load time.
+- [ ] Verify missing `workspace_root` is handled according to the chosen rule.
+- [ ] Verify the new fields survive a normal swarm load cycle.
 
-### 5. Connect the UI to the storage model
+### 9. Update docs
 
-Update Settings page behavior so that:
+Target files:
 
-- API settings load from the backend settings API
-- UI preferences load from `localStorage`
-- Clicking `保存更改` writes both categories to the correct destination
+- [ ] [`agents/README.md`](/run/media/luna/数据和游戏/Codes/Python/angelus/agents/README.md)
+- [ ] [`agents/readme_en.md`](/run/media/luna/数据和游戏/Codes/Python/angelus/agents/readme_en.md)
+- [ ] [`docs/backend/runtime.md`](/run/media/luna/数据和游戏/Codes/Python/angelus/docs/backend/runtime.md)
 
-Expected outcome:
+Checklist:
 
-- The save button has a real effect.
-- The user can tell which settings survive restart and which only survive in the browser.
+- [ ] Explain what `workspace` means.
+- [ ] Explain what `full_access` means.
+- [ ] Explain where workspace roots come from.
+- [ ] Explain which tools enforce the boundary.
+- [ ] Make clear that this is an agent access model, not an LLM backend setting.
 
-### 6. Wire timeout and reconnect behavior to real runtime logic
+## Secondary Phase: Context Graph System
 
-The API settings should not remain decorative.
+Keep `plan/pending/context_graph_system.md` as a later-stage memory improvement.
 
-Work items:
+### When to revisit
 
-- Make `api_timeout` influence actual HTTP request timeout handling.
-- Make `sse_reconnect_interval` control reconnect timing.
-- Make `auto_reconnect` decide whether SSE reconnection is enabled.
+- [ ] After workspace access is stable.
+- [ ] After file tools enforce access boundaries.
+- [ ] After the workspace directory convention is settled.
 
-Expected outcome:
+### Why it stays later
 
-- Timeout failures and reconnection behavior match the saved API configuration.
-- The settings UI is tied to actual runtime behavior instead of static labels.
+- [ ] It improves reasoning and retrieval quality, not safety boundaries.
+- [ ] It is not required to implement the workspace model.
+- [ ] The project already has a cognitive-graph base, so this can be layered on later.
 
-### 7. Improve task failure visibility
+## Done Criteria
 
-Task failures like backend timeout should remain visible as a real runtime outcome.
+The checklist is complete when:
 
-Work items:
+- [ ] Agents can declare `workspace` or `full_access`.
+- [ ] Runtime passes that information into tools.
+- [ ] File tools enforce the declared boundary.
+- [ ] Tests prove the boundary works.
+- [ ] Docs match the implementation.
 
-- Ensure timeout is distinguishable from generic failure.
-- Preserve provider/model context when available.
-- Show the failure reason clearly in task history and logs.
-
-Expected outcome:
-
-- A timed-out task is easy to identify.
-- The UI does not collapse different failure types into one vague message.
-
-### 8. Update documentation
-
-After the behavior is implemented, update the docs so they match reality.
-
-Targets:
-
-- `docs/frontend/settings.md`
-- `docs/backend/runtime.md`
-- `docs/backend/runs.md`
-- `docs/agent_structure.md`
-- `docs/backend/app-and-routes.md` if the new settings API is added there
-
-Expected outcome:
-
-- The docs explain which settings go to `config.toml`.
-- The docs explain which settings go to `localStorage`.
-- The docs explain what the save button actually does.
-
-## Suggested Execution Order
-
-1. Define the settings contract and field ownership.
-
-## Next Topic: Agent Workspace Access
-
-We also need an agent workspace model that separates safe local file access from broader repository access.
-
-### Goal
-
-Add an explicit filesystem access mode for each agent so runtime tools can enforce boundaries instead of assuming every agent can see the whole workspace.
-
-### Proposed access modes
-
-- `workspace`
-- `full_access`
-
-### Semantics
-
-- `workspace`
-  - The agent may only read/write within its assigned workspace root.
-  - This should be the default mode.
-  - It is the safer choice for most agents and all externally-influenced tasks.
-
-- `full_access`
-  - The agent may access the broader project workspace.
-  - This should be reserved for trusted system agents.
-  - It should be opt-in and clearly visible in the manifest.
-
-### Where it should live
-
-- `core/swarm_spec.py`
-  - Add workspace/access fields to `AgentBlueprint`.
-- `core/toodefl.py`
-  - Add filesystem scope information to `ToolContext`.
-- `core/core.py`
-  - Thread the access mode into runtime agent/tool creation.
-- `tools/file_writer_tool.py`
-  - Enforce path boundaries before writing.
-- Future file-reading tools
-  - Apply the same checks there.
-
-### Suggested manifest shape
-
-```toml
-[[agents]]
-agent_id = "reviewer"
-backend_name = "deepseek"
-workspace_mode = "workspace"
-workspace_root = "agents/docs_verifier/workspace/reviewer"
-tools = ["file_writer"]
-```
-
-Or, for a trusted runtime agent:
-
-```toml
-[[agents]]
-agent_id = "publisher"
-backend_name = "deepseek"
-workspace_mode = "full_access"
-tools = ["file_writer"]
-```
-
-### Expected outcome
-
-- Agents stop relying on implicit filesystem assumptions.
-- File tools become safer and easier to audit.
-- We can later add file reader or shell-like tools without redesigning the permission model.
-
-## Related Future Work: Context Graph System
-
-The proposal in `plan/pending/context_graph_system.md` is valuable, but it should remain a later-stage optimization rather than a prerequisite for workspace access.
-
-### Why it is valuable
-
-- It gives us graph-shaped memory instead of a flat message list.
-- It helps preserve relationships between facts, evidence, and claims.
-- It aligns well with the existing cognitive graph direction already in the runtime.
-
-### Why it should not block workspace work
-
-- It is mostly about reasoning/memory quality.
-- Workspace access is a concrete safety and tooling boundary.
-- The workspace model can be added first without needing the full context graph rewrite.
-
-### Recommended priority
-
-1. Land workspace / full access permissions.
-2. Make file tools respect those permissions.
-3. Keep the context graph system as a second-phase memory improvement.
-2. Add the backend settings API and config persistence for API settings.
-3. Add `localStorage` persistence for frontend preferences.
-4. Wire the Settings page to the real storage model.
-5. Connect timeout and reconnect behavior to the saved API config.
-6. Update docs and add regression coverage.
-
-## Acceptance Criteria
-
-- API settings are saved into `config.toml`.
-- Frontend preferences are saved into `localStorage`.
-- The Settings page no longer presents decorative controls as if they were already durable config.
-- `保存更改` has a real effect for both storage paths.
-- Timeout and reconnection behavior follow the saved API configuration.
-- Documentation matches the final implementation.
