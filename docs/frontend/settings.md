@@ -4,154 +4,90 @@
 
 ## 1. 页面定位
 
-当前 `Settings` 页面更像是一个“设置面板外壳”，而不是完整的系统配置中心。
+当前 `Settings` 页面是一个配置面板，支持以下两类设置：
 
-页面里确实展示了多项配置项，但就现有代码来看，真正会影响全局运行的只有 API Base URL；其余大多数开关、输入框和下拉框目前都只是本地 UI 状态。
+- **API 配置**（已连接真实行为）
+  - 后端 API 地址
+  - API 超时（秒）
+  - SSE 重连间隔（秒）
+  - 自动重连 SSE 流
+- **显示设置**（已连接真实行为）
+  - 深色模式
+  - 紧凑布局
+  - 显示调试信息
+  - 语言
 
-页面本身已经挂载到路由：
+所有设置均已接入 `localStorage` 持久化，点击"保存更改"后生效并保留。
 
-- `GET /settings`
+## 2. 设置持久化模型
 
-对应的组件是：
+`StateService` 通过 `localStorage` 前缀 `angelus_` 保存以下字段：
 
-- [`frontend/angelus/src/app/pages/settings.page.ts`](../../frontend/angelus/src/app/pages/settings.page.ts)
+| 字段 | 类型 | 默认值 | 生效范围 |
+|---|---|---|---|
+| `apiBaseUrl` | string | `/api` | 全局 API 请求基址 |
+| `apiTimeout` | number | `30` | HTTP 请求超时（秒） |
+| `reconnectInterval` | number | `5` | SSE 断开后重连等待（秒） |
+| `autoReconnect` | boolean | `true` | SSE 断开后是否自动重连 |
+| `darkMode` | boolean | `true` | 页面明暗主题 |
+| `compactMode` | boolean | `false` | 布局紧凑程度 |
+| `showDebug` | boolean | `false` | 是否展示调试信息 |
+| `language` | string | `zh` | 界面语言 |
 
-## 2. 页面结构
+### 加载时机
 
-`SettingsPage` 当前由四个区块组成：
+`StateService.init()` 会在应用初始化时调用 `loadSettings()`，从 `localStorage` 恢复所有已保存的值。
 
-1. 顶部标题区
-   - 标题：`系统设置`
-   - 副标题：`配置 API 端点、系统参数和个性化选项`
-   - 右上角有一个 `保存更改` 按钮
+### 保存时机
 
-2. `API 配置`
-   - 后端 API 地址
-   - API 超时
-   - SSE 重连间隔
-   - 自动重连 SSE 流
+用户点击 Settings 页面的"保存更改"按钮时，调用 `StateService.saveSettings(...)`，一次性写入所有设置到 `localStorage`，并触发 `settingsSaved` 信号（2 秒后自动清除）。
 
-3. `系统信息`
-   - 版本
-   - Angular 版本
-   - Node.js 版本
-   - 构建时间
-   - API 状态
+## 3. 各设置项的真实行为
 
-4. `显示设置`
-   - 深色模式
-   - 紧凑布局
-   - 显示调试信息
-   - 语言
+### 3.1 后端 API 地址
 
-5. `系统状态`
-   - 后端健康
-   - 就绪状态
-   - Swarm 数量
-   - Agent 总数
+- 保存后立即更新 `apiBaseUrl` signal
+- 后续所有 `ApiService` 调用都会使用新地址
+- 不会回写到后端配置文件
 
-## 3. 配置项现状
+### 3.2 API 超时
 
-### 3.1 真正会生效的配置
+- 保存后写入 `angelus_apiTimeout`
+- `timeout.interceptor.ts` 会从 `localStorage` 读取该值
+- 使用 rxjs `timeout` 操作符为每个 HTTP 请求添加超时限制
+- 超时后会抛出状态码为 0 的 `HttpErrorResponse`，错误消息包含"请求超时"
 
-当前只有 `后端 API 地址` 会在点击保存后写回全局状态。
+### 3.3 SSE 重连间隔 & 自动重连
 
-页面初始化时：
+- `StateService.watchRun()` 创建 `EventSource` 监听实时事件流
+- 当连接断开（`onerror`）时，如果 `autoReconnect` 为 `true`，会在 `reconnectInterval` 秒后自动重新创建连接
+- 重连计时器在 `closeStream()` 或组件销毁时会被清理
 
-- `apiUrl` 会从 `state.apiBaseUrl()` 读取初始值
+### 3.4 深色模式
 
-点击 `保存更改` 时：
+- 保存后立即调用 `applyTheme()`
+- 为 `document.body` 添加/移除 `dark` 或 `light` class
+- 实际样式变化需要项目 CSS 中定义对应的 `.dark` / `.light` 规则
 
-- 调用 `state.setApiBaseUrl(this.apiUrl())`
+### 3.5 紧凑布局 / 显示调试信息 / 语言
 
-`StateService` 里的实现是：
+- 保存后持久化到 `localStorage`
+- 当前 UI 层已读取这些信号，但部分子组件可能尚未完全响应
+- 这些设置属于前端运行时偏好，不影响后端行为
 
-- [`frontend/angelus/src/app/services/state.service.ts`](../../frontend/angelus/src/app/services/state.service.ts)
+## 4. 保存按钮的行为
 
-它会把值写入 `apiBaseUrl` 这个 signal，并做一次简单清洗：
+`saveSettings()` 执行以下动作：
 
-- 去掉首尾空白
-- 为空时回退到 `/api`
+1. 收集页面当前所有设置值
+2. 调用 `StateService.saveSettings({...})`
+3. 写入 `localStorage`
+4. 应用主题变更
+5. 触发 `settingsSaved` 信号，页面右上角显示"✓ 已保存"（2 秒后消失）
 
-这意味着：
+如果 `localStorage` 不可用（如隐私模式），保存操作会静默失败，不会抛出错误。
 
-- 之后所有依赖 `baseUrl()` 的接口调用都会改用新地址
-- 这个改动只存在于当前前端运行时内存里
-- 页面代码里没有把它持久化到 `localStorage`
-- 也没有回写到后端配置接口
-
-### 3.2 只存在于 UI 的配置
-
-下面这些字段目前只是页面本地状态，没有接到 `StateService` 或 `ApiService` 的实际逻辑：
-
-- `API 超时 (秒)` -> `apiTimeout`
-- `SSE 重连间隔 (秒)` -> `reconnectInterval`
-- `自动重连 SSE 流` -> `autoReconnect`
-- `深色模式` -> `darkMode`
-- `紧凑布局` -> `compactMode`
-- `显示调试信息` -> `showDebug`
-- `语言` -> `language`
-
-它们虽然能在界面上切换，但当前代码里没有看到：
-
-- 持久化保存
-- 应用到全局主题
-- 应用到 HTTP 超时
-- 应用到 SSE 自动重连逻辑
-- 应用到调试信息开关
-- 应用到语言切换
-
-换句话说，这些都是“可点、可改、但不会真正驱动系统行为”的字段。
-
-## 4. 运行时行为
-
-### 4.1 API 地址的作用范围
-
-`StateService` 中所有数据加载都通过 `baseUrl()` 取值，再传给 `ApiService`。
-
-因此，只要修改了 `apiBaseUrl`：
-
-- 后续的 `loadOverview()`
-- `loadAgents()`
-- `loadTasks()`
-- `loadTools()`
-- `loadEvents()`
-- `loadLogs()`
-- `loadMetrics()`
-- `loadKnowledge()`
-- `loadMemory()`
-- 以及 Swarm 相关操作
-
-都会指向新的前端 API 基址。
-
-### 4.2 保存按钮不会触发额外动作
-
-当前 `saveSettings()` 只做了一件事：
-
-- 更新 `StateService` 的 API Base URL
-
-它没有做这些事情：
-
-- 重新拉取页面数据
-- 重新连接 SSE
-- 触发页面刷新
-- 写入本地存储
-- 调用后端保存配置
-
-所以它更像是“更新运行时基址”，不是“提交一份持久化配置”。
-
-### 4.3 系统状态是只读的
-
-页面里的 `系统状态` 区块只是从 `StateService` 直接读值：
-
-- `state.health()`
-- `state.ready()`
-- `state.swarms().length`
-- `state.totalAgents()`
-
-这里没有编辑入口，也没有从设置页反向修改这些状态的逻辑。
-
-## 5. 系统信息区说明
+## 5. 系统信息区
 
 `系统信息` 区块当前都是展示型字段：
 
@@ -163,37 +99,26 @@
 
 其中只有 `API 状态` 会跟后端健康检查结果联动，其他都是静态文本或一次性生成值。
 
-## 6. `ApiService` 与 Settings 的关系
+## 6. 系统状态区
 
-`ApiService` 本身没有任何“设置保存”接口，也没有 settings 专用 CRUD。
+`系统状态` 区块是只读的，直接从 `StateService` 读取：
 
-它做的事情主要是：
+- `后端健康`：`state.health()`
+- `就绪状态`：`state.ready()`
+- `Swarm 数量`：`state.swarms().length`
+- `Agent 总数`：`state.totalAgents()`
 
-- 拼接 API 地址
-- 发起请求
-- 提供系统各模块的读写接口
+## 7. 当前限制
 
-因此 Settings 页面目前并不是通过后端接口保存配置，而只是通过 `StateService.setApiBaseUrl()` 修改运行时基址。
+- 设置目前只保存在浏览器本地，不会同步到后端配置
+- 多浏览器/多设备之间不会共享设置
+- `language` 切换只持久化值，完整国际化需要后续补充翻译文件
+- `compactMode` 和 `showDebug` 的信号已就绪，但部分子组件可能尚未响应
 
-从这个角度看，Settings 页面对 `ApiService` 的影响是间接的：
+## 8. 与 `ApiService` 的关系
 
-- 先改 `apiBaseUrl`
-- 再让所有后续请求走新的 base URL
+`ApiService` 本身没有直接读取 Settings，但：
 
-## 7. 现在能做什么
-
-- 修改前端当前运行时的 API Base URL
-- 查看后端健康、就绪、Swarm 数量和 Agent 总数
-- 直观看到 API 是否在线
-- 在 UI 上切换几个“看起来像设置项”的选项
-
-## 8. 现在还不能做什么
-
-- 不能把设置真正持久化到本地存储
-- 不能把设置保存到后端
-- 不能让 `apiTimeout` 真正控制请求超时
-- 不能让 `reconnectInterval` 真正控制 SSE 重连
-- 不能让 `autoReconnect` 真正接管实时流重连策略
-- 不能让 `darkMode`、`compactMode`、`showDebug`、`language` 真正驱动全局行为
-- 不能在设置页里重新拉取全部数据或立即应用除 API Base URL 外的其他配置
-
+- 所有 API 地址通过 `StateService.baseUrl()` 间接使用
+- HTTP 超时通过 `timeout.interceptor.ts` 从 `localStorage` 读取，无需修改 `ApiService`
+- SSE 重连逻辑直接在 `StateService.watchRun()` 中实现

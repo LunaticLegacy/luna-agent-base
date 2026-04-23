@@ -209,3 +209,33 @@
 
 它的设计偏向于“可热更新，但不自动取消正在跑的东西”。
 
+## 配置范围说明
+
+当前后端配置表面非常精简。根配置 `config.toml` 只包含一个显式字段：
+
+```toml
+[app]
+swarm_root = "agents"
+```
+
+### 前端设置与后端的关系
+
+前端 Settings 页面呈现的设置项（API 超时、SSE 重连间隔、深色模式等）**不会回写到后端配置**。它们以 `angelus_*` 为前缀保存在浏览器 `localStorage` 中，属于纯前端运行时偏好。
+
+这意味着：
+
+- 后端不负责消费这些前端设置
+- 服务重启后，前端设置不会丢失（因为存在浏览器本地）
+- 多设备/多浏览器之间不会自动同步
+- 如果需要后端级别的超时控制，需要单独扩展 `config.toml` schema 并在 `AgentConfig` 或执行层中读取
+
+### 扩展后端配置时的建议
+
+如果后续需要让后端也支持可配置的超时、重试策略或日志级别，建议：
+
+1. 在 `config.toml` 中新增对应表（例如 `[app.timeouts]`）
+2. 在 `core/config.py` 中扩展 `AgentConfig` 或新增配置 dataclass
+3. 在 `RuntimeRegistry.from_config_path()` 中读取并挂载到 registry
+4. 在 `web/app_factory.py` 中将配置对象注入 Flask app extensions，供路由层读取
+
+当前实现有意保持后端配置最小化，以降低部署复杂度。
