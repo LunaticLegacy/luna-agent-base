@@ -91,10 +91,11 @@ class ThoughtGraphTest(unittest.TestCase):
                 character_prompt="review",
                 cognitive_graph=private,
                 workspace_root=workspace_root,
+                swarm_name="test_swarm",
             )
 
             agent.persist_private_thought_snapshot()
-            snapshot_path = workspace_root / ".angelus_private" / "manual" / "reviewer" / "cognitive_graph_snapshot.json"
+            snapshot_path = agent.private_workspace_dir / "cognitive_graph_snapshot.json"
 
             self.assertTrue(snapshot_path.exists())
             self.assertIn("Private draft hypothesis", snapshot_path.read_text(encoding="utf-8"))
@@ -108,6 +109,7 @@ class ThoughtGraphTest(unittest.TestCase):
                 llm_handler=object(),
                 character_prompt="review",
                 workspace_root=workspace_root,
+                swarm_name="test_swarm",
             )
             agent.set_run_id("run-a")
             run_a_dir = agent.private_workspace_dir

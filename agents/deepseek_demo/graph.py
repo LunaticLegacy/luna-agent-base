@@ -45,7 +45,9 @@ def build_graph(core):
             agent_id='organizer',
             additional_prompt=('Phase: dispatch. Fan out the active branches, but keep the shape adaptive. '
  'Use graph edits to widen or narrow the tree if the current situation '
- 'requires it. The join point is node 17.'),
+ 'requires it. The join point is node 17. Do not include next_node_id, '
+ 'next_node_ids, branch, or branches in your response. The runtime will handle '
+ 'routing automatically.'),
         ),
     )
     graph.add_node(

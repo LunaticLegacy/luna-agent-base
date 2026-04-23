@@ -14,6 +14,7 @@ from .toodefl import ToolDefinition, normalize_capabilities
 from .skills import SkillAsset
 from .protocols import AgentLike
 from .results import GraphValidationResult
+from .task_graph import TaskGraph
 
 if TYPE_CHECKING:
     from .policy import ExecutionGraph
@@ -43,6 +44,7 @@ class Core:
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
         self.active_thought_subgraphs: Dict[str, CognitiveSubgraphDescriptor] = {}
         self.current_run_id: Optional[str] = None
+        self.task_graph: Optional[TaskGraph] = None
 
     async def init(self) -> None:
         """Initialize runtime resources and validate the current graph."""
@@ -58,6 +60,26 @@ class Core:
             subject_id=self.agent_name,
             detail={"runtime_dir": str(runtime_dir)},
         )
+
+    def set_task_graph(self, task_graph: TaskGraph, *, persist_path: Optional[Path] = None) -> None:
+        """Attach a shared task graph for all agents in this swarm."""
+        self.task_graph = task_graph
+        self._task_graph_path = persist_path
+        self._record_runtime_change(
+            action="set_task_graph",
+            subject_kind="task_graph",
+            subject_id=task_graph.graph_id,
+            detail={"task_count": len(task_graph.tasks)},
+        )
+
+    def persist_task_graph(self) -> None:
+        """Save the current task graph to disk, if a persist path was configured."""
+        if self.task_graph is not None and getattr(self, "_task_graph_path", None):
+            self.task_graph.save(self._task_graph_path)
+
+    def get_task_graph(self) -> Optional[TaskGraph]:
+        """Return the shared task graph, if any."""
+        return self.task_graph
 
     def create_agent(
         self,
@@ -89,6 +111,7 @@ class Core:
             cognitive_graph=cognitive_graph,
             workspace_mode=workspace_mode,
             workspace_root=workspace_root if workspace_root is not None else self.workspace_root,
+            swarm_name=self.agent_name,
         )
         agent.set_run_id(self.current_run_id)
         self.add_agent(agent)

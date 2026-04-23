@@ -698,7 +698,11 @@ class GraphExecutor:
         next_node_override: Optional[int],
     ) -> List[int]:
         if next_node_override is not None:
-            return [next_node_override]
+            # Ignore self-references; they are typically agent hallucinations.
+            if next_node_override == node.node_id:
+                next_node_override = None
+            else:
+                return [next_node_override]
 
         if isinstance(payload, dict):
             next_node_ids = payload.get("next_node_ids")

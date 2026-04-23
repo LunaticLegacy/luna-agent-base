@@ -42,6 +42,7 @@ class Agent:
         cognitive_graph: Optional[CognitiveGraph] = None,
         workspace_mode: str = "workspace",
         workspace_root: Optional[Path] = None,
+        swarm_name: Optional[str] = None,
     ) -> None:
         self.agent_id = agent_id
         self.name = name or agent_id
@@ -54,6 +55,7 @@ class Agent:
         self.cognitive_graph = cognitive_graph or CognitiveGraph(graph_id=f"agent_{agent_id}")
         self.workspace_mode = workspace_mode
         self.workspace_root = Path(workspace_root).resolve() if workspace_root is not None else None
+        self.swarm_name = swarm_name
         self.current_run_id: Optional[str] = None
 
     def append_context(self, role: str, content: str) -> None:
@@ -84,11 +86,15 @@ class Agent:
 
     @property
     def private_workspace_dir(self) -> Path:
-        """Directory for this agent's private, non-shared runtime artifacts."""
+        """Directory for this agent's private, non-shared runtime artifacts.
+
+        Organised by swarm so that state from different swarms never collides.
+        """
         root = self.workspace_root or Path.cwd()
+        swarm_segment = self.swarm_name or "unknown"
         if self.current_run_id:
-            return root / ".angelus_private" / "runs" / self.current_run_id / self.agent_id
-        return root / ".angelus_private" / "manual" / self.agent_id
+            return root / ".angelus_private" / "swarms" / swarm_segment / "runs" / self.current_run_id / self.agent_id
+        return root / ".angelus_private" / "swarms" / swarm_segment / "manual" / self.agent_id
 
     def summarize_private_workspace(self, *, max_files: int = 8, max_chars: int = 1200) -> str:
         """Return a compact summary of private workspace artifacts for prompting."""

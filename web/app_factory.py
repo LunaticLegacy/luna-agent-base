@@ -7,11 +7,11 @@ from flask import Flask, jsonify
 from core.swarm_loader import SwarmLoaderError
 from web.content_store import ContentStore
 from web.runtime import RuntimeRegistry
+from web.task_store import TaskStore
 from web.routes.swarms import _serialize_swarm_with_runtime
-from web.runs import serialize_graph_snapshot
 
 from .errors import register_error_handlers
-from .routes import catalog_bp, content_bp, health_bp, settings_bp, swarms_bp
+from .routes import catalog_bp, content_bp, health_bp, settings_bp, swarms_bp, tasks_bp
 from .security import install_api_security
 
 
@@ -40,6 +40,10 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
         data_dir=config_path.parent / "data",
         runtime_registry=runtime_registry,
     )
+    app.extensions["angelus_tasks"] = TaskStore.from_runtime_registry(
+        data_dir=config_path.parent / "data",
+        runtime_registry=runtime_registry,
+    )
 
     @app.get("/api/swarms")
     def api_swarms():
@@ -53,24 +57,12 @@ def create_app(config_path: str | Path = "config.toml") -> Flask:
             }
         )
 
-    @app.get("/api/swarms/<string:swarm_name>")
-    def api_swarm_detail(swarm_name: str):
-        swarm = runtime_registry.get_swarm(swarm_name)
-        return jsonify({"success": True, "swarm": _serialize_swarm_with_runtime(swarm)})
-
-    @app.get("/api/swarms/<string:swarm_name>/graph")
-    def api_swarm_graph(swarm_name: str):
-        swarm = runtime_registry.get_swarm(swarm_name)
-        graph = swarm.core.get_execution_graph()
-        if graph is None:
-            return jsonify({"success": False, "error": f"Swarm '{swarm_name}' has no execution graph attached."}), 400
-        return jsonify({"success": True, "swarm": swarm_name, "graph": serialize_graph_snapshot(graph)})
-
     register_error_handlers(app)
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(catalog_bp, url_prefix="/api")
     app.register_blueprint(content_bp, url_prefix="/api")
     app.register_blueprint(settings_bp, url_prefix="/api")
+    app.register_blueprint(tasks_bp, url_prefix="/api")
     # Keep swarm routes under /api/swarms so they match the documented public API.
     app.register_blueprint(swarms_bp, url_prefix="/api/swarms")
 

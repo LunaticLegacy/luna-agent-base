@@ -13,7 +13,7 @@ from web.runs import (
 from web.runtime import RuntimeRegistry
 from web.utils import to_jsonable
 
-swarms_bp = Blueprint("swarms", __name__, url_prefix="/swarms")
+swarms_bp = Blueprint("swarms", __name__)
 
 
 def _get_runtime_registry() -> RuntimeRegistry:

@@ -273,6 +273,11 @@ export interface TaskCatalogItem {
   output: JsonValue;
   logs: TaskCatalogLogItem[];
   swarm: string;
+  dependencies?: string[];
+  next_tasks?: string[];
+  failed_count?: number;
+  completed_count?: number;
+  executed_count?: number;
 }
 
 export interface TaskCatalogStats {
