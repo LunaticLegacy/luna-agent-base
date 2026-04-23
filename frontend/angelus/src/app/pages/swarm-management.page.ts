@@ -246,27 +246,6 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
           </div>
         </div>
 
-        <div class="panel-card">
-          <div class="panel-header">
-            <h3>实时活动</h3>
-          </div>
-          <div class="activity-list">
-            @for (event of state.liveEvents(); track $index) {
-              <div class="activity-item">
-                <div class="activity-icon" [class.success]="event.tone === 'success'" [class.error]="event.tone === 'error'">
-                  {{ (event.tone || 'INFO').charAt(0).toUpperCase() }}
-                </div>
-                <div class="activity-body">
-                  <div class="activity-title">{{ event.method }} {{ event.endpoint }}</div>
-                  <div class="activity-desc">{{ event.title }}</div>
-                  <div class="activity-time">{{ event.timestamp }}</div>
-                </div>
-              </div>
-            } @empty {
-              <div class="empty-state">暂无活动记录</div>
-            }
-          </div>
-        </div>
       </div>
         }
         @case ('拓扑视图') {
@@ -337,25 +316,6 @@ import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
                     } @empty { <tr><td colspan="6" class="empty-cell">暂无任务</td></tr> }
                   </tbody>
                 </table>
-              </div>
-            </div>
-          </div>
-        }
-        @case ('活动') {
-          <div class="tab-content">
-            <div class="panel-card">
-              <div class="panel-header"><h3>活动记录</h3><span class="badge">{{ state.derivedEvents().length }}</span></div>
-              <div class="activity-list">
-                @for (ev of state.derivedEvents(); track ev.id) {
-                  <div class="activity-item">
-                    <div class="activity-icon" [class.success]="ev.level==='info'" [class.error]="ev.level==='error'">{{ ev.level.charAt(0).toUpperCase() }}</div>
-                    <div class="activity-body">
-                      <div class="activity-title">{{ ev.source }} — {{ ev.event }}</div>
-                      <div class="activity-desc">{{ ev.detail }}</div>
-                      <div class="activity-time">{{ ev.time }}</div>
-                    </div>
-                  </div>
-                } @empty { <div class="empty-state">暂无活动记录</div> }
               </div>
             </div>
           </div>
@@ -850,7 +810,7 @@ export class SwarmManagementPageComponent {
   readonly state = inject(StateService);
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
-  readonly tabs = ['概览', '拓扑视图', '思考图', 'Agents', '任务', '活动', '知识', '记忆', '设置'];
+  readonly tabs = ['概览', '拓扑视图', '思考图', 'Agents', '任务', '知识', '记忆', '设置'];
 
   async loadSwarm(): Promise<void> {
     const source = window.prompt('输入要加载的 Swarm 路径或名称');

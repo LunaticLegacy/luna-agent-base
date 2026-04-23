@@ -30,19 +30,20 @@ interface RenderEdge {
         {{ graph?.nodes?.length ?? 0 }} 节点 · {{ graph?.edges?.length ?? 0 }} 边 ·
         {{ (graph?.active_subgraphs?.length ?? 0) }} 子图 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
       </div>
-      <svg
-        #viewport
-        [attr.viewBox]="viewBox()"
-        preserveAspectRatio="none"
-        class="thought-svg"
-        role="img"
-        [attr.aria-label]="ariaLabel"
-        (pointerdown)="onPointerDown($event)"
-        (pointermove)="onPointerMove($event)"
-        (pointerup)="onPointerUp($event)"
-        (pointerleave)="onPointerUp($event)"
-        (wheel)="onWheel($event)"
-      >
+      <div class="thought-svg-scroll">
+        <svg
+          #viewport
+          [attr.viewBox]="viewBox()"
+          [attr.height]="svgHeight() + 'px'"
+          class="thought-svg"
+          role="img"
+          [attr.aria-label]="ariaLabel"
+          (pointerdown)="onPointerDown($event)"
+          (pointermove)="onPointerMove($event)"
+          (pointerup)="onPointerUp($event)"
+          (pointerleave)="onPointerUp($event)"
+          (wheel)="onWheel($event)"
+        >
         <defs>
           <marker id="arrowhead-thought" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
             <polygon points="0 0, 8 3, 0 6" fill="rgba(94, 234, 212, 0.45)" />
@@ -117,7 +118,8 @@ interface RenderEdge {
             </g>
           }
         </g>
-      </svg>
+        </svg>
+      </div>
 
       <div class="thought-panels">
         <div class="thought-panel">
@@ -291,13 +293,10 @@ export class ThoughtGraphViewerComponent {
     const update = () => {
       const rect = container.getBoundingClientRect();
       const w = Math.max(440, Math.round(rect.width));
-      const h = Math.max(360, Math.round(rect.height));
       this.svgWidth.set(w);
-      this.svgHeight.set(h);
-      this.viewBox.set(`0 0 ${w} ${h}`);
-      this.nodeRadius.set(Math.max(20, Math.min(28, Math.round(Math.min(w, h) / 22))));
-      this.nodeWidth.set(Math.max(160, Math.min(240, Math.round(w / 5))));
-      this.nodeHeight.set(Math.max(50, Math.min(72, Math.round(h / 10))));
+      this.nodeRadius.set(Math.max(20, Math.min(28, Math.round(w / 22))));
+      this.nodeWidth.set(Math.max(140, Math.min(220, Math.round(w / 5))));
+      this.nodeHeight.set(Math.max(48, Math.min(64, Math.round(w / 14))));
       this.recalculateLayout();
     };
 
@@ -317,16 +316,23 @@ export class ThoughtGraphViewerComponent {
       this.zoom.set(1);
       this.panX.set(0);
       this.panY.set(0);
+      this.svgHeight.set(380);
+      this.viewBox.set(`0 0 ${this.svgWidth()} 380`);
       return;
     }
 
     const nodes = [...g.nodes];
     const svgW = this.svgWidth();
-    const svgH = this.svgHeight();
     const pad = this.padding();
+    const nodeW = this.nodeWidth();
+    const nodeH = this.nodeHeight();
+    const gapX = 28;   // 水平间隙
+    const gapY = 40;   // 垂直间隙（行之间）
+    const laneGap = 48; // lane 之间额外间隙
+
     const innerWidth = Math.max(1, svgW - pad * 2);
-    const innerHeight = Math.max(1, svgH - pad * 2);
-    const laneGap = innerHeight / 3;
+    const nodesPerRow = Math.max(1, Math.floor(innerWidth / (nodeW + gapX)));
+
     const laneGroups = new Map<number, ThoughtGraphNodeSnapshot[]>();
     for (const node of nodes) {
       const lane = this.nodeLane(node);
@@ -340,6 +346,7 @@ export class ThoughtGraphViewerComponent {
     );
     const sortedLanes = [0, 1, 2];
     const renderNodes: RenderNode[] = [];
+    let currentY = pad;
 
     for (const lane of sortedLanes) {
       const laneNodes = (laneGroups.get(lane) ?? []).slice().sort((a, b) => {
@@ -350,13 +357,29 @@ export class ThoughtGraphViewerComponent {
         if (confidenceDiff !== 0) return confidenceDiff;
         return a.node_id.localeCompare(b.node_id);
       });
-      const y = pad + lane * laneGap + laneGap / 2;
-      const count = Math.max(1, laneNodes.length);
+
+      if (laneNodes.length === 0) continue;
+
+      const rows = Math.ceil(laneNodes.length / nodesPerRow);
+      const laneHeight = rows * nodeH + (rows - 1) * gapY;
+
       laneNodes.forEach((node, index) => {
-        const x = pad + ((index + 1) * innerWidth) / (count + 1);
+        const row = Math.floor(index / nodesPerRow);
+        const col = index % nodesPerRow;
+        const nodesInThisRow = Math.min(nodesPerRow, laneNodes.length - row * nodesPerRow);
+        const rowWidth = nodesInThisRow * nodeW + (nodesInThisRow - 1) * gapX;
+        const x = pad + (innerWidth - rowWidth) / 2 + col * (nodeW + gapX) + nodeW / 2;
+        const y = currentY + row * (nodeH + gapY) + nodeH / 2;
         renderNodes.push({ node, x, y, lane });
       });
+
+      currentY += laneHeight + laneGap;
     }
+
+    const contentHeight = currentY + pad;
+    const finalHeight = Math.max(380, contentHeight);
+    this.svgHeight.set(finalHeight);
+    this.viewBox.set(`0 0 ${svgW} ${finalHeight}`);
 
     const nodeById = new Map(renderNodes.map((item) => [item.node.node_id, item]));
     const renderEdges = g.edges.map((edge) => ({

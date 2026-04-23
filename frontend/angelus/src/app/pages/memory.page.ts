@@ -263,10 +263,6 @@ import { StateService, MemoryItem } from '../services/state.service';
               <span class="info-key">Active Run</span>
               <span class="info-val mono">{{ state.activeRun()?.run_id || 'None' }}</span>
             </div>
-            <div class="info-item">
-              <span class="info-key">Live Events</span>
-              <span class="info-val">{{ (state.liveEvents() || []).length }}</span>
-            </div>
           </div>
         </div>
       </div>

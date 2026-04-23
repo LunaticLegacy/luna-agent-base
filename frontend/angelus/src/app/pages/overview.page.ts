@@ -52,11 +52,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
           <div class="stat-value" [class.success]="!!state.resolvedGraph()">{{ state.resolvedGraph() ? '已加载' : '未加载' }}</div>
           <div class="stat-sub">{{ state.graphSummary() || '—' }}</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">事件流</div>
-          <div class="stat-value">{{ (state.liveEvents() || []).length }}</div>
-          <div class="stat-sub">实时事件</div>
-        </div>
       </div>
 
       <!-- Two Column Layout -->
@@ -114,20 +109,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
               </div>
             </div>
 
-            <div class="live-activity">
-              <h4>实时活动</h4>
-              <div class="event-list">
-                @for (event of state.liveEvents(); track $index) {
-                  <div class="event-item">
-                    <span class="event-time">{{ event.timestamp || 'now' }}</span>
-                    <span class="event-type">{{ event.tone || 'INFO' }}</span>
-                    <span class="event-msg">{{ event.title || event.meta || 'Event' }}</span>
-                  </div>
-                } @empty {
-                  <div class="empty-state">暂无活动</div>
-                }
-              </div>
-            </div>
           </div>
         </div>
       </div>

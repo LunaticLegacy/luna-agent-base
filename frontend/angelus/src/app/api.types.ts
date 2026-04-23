@@ -427,32 +427,6 @@ export interface MetricsResponse {
   };
 }
 
-export interface EventCatalogItem {
-  id: string;
-  time: string;
-  level: 'info' | 'warn' | 'error';
-  source: string;
-  event: string;
-  detail: string;
-  data: JsonValue;
-}
-
-export interface EventCatalogStats {
-  today: number;
-  errors: number;
-  warnings: number;
-  infos: number;
-}
-
-export interface EventListResponse {
-  success: boolean;
-  total: number;
-  page: number;
-  limit: number;
-  items: EventCatalogItem[];
-  stats: EventCatalogStats;
-}
-
 export interface LogCatalogItem {
   id: string;
   time: string;
