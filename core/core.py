@@ -297,3 +297,13 @@ class Core:
     def get_cognitive_graph_snapshot(self) -> Dict[str, Any]:
         """Return a JSON-serializable snapshot of the swarm cognitive graph."""
         return self.swarm_cognitive_graph.snapshot()
+
+    def reset_runtime_state(self) -> None:
+        """Clear transient runtime state before starting a fresh swarm run."""
+        for agent in self.agents.values():
+            reset_runtime_state = getattr(agent, "reset_runtime_state", None)
+            if callable(reset_runtime_state):
+                reset_runtime_state()
+                continue
+            agent.reset_context()
+        self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{self.agent_name}")

@@ -153,7 +153,7 @@ export interface AgentRoundResponse {
 export interface AgentCatalogItem {
   id: string;
   name: string;
-  status: 'online' | 'offline' | 'busy' | 'error';
+  status: 'online' | 'offline' | 'running' | 'error';
   type: 'coordinator' | 'worker' | 'specialist' | 'reviewer' | string;
   capabilities: string[];
   tags: string[];

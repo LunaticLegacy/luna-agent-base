@@ -78,7 +78,7 @@ def list_swarm_agents(swarm_name: str):
 
     filtered_stats = {
         "total": len(filtered),
-        "active": sum(1 for agent in filtered if agent.get("status") == "busy"),
+        "active": sum(1 for agent in filtered if agent.get("status") == "running"),
         "success_rate": round(
             sum(float(agent.get("success_rate", 0.0)) for agent in filtered) / len(filtered), 1
         ) if filtered else 0.0,

@@ -57,13 +57,13 @@ import { StateService, AgentRow } from '../services/state.service';
             (input)="searchQuery.set($any($event).target.value)"
           />
         </div>
-        <select class="filter-select" [value]="filterStatus()" (change)="filterStatus.set($any($event).target.value)">
-          <option value="">全部状态</option>
-          <option value="online">在线</option>
-          <option value="offline">离线</option>
-          <option value="busy">忙碌</option>
-          <option value="error">异常</option>
-        </select>
+          <select class="filter-select" [value]="filterStatus()" (change)="filterStatus.set($any($event).target.value)">
+            <option value="">全部状态</option>
+            <option value="online">在线</option>
+            <option value="offline">离线</option>
+            <option value="running">执行中</option>
+            <option value="error">异常</option>
+          </select>
         <select class="filter-select" [value]="filterType()" (change)="filterType.set($any($event).target.value)">
           <option value="">全部类型</option>
           <option value="coordinator">Coordinator</option>
@@ -122,7 +122,7 @@ import { StateService, AgentRow } from '../services/state.service';
                         </div>
                       </div>
                     </td>
-                    <td><span class="pill" [class.online]="agent.status === 'online'" [class.offline]="agent.status === 'offline'" [class.busy]="agent.status === 'busy'" [class.error]="agent.status === 'error'">{{ statusText(agent.status) }}</span></td>
+                    <td><span class="pill" [class.online]="agent.status === 'online'" [class.offline]="agent.status === 'offline'" [class.running]="agent.status === 'running'" [class.error]="agent.status === 'error'">{{ statusText(agent.status) }}</span></td>
                     <td>{{ agent.type }}</td>
                     <td>
                       <div class="cap-tags">
@@ -191,7 +191,7 @@ import { StateService, AgentRow } from '../services/state.service';
               <!-- Basic Info -->
               <div class="drawer-section">
                 <h4>基本信息</h4>
-                <div class="drawer-row"><span>状态</span><span class="pill" [class.online]="agent.status === 'online'" [class.offline]="agent.status === 'offline'" [class.busy]="agent.status === 'busy'" [class.error]="agent.status === 'error'">{{ statusText(agent.status) }}</span></div>
+                <div class="drawer-row"><span>状态</span><span class="pill" [class.online]="agent.status === 'online'" [class.offline]="agent.status === 'offline'" [class.running]="agent.status === 'running'" [class.error]="agent.status === 'error'">{{ statusText(agent.status) }}</span></div>
                 <div class="drawer-row"><span>类型</span><span>{{ agent.type }}</span></div>
                 <div class="drawer-row"><span>任务执行</span><span>{{ agent.tasksExecuted }}</span></div>
                 <div class="drawer-row"><span>成功率</span><span>{{ agent.successRate }}%</span></div>
@@ -411,7 +411,7 @@ import { StateService, AgentRow } from '../services/state.service';
     }
     .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.offline { background: rgba(100,116,139,0.15); color: #94a3b8; }
-    .pill.busy { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.error { background: rgba(239,68,68,0.15); color: #ef4444; }
     .cap-tags { display: flex; gap: 4px; flex-wrap: wrap; }
     .mini-cap, .mini-tag {
@@ -626,7 +626,7 @@ export class AgentsPageComponent {
   });
 
   statusText(status: string): string {
-    const map: Record<string, string> = { online: '在线', offline: '离线', busy: '忙碌', error: '异常' };
+    const map: Record<string, string> = { online: '在线', offline: '离线', running: '执行中', error: '异常' };
     return map[status] || status;
   }
 

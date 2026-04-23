@@ -56,7 +56,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
         </div>
         <div class="stat-card">
           <div class="stat-label">当前任务</div>
-          <div class="stat-value">{{ state.activeRun() ? '运行中' : '空闲' }}</div>
+          <div class="stat-value">{{ state.activeRunStatusText() }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">成功率</div>
@@ -89,7 +89,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
         @case ('概览') {
 
       <!-- Topology Canvas -->
-      <div class="panel-card topology-canvas">
+        <div class="panel-card topology-canvas">
         <div class="panel-header">
           <h3>Swarm 拓扑</h3>
           <div class="panel-actions">
@@ -98,7 +98,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
         </div>
         <div class="topology-graph">
           @if (state.resolvedGraph()) {
-            <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
+            <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
           } @else {
             <div class="empty-state">暂无拓扑数据</div>
           }
@@ -226,7 +226,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
                   <tr>
                     <td class="mono">{{ state.activeRun()?.run_id || 'RUN-001' }}</td>
                     <td>Swarm 执行</td>
-                    <td><span class="pill running">{{ state.streamState() || 'running' }}</span></td>
+                    <td><span class="pill running">{{ state.activeRunStatusText() }}</span></td>
                     <td>
                       <div class="progress-bar"><div class="progress-fill" [style.width.%]="45"></div></div>
                     </td>
@@ -295,7 +295,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
                   <tbody>
                     @for (agent of state.derivedAgents(); track agent.id) {
                       <tr><td class="mono">{{ agent.id }}</td>
-                      <td><span class="pill" [class.online]="agent.status==='online'" [class.busy]="agent.status==='busy'" [class.error]="agent.status==='error'">{{ agent.status }}</span></td>
+                      <td><span class="pill" [class.online]="agent.status==='online'" [class.running]="agent.status==='running'" [class.error]="agent.status==='error'">{{ agent.status }}</span></td>
                       <td>{{ agent.type }}</td><td>{{ agent.tasksExecuted }}</td><td>{{ agent.successRate }}%</td><td>{{ agent.avgResponseTime }}</td><td>{{ agent.lastActivity }}</td></tr>
                     } @empty { <tr><td colspan="7" class="empty-cell">暂无 Agent</td></tr> }
                   </tbody>
@@ -758,7 +758,7 @@ import { GraphViewerComponent } from '../graph-viewer.component';
       font-size: 11px;
       font-weight: 600;
     }
-    .pill.running { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.busy { background: rgba(139,92,246,0.15); color: #a78bfa; }

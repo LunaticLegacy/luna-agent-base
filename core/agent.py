@@ -66,6 +66,11 @@ class Agent:
         self._context.messages.clear()
         self._context.metadata.clear()
 
+    def reset_runtime_state(self) -> None:
+        """Clear per-run state so a fresh graph run starts without residue."""
+        self.reset_context()
+        self.cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}")
+
     def _build_system_prompt(self, additional_prompt: Optional[str] = None) -> str:
         prompts = [self.character_prompt.strip()]
         if additional_prompt:

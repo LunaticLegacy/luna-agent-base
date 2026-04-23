@@ -5,6 +5,7 @@ import type {
   AgentCatalogItem,
   ApiIndexResponse,
   EventCatalogItem,
+  EventListResponse,
   GraphSnapshot,
   HealthResponse,
   KnowledgeCatalogItem,
@@ -87,7 +88,7 @@ export interface ErrorDetail {
 export interface AgentRow {
   id: string;
   name: string;
-  status: 'online' | 'offline' | 'busy' | 'error';
+  status: 'online' | 'offline' | 'running' | 'error';
   type: string;
   capabilities: string[];
   tags: string[];
@@ -292,6 +293,7 @@ export class StateService {
   readonly swarmStatsLoaded = signal(false);
   readonly events = signal<EventItem[]>([]);
   readonly eventsLoaded = signal(false);
+  readonly eventsResponse = signal<EventListResponse | null>(null);
   readonly logs = signal<LogItem[]>([]);
   readonly logsLoaded = signal(false);
   readonly logsResponse = signal<LogListResponse | null>(null);
@@ -306,10 +308,19 @@ export class StateService {
 
   private readonly feedId = signal(0);
   private eventSource: EventSource | null = null;
+  private refreshGraceful = false;
 
   readonly totalAgents = computed(() => this.swarms().reduce((sum, s) => sum + s.agent_count, 0));
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
   readonly resolvedGraph = computed<GraphSnapshot | null>(() => this.selectedSwarm()?.graph ?? this.selectedGraph());
+  readonly activeRunNodeId = computed(() => {
+    const run = this.activeRun();
+    return run?.status === 'running' ? run.current_node_id ?? null : null;
+  });
+  readonly activeRunStatusText = computed(() => {
+    const run = this.activeRun();
+    return run ? this.runStatusLabel(run.status) : '空闲';
+  });
 
   /* ---------- Derived data (replaces hard-coded mock) ---------- */
 
@@ -323,11 +334,11 @@ export class StateService {
     return swarm.agent_files.map((file, idx) => {
       const id = this.stripAgentName(file);
       const node = graph?.nodes.find(n => n.agent_id === id || n.node_name === id);
-      const isBusy = run?.current_node_name === id && run?.status === 'running';
+      const isRunning = run?.current_node_name === id && run?.status === 'running';
       const calls = feed.filter(f => f.title.includes(id) || (f.meta && f.meta.includes(id))).length;
       return {
         id, name: id,
-        status: (isBusy ? 'busy' : 'online') as AgentRow['status'],
+        status: (isRunning ? 'running' : 'online') as AgentRow['status'],
         type: node?.node_type?.replace('Node', '').toLowerCase() || 'agent',
         capabilities: Array.isArray((node?.metadata as Record<string, unknown>)?.['capabilities']) ? (node?.metadata as Record<string, unknown>)?.['capabilities'] as string[] : [],
         tags: Array.isArray((node?.metadata as Record<string, unknown>)?.['tags']) ? (node?.metadata as Record<string, unknown>)?.['tags'] as string[] : [],
@@ -344,7 +355,7 @@ export class StateService {
     const agents = this.derivedAgents();
     return {
       total: agents.length,
-      active: agents.filter(a => a.status === 'online' || a.status === 'busy').length,
+      active: agents.filter(a => a.status === 'online' || a.status === 'running').length,
       totalTasks: agents.reduce((s, a) => s + a.tasksExecuted, 0),
       avgResponseTime: agents.length ? `${Math.round(agents.reduce((s, a) => s + parseInt(a.avgResponseTime), 0) / agents.length)}ms` : '-',
       totalTokenUsage: agents.reduce((s, a) => s + a.tokenUsage, 0),
@@ -446,12 +457,14 @@ export class StateService {
   });
 
   readonly eventStats = computed(() => {
+    const response = this.eventsResponse();
     const events = this.derivedEvents();
+    const stats = response?.stats ?? null;
     return {
-      today: events.length,
-      errors: events.filter(e => e.level === 'error').length,
-      warnings: events.filter(e => e.level === 'warn').length,
-      infos: events.filter(e => e.level === 'info').length,
+      today: response?.total ?? events.length,
+      errors: stats?.errors ?? events.filter(e => e.level === 'error').length,
+      warnings: stats?.warnings ?? events.filter(e => e.level === 'warn').length,
+      infos: stats?.infos ?? events.filter(e => e.level === 'info').length,
     };
   });
 
@@ -694,7 +707,7 @@ export class StateService {
     const counts = distribution
       ? [
           { label: '完成', count: distribution.completed, color: '#10B981' },
-          { label: '运行中', count: distribution.running, color: '#f59e0b' },
+          { label: '运行中', count: distribution.running, color: '#3B82F6' },
           { label: '待处理', count: distribution.pending, color: '#3B82F6' },
           { label: '失败', count: distribution.failed, color: '#ef4444' },
         ]
@@ -706,7 +719,7 @@ export class StateService {
           const failed = this.derivedTasks().filter((task) => task.status === 'failed').length;
           return [
             { label: '完成', count: completed, color: '#10B981' },
-            { label: '运行中', count: running, color: '#f59e0b' },
+            { label: '运行中', count: running, color: '#3B82F6' },
             { label: '待处理', count: pending, color: '#3B82F6' },
             { label: '失败', count: failed, color: '#ef4444' },
           ];
@@ -739,8 +752,13 @@ export class StateService {
 
   readonly topologyLegendItems = computed<TopologyLegendItem[]>(() => {
     const graph = this.resolvedGraph();
+    const agents = this.derivedAgents();
+    const runningCount = agents.filter((agent) => agent.status === 'running').length;
+    const onlineCount = agents.filter((agent) => agent.status === 'online').length;
     if (!graph) {
       return [
+        { label: '正在运行', detail: `${runningCount} 个节点`, color: '#3B82F6', kind: 'dot' },
+        { label: '在线', detail: `${onlineCount} 个节点`, color: '#10B981', kind: 'dot' },
         { label: '入口节点', detail: '—', color: '#8B5CF6', kind: 'dot' },
         { label: 'Agent 节点', detail: '—', color: '#10B981', kind: 'dot' },
         { label: 'Tool 节点', detail: '—', color: '#f59e0b', kind: 'dot' },
@@ -753,6 +771,8 @@ export class StateService {
     const agentCount = graph.nodes.filter((node) => node.node_type === 'AgentNode').length;
     const toolCount = graph.nodes.filter((node) => node.node_type === 'ToolNode').length;
     return [
+      { label: '正在运行', detail: `${runningCount} 个节点`, color: '#3B82F6', kind: 'dot' },
+      { label: '在线', detail: `${onlineCount} 个节点`, color: '#10B981', kind: 'dot' },
       { label: '入口节点', detail: graph.entry_node_id !== null ? `ID ${graph.entry_node_id}` : '无', color: '#8B5CF6', kind: 'dot' },
       { label: 'Agent 节点', detail: `${agentCount} 个`, color: '#10B981', kind: 'dot' },
       { label: 'Tool 节点', detail: `${toolCount} 个`, color: '#f59e0b', kind: 'dot' },
@@ -1036,8 +1056,11 @@ export class StateService {
   refreshSelectedSwarm(): void { void this.reloadSelectedSwarm(); }
   refreshGraph(): void { void this.loadSelectedGraph(); }
 
-  async loadOverview(): Promise<void> {
-    this.loading.set(true); this.error.set(null);
+  async loadOverview(options: { gracefulOffline?: boolean } = {}): Promise<void> {
+    const gracefulOffline = options.gracefulOffline ?? true;
+    this.loading.set(true);
+    this.error.set(null);
+    this.refreshGraceful = gracefulOffline;
     try {
       const baseUrl = this.baseUrl();
       const [indexResult, healthResult, readyResult, swarmResult] = await Promise.allSettled([
@@ -1047,12 +1070,31 @@ export class StateService {
         this.apiService.listSwarms(baseUrl),
       ]);
       const issues: string[] = [];
-      if (indexResult.status === 'fulfilled') { this.apiIndex.set(indexResult.value); this.pushFeed('API 索引', 'GET', `${baseUrl}`, 'info', indexResult.value, '根元数据'); }
-      else { issues.push(errorSummary(indexResult.reason)); }
-      if (healthResult.status === 'fulfilled') { this.health.set(healthResult.value); this.pushFeed('健康检查', 'GET', `${baseUrl}/health`, 'info', healthResult.value); }
-      else { issues.push(errorSummary(healthResult.reason)); }
-      if (readyResult.status === 'fulfilled') { this.ready.set(readyResult.value); this.pushFeed('就绪状态', 'GET', `${baseUrl}/ready`, 'info', readyResult.value); }
-      else { issues.push(errorSummary(readyResult.reason)); }
+      let offlineDetected = false;
+      if (indexResult.status === 'fulfilled') {
+        this.apiIndex.set(indexResult.value);
+        this.pushFeed('API 索引', 'GET', `${baseUrl}`, 'info', indexResult.value, '根元数据');
+      } else if (this.isOfflineLikeError(indexResult.reason)) {
+        offlineDetected = true;
+      } else {
+        issues.push(errorSummary(indexResult.reason));
+      }
+      if (healthResult.status === 'fulfilled') {
+        this.health.set(healthResult.value);
+        this.pushFeed('健康检查', 'GET', `${baseUrl}/health`, 'info', healthResult.value);
+      } else if (this.isOfflineLikeError(healthResult.reason)) {
+        offlineDetected = true;
+      } else {
+        issues.push(errorSummary(healthResult.reason));
+      }
+      if (readyResult.status === 'fulfilled') {
+        this.ready.set(readyResult.value);
+        this.pushFeed('就绪状态', 'GET', `${baseUrl}/ready`, 'info', readyResult.value);
+      } else if (this.isOfflineLikeError(readyResult.reason)) {
+        offlineDetected = true;
+      } else {
+        issues.push(errorSummary(readyResult.reason));
+      }
       if (swarmResult.status === 'fulfilled') {
         this.swarms.set(swarmResult.value.swarms);
         this.pushFeed('Swarm 注册表', 'GET', `${baseUrl}/swarms`, 'success', swarmResult.value);
@@ -1070,16 +1112,20 @@ export class StateService {
             this.ensureAgentSelection(selectedFromList);
           }
         }
-      } else { issues.push(errorSummary(swarmResult.reason)); }
+      } else if (this.isOfflineLikeError(swarmResult.reason)) {
+        offlineDetected = true;
+      } else {
+        issues.push(errorSummary(swarmResult.reason));
+      }
       await Promise.allSettled([
-        this.loadEvents(),
+        this.loadEvents({}, { gracefulOffline }),
         this.loadLogs(),
         this.loadMetrics(),
         this.loadKnowledge(),
         this.loadMemory(),
       ]);
       if (this.selectedSwarmName()) {
-        await this.reloadSelectedSwarm({ clearError: false });
+        await this.reloadSelectedSwarm({ clearError: false, gracefulOffline });
       } else {
         this.selectedSwarm.set(null);
         this.selectedGraph.set(null);
@@ -1092,12 +1138,25 @@ export class StateService {
         this.swarmStats.set(null);
         this.swarmStatsLoaded.set(false);
       }
-      if (issues.length > 0) this.error.set({ summary: issues.join(' · '), message: issues.join('\n'), timestamp: new Date().toISOString() });
-    } catch (error) { this.error.set(formatErrorDetail(error)); }
-    finally { this.loading.set(false); }
+      if (offlineDetected && gracefulOffline) {
+        this.applyOfflineSnapshot();
+      }
+      if (issues.length > 0) {
+        this.error.set({ summary: issues.join(' · '), message: issues.join('\n'), timestamp: new Date().toISOString() });
+      }
+    } catch (error) {
+      if (gracefulOffline && this.isOfflineLikeError(error)) {
+        this.applyOfflineSnapshot();
+      } else {
+        this.error.set(formatErrorDetail(error));
+      }
+    } finally {
+      this.refreshGraceful = false;
+      this.loading.set(false);
+    }
   }
 
-  async reloadSelectedSwarm(options: { clearError?: boolean } = {}): Promise<void> {
+  async reloadSelectedSwarm(options: { clearError?: boolean; gracefulOffline?: boolean } = {}): Promise<void> {
     const swarmName = this.selectedSwarmName();
     if (!swarmName) {
       this.selectedSwarm.set(null);
@@ -1137,7 +1196,15 @@ export class StateService {
         this.selectedSwarm.set(null);
         this.selectedGraph.set(null);
       }
-      this.error.set(formatErrorDetail(error));
+      if (options.gracefulOffline ?? this.refreshGraceful) {
+        if (this.isOfflineLikeError(error)) {
+          this.applyOfflineSnapshot();
+        } else {
+          this.error.set(formatErrorDetail(error));
+        }
+      } else {
+        this.error.set(formatErrorDetail(error));
+      }
     }
     finally { this.loadingDetails.set(false); }
   }
@@ -1160,7 +1227,9 @@ export class StateService {
         this.selectedGraph.set(cached.graph);
         return;
       }
-      this.error.set(formatErrorDetail(error));
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+      }
       this.selectedGraph.set(null);
     }
   }
@@ -1178,8 +1247,10 @@ export class StateService {
       this.agentsLoaded.set(true);
       this.pushFeed(`Agents 列表 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/agents`, 'info', response);
     } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed(`Agents 列表失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/agents`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`Agents 列表失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/agents`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
@@ -1201,14 +1272,16 @@ export class StateService {
         response
       );
     } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed(
-        `Tasks 列表失败${swarmName ? ` · ${swarmName}` : ''}`,
-        'GET',
-        `${this.baseUrl()}/tasks`,
-        'error',
-        { error: errorSummary(error) }
-      );
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(
+          `Tasks 列表失败${swarmName ? ` · ${swarmName}` : ''}`,
+          'GET',
+          `${this.baseUrl()}/tasks`,
+          'error',
+          { error: errorSummary(error) }
+        );
+      }
     }
   }
 
@@ -1219,8 +1292,10 @@ export class StateService {
       this.toolsLoaded.set(true);
       this.pushFeed('Tools 列表', 'GET', `${this.baseUrl()}/tools`, 'info', response);
     } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed('Tools 列表失败', 'GET', `${this.baseUrl()}/tools`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed('Tools 列表失败', 'GET', `${this.baseUrl()}/tools`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
@@ -1237,20 +1312,28 @@ export class StateService {
       this.swarmStatsLoaded.set(true);
       this.pushFeed(`Swarm 统计 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'info', response);
     } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed(`Swarm 统计失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`Swarm 统计失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
-  async loadEvents(): Promise<void> {
+  async loadEvents(
+    query: Record<string, string | number | boolean | undefined | null> = {},
+    options: { gracefulOffline?: boolean } = {}
+  ): Promise<void> {
     try {
-      const response = await this.apiService.listEvents(this.baseUrl(), { page: 1, limit: 200 });
+      const response = await this.apiService.listEvents(this.baseUrl(), query);
       this.events.set(response.items.map((item) => this.mapEventCatalogItem(item)));
+      this.eventsResponse.set(response);
       this.eventsLoaded.set(true);
       this.pushFeed('事件列表', 'GET', `${this.baseUrl()}/events`, 'info', response);
     } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed('事件列表失败', 'GET', `${this.baseUrl()}/events`, 'error', { error: errorSummary(error) });
+      if (!(options.gracefulOffline ?? this.refreshGraceful) || !this.isOfflineLikeError(error)) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed('事件列表失败', 'GET', `${this.baseUrl()}/events`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
@@ -1264,10 +1347,12 @@ export class StateService {
       this.logsLoaded.set(true);
       this.pushFeed('日志列表', 'GET', `${this.baseUrl()}/logs`, 'info', response);
     } catch (error) {
-      this.logsResponse.set(null);
-      this.logsLoaded.set(false);
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed('日志列表失败', 'GET', `${this.baseUrl()}/logs`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.logsResponse.set(null);
+        this.logsLoaded.set(false);
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed('日志列表失败', 'GET', `${this.baseUrl()}/logs`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
@@ -1281,9 +1366,11 @@ export class StateService {
       this.metricsLoaded.set(true);
       this.pushFeed('系统指标', 'GET', `${this.baseUrl()}/metrics`, 'info', response);
     } catch (error) {
-      this.metricsLoaded.set(false);
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed('系统指标失败', 'GET', `${this.baseUrl()}/metrics`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.metricsLoaded.set(false);
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed('系统指标失败', 'GET', `${this.baseUrl()}/metrics`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
@@ -1294,9 +1381,11 @@ export class StateService {
       this.knowledgeLoaded.set(true);
       this.pushFeed('知识库列表', 'GET', `${this.baseUrl()}/knowledge`, 'info', response);
     } catch (error) {
-      this.knowledgeLoaded.set(false);
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed('知识库列表失败', 'GET', `${this.baseUrl()}/knowledge`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.knowledgeLoaded.set(false);
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed('知识库列表失败', 'GET', `${this.baseUrl()}/knowledge`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
@@ -1307,9 +1396,11 @@ export class StateService {
       this.memoriesLoaded.set(true);
       this.pushFeed('记忆库列表', 'GET', `${this.baseUrl()}/memory`, 'info', response);
     } catch (error) {
-      this.memoriesLoaded.set(false);
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed('记忆库列表失败', 'GET', `${this.baseUrl()}/memory`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.memoriesLoaded.set(false);
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed('记忆库列表失败', 'GET', `${this.baseUrl()}/memory`, 'error', { error: errorSummary(error) });
+      }
     }
   }
 
@@ -1325,10 +1416,12 @@ export class StateService {
       const response = await this.apiService.loadSwarm(this.baseUrl(), { source: trimmed, replace });
       this.pushFeed(`Swarm 加载 · ${response.swarm.swarm_name}`, 'POST', `${this.baseUrl()}/swarms/load`, 'success', response);
       this.selectedSwarmName.set(response.swarm.swarm_name);
-      await this.loadOverview();
+      await this.loadOverview({ gracefulOffline: true });
     } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed(`Swarm 加载失败 · ${trimmed}`, 'POST', `${this.baseUrl()}/swarms/load`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`Swarm 加载失败 · ${trimmed}`, 'POST', `${this.baseUrl()}/swarms/load`, 'error', { error: errorSummary(error) });
+      }
     } finally {
       this.loading.set(false);
     }
@@ -1345,10 +1438,12 @@ export class StateService {
     try {
       const response = await this.apiService.reloadSwarm(this.baseUrl(), swarmName, { force });
       this.pushFeed(`Swarm 重载 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}/reload`, 'success', response);
-      await this.reloadSelectedSwarm({ clearError: false });
+      await this.reloadSelectedSwarm({ clearError: false, gracefulOffline: true });
     } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed(`Swarm 重载失败 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}/reload`, 'error', { error: errorSummary(error) });
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`Swarm 重载失败 · ${swarmName}`, 'POST', `${this.baseUrl()}/swarms/${encodeURIComponent(swarmName)}/reload`, 'error', { error: errorSummary(error) });
+      }
     } finally {
       this.loadingDetails.set(false);
     }
@@ -1469,33 +1564,23 @@ export class StateService {
     if (!prompt) { this.error.set(makeUserError('执行目标不能为空。')); return; }
     this.loading.set(true); this.error.set(null);
     try {
-      const response = await this.apiService.startSwarm(this.baseUrl(), swarmName, {
-        input: asJsonValue(this.buildSwarmExecutionInput()),
-        rounds: this.swarmRounds(),
-        meta_mode: this.metaMode(),
-      });
-      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start`), 'success', response);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start`), 'error', { error: errorSummary(error) }); }
-    finally { this.loading.set(false); }
-  }
-
-  async startSwarmBackground(): Promise<void> {
-    const swarmName = this.selectedSwarmName();
-    if (!swarmName) { this.error.set(makeUserError('启动后台结构前请选择一个 Swarm。')); return; }
-    const prompt = this.swarmExecutionPrompt().trim();
-    if (!prompt) { this.error.set(makeUserError('执行目标不能为空。')); return; }
-    this.loading.set(true); this.error.set(null);
-    try {
       const response = await this.apiService.startSwarmBackground(this.baseUrl(), swarmName, {
         input: asJsonValue(this.buildSwarmExecutionInput()),
         rounds: this.swarmRounds(),
         meta_mode: this.metaMode(),
       });
       this.activeRun.set(response.run);
-      this.pushFeed(`后台结构已启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'success', response);
+      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'success', response);
       this.watchRun(response.run);
-    } catch (error) { this.error.set(formatErrorDetail(error)); this.pushFeed(`后台结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'error', { error: errorSummary(error) }); }
+    } catch (error) {
+      this.error.set(formatErrorDetail(error));
+      this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'error', { error: errorSummary(error) });
+    }
     finally { this.loading.set(false); }
+  }
+
+  async startSwarmBackground(): Promise<void> {
+    await this.startSwarmStructure();
   }
 
   async runSwarmSync(): Promise<void> {
@@ -1614,6 +1699,40 @@ export class StateService {
     this.streamState.set('closed');
   }
 
+  private applyOfflineSnapshot(): void {
+    this.health.set({ success: false, status: 'offline' });
+    this.ready.set({ success: false, ready: false, reason: '离线' });
+    this.streamNote.set('系统离线，已同步本地状态');
+    this.closeStream();
+  }
+
+  private isOfflineLikeError(error: unknown): boolean {
+    if (error instanceof HttpErrorResponse) {
+      return error.status === 0 || error.status === 502 || error.status === 504;
+    }
+    const summary = errorSummary(error).toLowerCase();
+    return summary.includes('econnrefused') || summary.includes('failed to fetch') || summary.includes('networkerror') || summary.includes('unknown error');
+  }
+
+  private shouldSuppressOfflineError(error: unknown): boolean {
+    return this.refreshGraceful && this.isOfflineLikeError(error);
+  }
+
+  private runStatusLabel(status: string | null | undefined): string {
+    switch (status) {
+      case 'running':
+        return '执行中';
+      case 'completed':
+        return '已完成';
+      case 'failed':
+        return '失败';
+      case 'queued':
+        return '排队中';
+      default:
+        return status || '未知';
+    }
+  }
+
   private resolveRunUrl(run: RunSnapshot, kind: 'status' | 'events'): string {
     const legacyPattern = /\/api\/runs\//;
     const rawUrl = kind === 'status' ? run.status_url : run.events_url;
@@ -1650,7 +1769,10 @@ export class StateService {
 
   selectedRunHint(): string {
     const run = this.activeRun();
-    return run ? `${run.status} · ${run.event_count} 个事件` : '无运行加载';
+    if (!run) {
+      return '无运行加载';
+    }
+    return `${this.runStatusLabel(run.status)} · ${run.event_count} 个事件`;
   }
 
   apiErrorDetails(): unknown {

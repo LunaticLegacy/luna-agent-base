@@ -18,8 +18,7 @@ import { CommonModule } from '@angular/common';
     .badge-warning { background:rgba(245,158,11,.12); color:#F59E0B; }
     .badge-bad { background:rgba(239,68,68,.12); color:#EF4444; }
     .badge-neutral { background:rgba(148,163,184,.12); color:#94A3B8; }
-    .badge-running { background:rgba(139,92,246,.12); color:#A78BFA; }
-    .badge-busy { background:rgba(245,158,11,.12); color:#FCD34D; }
+    .badge-running, .badge-busy { background:rgba(59,130,246,.12); color:#60A5FA; }
     .badge-idle { background:rgba(59,130,246,.12); color:#93C5FD; }
   `]
 })
@@ -30,8 +29,8 @@ export class StatusBadgeComponent {
   tone(): string {
     const s = (this.status || '').toLowerCase();
     if (['online','healthy','ok','ready','active'].includes(s)) return 'good';
-    if (['running','streaming'].includes(s)) return 'running';
-    if (['busy','pending'].includes(s)) return 'busy';
+    if (['running','streaming','busy'].includes(s)) return 'running';
+    if (['pending'].includes(s)) return 'busy';
     if (['warning','warn'].includes(s)) return 'warning';
     if (['error','offline','failed','dead'].includes(s)) return 'bad';
     if (['idle','standby'].includes(s)) return 'idle';

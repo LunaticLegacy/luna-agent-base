@@ -93,6 +93,7 @@ class DummyCore:
         self.name = "demo-core"
         self._graph = DummyGraph()
         self.tools = {"tool-a": object()}
+        self.reset_calls = 0
 
     def list_agents(self):
         return [DummyAgent()]
@@ -108,6 +109,9 @@ class DummyCore:
 
     def get_agent(self, agent_id: str):
         return DummyAgent()
+
+    def reset_runtime_state(self):
+        self.reset_calls += 1
 
 
 class DummySwarm:
@@ -136,7 +140,11 @@ class DummyRunRegistry:
         return self._runs.get(run_id)
 
     def active_run_count(self, swarm_name: str | None = None) -> int:
-        return 0
+        return sum(
+            1
+            for record in self._runs.values()
+            if not record._done and (swarm_name is None or record.swarm_name == swarm_name)
+        )
 
     def active_run_ids(self, swarm_name: str | None = None) -> list[str]:
         return []
@@ -198,6 +206,7 @@ class RouteSmokeTest(unittest.TestCase):
         run_payload = run_response.get_json()
         self.assertTrue(run_payload["success"])
         self.assertEqual(run_payload["rounds"], 2)
+        self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 1)
 
         background_response = self.client.post("/api/swarms/demo/runs", json={"input": {"hello": "world"}})
         self.assertEqual(background_response.status_code, 202)
@@ -212,6 +221,19 @@ class RouteSmokeTest(unittest.TestCase):
         stream_text = stream_response.get_data(as_text=True)
         self.assertIn("event: run.snapshot", stream_text)
         self.assertIn(f"\"status_url\": \"/api/swarms/runs/{run_snapshot['run_id']}\"", stream_text)
+        self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 2)
+
+    def test_rejects_concurrent_run_for_same_swarm(self) -> None:
+        active = RunRecord(run_id="run-active", swarm_name="demo", status="running")
+        self.runtime.runs._runs[active.run_id] = active
+
+        response = self.client.post("/api/swarms/demo/runs", json={"input": {"hello": "world"}})
+
+        self.assertEqual(response.status_code, 409)
+        payload = response.get_json()
+        self.assertFalse(payload["success"])
+        self.assertIn("already has an active run", payload["error"])
+        self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 0)
 
 
 if __name__ == "__main__":
