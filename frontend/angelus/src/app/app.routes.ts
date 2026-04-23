@@ -8,7 +8,6 @@ export const routes: Routes = [
   { path: 'knowledge', loadComponent: () => import('./pages/knowledge.page').then(m => m.KnowledgePageComponent) },
   { path: 'tools', loadComponent: () => import('./pages/tools.page').then(m => m.ToolsPage) },
   { path: 'memory', loadComponent: () => import('./pages/memory.page').then(m => m.MemoryPageComponent) },
-  { path: 'events', loadComponent: () => import('./pages/events.page').then(m => m.EventsPage) },
   { path: 'logs', loadComponent: () => import('./pages/logs.page').then(m => m.LogsPage) },
   { path: 'settings', loadComponent: () => import('./pages/settings.page').then(m => m.SettingsPage) },
 ];

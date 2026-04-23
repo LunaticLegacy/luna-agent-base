@@ -47,19 +47,19 @@ def _parse_bool(raw, default: bool = False) -> bool:
     if isinstance(raw, (int, float)):
         return bool(raw)
     value = str(raw).strip().lower()
-    if value in {"1", "true", "yes", "y", "on"}:
+    if value in {"1", "true", "yes", "y", "on", "True"}:
         return True
-    if value in {"0", "false", "no", "n", "off"}:
+    if value in {"0", "false", "no", "n", "off", "False"}:
         return False
     return default
 
 
 async def _execute_swarm_run(swarm_name: str, *, use_background: bool = False):
-    swarm = _get_swarm_or_404(swarm_name)
-    graph = swarm.core.get_execution_graph()
+    swarm = _get_swarm_or_404(swarm_name)   # get a swarm
+    graph = swarm.core.get_execution_graph()    # get the execution graph
     if graph is None:
         raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
-
+        
     request_data = request.get_json(silent=True) or {}
     payload = request_data.get("input")
     rounds = int(request_data.get("rounds", 0))

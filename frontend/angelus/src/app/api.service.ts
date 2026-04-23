@@ -7,7 +7,6 @@ import type {
   AgentRoundRequest,
   AgentRoundResponse,
   ApiIndexResponse,
-  EventListResponse,
   GraphSnapshot,
   HealthResponse,
   KnowledgeCatalogItem,
@@ -146,13 +145,6 @@ export class ApiService {
     return firstValueFrom(
       this.http.get<SwarmStatsResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/stats`))
     );
-  }
-
-  listEvents(
-    baseUrl: string,
-    query: Record<string, string | number | boolean | undefined | null> = {}
-  ): Promise<EventListResponse> {
-    return firstValueFrom(this.http.get<EventListResponse>(joinUrlWithQuery(baseUrl, '/events', query)));
   }
 
   listLogs(

@@ -5,8 +5,6 @@ import type {
   AgentCatalogItem,
   ApiIndexResponse,
   ApiSettings,
-  EventCatalogItem,
-  EventListResponse,
   GraphSnapshot,
   HealthResponse,
   KnowledgeCatalogItem,
@@ -132,16 +130,6 @@ export interface ToolItem {
   errorRate: number;
   created: string;
   schema: Record<string, string>;
-}
-
-export interface EventItem {
-  id: string;
-  time: string;
-  level: 'info' | 'warn' | 'error';
-  source: string;
-  event: string;
-  detail: string;
-  data: unknown;
 }
 
 export interface LogItem {
@@ -283,7 +271,6 @@ export class StateService {
   readonly agentRounds = signal<number>(1);
   readonly additionalPrompt = signal<string>('');
   readonly responseFeed = signal<FeedItem[]>([]);
-  readonly liveEvents = signal<FeedItem[]>([]);
   readonly activeRun = signal<RunSnapshot | null>(null);
   readonly streamState = signal<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle');
   readonly streamNote = signal<string>('未连接实时运行');
@@ -295,9 +282,6 @@ export class StateService {
   readonly toolsLoaded = signal(false);
   readonly swarmStats = signal<SwarmStatsResponse | null>(null);
   readonly swarmStatsLoaded = signal(false);
-  readonly events = signal<EventItem[]>([]);
-  readonly eventsLoaded = signal(false);
-  readonly eventsResponse = signal<EventListResponse | null>(null);
   readonly logs = signal<LogItem[]>([]);
   readonly logsLoaded = signal(false);
   readonly logsResponse = signal<LogListResponse | null>(null);
@@ -463,34 +447,6 @@ export class StateService {
       api: 0,
       local: tools.length,
       calls: tools.reduce((s, t) => s + t.calls, 0),
-    };
-  });
-
-  readonly derivedEvents = computed<EventItem[]>(() => {
-    if (this.eventsLoaded()) return this.events();
-    const feed = this.responseFeed();
-    const live = this.liveEvents();
-    const all = [...live, ...feed];
-    return all.map(item => ({
-      id: `evt-${item.id}`,
-      time: item.timestamp,
-      level: (item.tone === 'error' ? 'error' : item.tone === 'warn' ? 'warn' : 'info') as EventItem['level'],
-      source: item.endpoint.includes('/agents/') ? 'Agent' : item.endpoint.includes('/swarms/') ? 'Swarm' : 'System',
-      event: item.title,
-      detail: item.meta || (typeof item.payload === 'string' ? item.payload : JSON.stringify(item.payload).slice(0, 200)),
-      data: item.payload,
-    }));
-  });
-
-  readonly eventStats = computed(() => {
-    const response = this.eventsResponse();
-    const events = this.derivedEvents();
-    const stats = response?.stats ?? null;
-    return {
-      today: response?.total ?? events.length,
-      errors: stats?.errors ?? events.filter(e => e.level === 'error').length,
-      warnings: stats?.warnings ?? events.filter(e => e.level === 'warn').length,
-      infos: stats?.infos ?? events.filter(e => e.level === 'info').length,
     };
   });
 
@@ -703,7 +659,7 @@ export class StateService {
     }
 
     const run = this.activeRun();
-    const feedCount = this.responseFeed().length + this.liveEvents().length;
+    const feedCount = this.responseFeed().length;
     const totalAgents = this.totalAgents() || 0;
     return [
       {
@@ -875,7 +831,7 @@ export class StateService {
   }
 
   private buildFallbackMetrics(): MetricsResponse {
-    const feedCount = this.responseFeed().length + this.liveEvents().length;
+    const feedCount = this.responseFeed().length;
     const activeRuns = this.activeRun() ? 1 : 0;
     const totalAgents = this.totalAgents() || 0;
     const errors = Math.max(0, this.errorCount());
@@ -960,18 +916,6 @@ export class StateService {
       errorRate: item.error_rate ?? 0,
       created: item.created_at,
       schema: (item.schema && typeof item.schema === 'object' ? (item.schema as Record<string, string>) : {}),
-    };
-  }
-
-  private mapEventCatalogItem(item: EventCatalogItem): EventItem {
-    return {
-      id: item.id,
-      time: item.time,
-      level: item.level,
-      source: item.source,
-      event: item.event,
-      detail: item.detail,
-      data: item.data,
     };
   }
 
@@ -1342,8 +1286,7 @@ export class StateService {
         issues.push(errorSummary(swarmResult.reason));
       }
       await Promise.allSettled([
-        this.loadEvents({}, { gracefulOffline }),
-        this.loadLogs(),
+this.loadLogs(),
         this.loadMetrics(),
         this.loadKnowledge(),
         this.loadMemory(),
@@ -1562,24 +1505,6 @@ export class StateService {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
         this.pushFeed(`Swarm 统计失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'error', { error: errorSummary(error) });
-      }
-    }
-  }
-
-  async loadEvents(
-    query: Record<string, string | number | boolean | undefined | null> = {},
-    options: { gracefulOffline?: boolean } = {}
-  ): Promise<void> {
-    try {
-      const response = await this.apiService.listEvents(this.baseUrl(), query);
-      this.events.set(response.items.map((item) => this.mapEventCatalogItem(item)));
-      this.eventsResponse.set(response);
-      this.eventsLoaded.set(true);
-      this.pushFeed('事件列表', 'GET', `${this.baseUrl()}/events`, 'info', response);
-    } catch (error) {
-      if (!(options.gracefulOffline ?? this.refreshGraceful) || !this.isOfflineLikeError(error)) {
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed('事件列表失败', 'GET', `${this.baseUrl()}/events`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -1938,14 +1863,7 @@ export class StateService {
         }, delayMs);
       }
     };
-    source.addEventListener('run.snapshot', (event) => { const parsed = this.safeParseEvent(event); if (parsed) { this.activeRun.set(parsed as RunSnapshot); this.pushLiveEvent('run.snapshot', parsed); } });
-    source.addEventListener('message', (event) => { const parsed = this.safeParseEvent(event); if (parsed) this.pushLiveEvent('message', parsed); });
-    source.onmessage = (event) => { const parsed = this.safeParseEvent(event); if (parsed) this.pushLiveEvent('message', parsed); };
-  }
-
-  private pushLiveEvent(eventName: string, payload: unknown): void {
-    const item: FeedItem = { id: this.nextFeedId(), title: `实时事件 · ${eventName}`, endpoint: 'SSE', method: 'EVENT', tone: 'info', timestamp: shortTime(), payload: normalizeJsonValue(payload) };
-    this.liveEvents.set([item, ...this.liveEvents()].slice(0, 20));
+    source.addEventListener('run.snapshot', (event) => { const parsed = this.safeParseEvent(event); if (parsed) { this.activeRun.set(parsed as RunSnapshot); } });
   }
 
   private safeParseEvent(event: Event): unknown | null {
