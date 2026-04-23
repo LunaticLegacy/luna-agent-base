@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from ..config import AgentConfig
+from ..runtime_info import RuntimeInfoManager
+from ..task_graph import TaskGraph
+from ..cognitive import CognitiveGraph
+from .cognitive_state import CognitiveRuntimeMixin
+from .graph_state import ExecutionGraphStateMixin
+from .registry import RuntimeRegistryMixin
+
+
+class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin):
+    """Runtime container for agents, tools, execution graphs, and shared state."""
+
+    def __init__(
+        self,
+        agent_name: str,
+        agent_config: AgentConfig,
+        workspace_root: Optional[Path] = None,
+    ) -> None:
+        self.agent_name = agent_name
+        self.agent_config = agent_config
+        self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
+        self.workspace_mode = "workspace"
+        self.agents = {}
+        self.tools = {}
+        self.tool_capabilities = {}
+        self.skills = {}
+        self._execution_graph = None
+        self._execution_graph_source_path = None
+        self._execution_graph_backup_path = None
+        self._runtime_info: Optional[RuntimeInfoManager] = None
+        self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
+        self.active_thought_subgraphs = {}
+        self.current_run_id: Optional[str] = None
+        self.task_graph: Optional[TaskGraph] = None
+        self._task_graph_path: Optional[Path] = None
+
+    async def init(self) -> None:
+        if self._execution_graph is not None:
+            self.check_execution_graph_complete()
+
+    def set_runtime_info_dir(self, runtime_dir: Path) -> None:
+        self._runtime_info = RuntimeInfoManager(runtime_dir=runtime_dir, agent_name=self.agent_name)
+        self._record_runtime_change(
+            action="runtime_info_initialized",
+            subject_kind="runtime",
+            subject_id=self.agent_name,
+            detail={"runtime_dir": str(runtime_dir)},
+        )
+
+    def set_task_graph(self, task_graph: TaskGraph, *, persist_path: Optional[Path] = None) -> None:
+        self.task_graph = task_graph
+        self._task_graph_path = persist_path
+        self._record_runtime_change(
+            action="set_task_graph",
+            subject_kind="task_graph",
+            subject_id=task_graph.graph_id,
+            detail={"task_count": len(task_graph.tasks)},
+        )
+
+    def persist_task_graph(self) -> None:
+        if self.task_graph is not None and self._task_graph_path is not None:
+            self.task_graph.save(self._task_graph_path)
+
+    def get_task_graph(self) -> Optional[TaskGraph]:
+        return self.task_graph
+
+    def _record_runtime_change(
+        self,
+        *,
+        action: str,
+        subject_kind: str,
+        subject_id: Optional[str] = None,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self._runtime_info is None:
+            return
+        self._runtime_info.record(
+            action=action,
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            detail=detail,
+            core=self,
+        )
+
+    def record_runtime_change(
+        self,
+        *,
+        action: str,
+        subject_kind: str,
+        subject_id: Optional[str] = None,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self._record_runtime_change(
+            action=action,
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            detail=detail,
+        )
