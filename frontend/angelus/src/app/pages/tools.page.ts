@@ -2,34 +2,33 @@ import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, ToolItem } from '../services/state.service';
 import { StatusBadgeComponent } from '../components/status-badge.component';
+import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent } from '../shared';
 
 @Component({
   selector: 'app-tools-page',
   standalone: true,
-  imports: [CommonModule, StatusBadgeComponent],
+  imports: [CommonModule, StatusBadgeComponent, PageHeaderComponent, StatCardGridComponent, PanelCardComponent],
   template: `
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">工具管理</h1>
-        <p class="page-subtitle">管理系统工具、外部 API 和自定义技能</p>
+    <app-page-header title="工具管理" subtitle="管理系统工具、外部 API 和自定义技能">
+      <div actions>
+        <button class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          注册新工具
+        </button>
       </div>
-      <button class="btn btn-primary">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        注册新工具
-      </button>
-    </div>
+    </app-page-header>
 
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-label">总工具数</div><div class="stat-value">{{ state.toolStats().total }}</div><div class="stat-sub">已注册</div></div>
-      <div class="stat-card"><div class="stat-label">可用工具</div><div class="stat-value stat-green">{{ state.toolStats().available }}</div><div class="stat-sub">正常运行</div></div>
-      <div class="stat-card"><div class="stat-label">API 工具</div><div class="stat-value stat-purple">{{ state.toolStats().api }}</div><div class="stat-sub">外部接口</div></div>
-      <div class="stat-card"><div class="stat-label">本地技能</div><div class="stat-value stat-amber">{{ state.toolStats().local }}</div><div class="stat-sub">内置函数</div></div>
-      <div class="stat-card"><div class="stat-label">今日调用</div><div class="stat-value">{{ state.toolStats().calls | number }}</div><div class="stat-sub">次执行</div></div>
-    </div>
+    <app-stat-card-grid [cards]="[
+      { label: '总工具数', value: state.toolStats().total, subtitle: '已注册' },
+      { label: '可用工具', value: state.toolStats().available, subtitle: '正常运行', tone: 'green' },
+      { label: 'API 工具', value: state.toolStats().api, subtitle: '外部接口', tone: 'purple' },
+      { label: '本地技能', value: state.toolStats().local, subtitle: '内置函数', tone: 'amber' },
+      { label: '今日调用', value: (state.toolStats().calls | number) ?? '', subtitle: '次执行' }
+    ]" />
 
-    <div class="card">
+    <app-panel-card [noPadding]="true" style="display:block;margin-bottom:1.25rem">
       <div class="card-header">
         <div class="tabs">
           <button class="tab active">全部工具</button>
@@ -60,7 +59,7 @@ import { StatusBadgeComponent } from '../components/status-badge.component';
           }
         </tbody>
       </table>
-    </div>
+    </app-panel-card>
 
     @if (selectedTool()) {
       <div class="card">
@@ -97,19 +96,7 @@ import { StatusBadgeComponent } from '../components/status-badge.component';
   `,
   styles: [`
     :host { display:block; }
-    .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; }
-    .page-title { font-size:1.35rem; font-weight:700; color:#F1F5F9; margin:0; }
-    .page-subtitle { font-size:.82rem; color:#94A3B8; margin:.25rem 0 0; }
-    .btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1rem; border-radius:8px; border:none; background:linear-gradient(135deg,#7C3AED,#A78BFA); color:#fff; font-size:.82rem; font-weight:600; cursor:pointer; }
-    .btn-primary { background:linear-gradient(135deg,#7C3AED,#A78BFA); }
-    .btn-sm { padding:.35rem .7rem; font-size:.78rem; }
-    .btn-danger { background:rgba(239,68,68,.15); color:#EF4444; border:1px solid rgba(239,68,68,.2); }
-    .stat-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:1rem; margin-bottom:1.25rem; }
-    .stat-card { background:#131827; border:1px solid rgba(148,163,184,.08); border-radius:12px; padding:1rem 1.1rem; }
-    .stat-label { font-size:.72rem; color:#94A3B8; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.4rem; }
-    .stat-value { font-size:1.4rem; font-weight:700; color:#F1F5F9; }
-    .stat-green { color:#10B981; } .stat-purple { color:#A78BFA; } .stat-amber { color:#F59E0B; } .stat-red { color:#EF4444; }
-    .stat-sub { font-size:.72rem; color:#64748B; margin-top:.2rem; }
+                    .stat-green { color:#10B981; } .stat-red { color:#EF4444; }
     .card { background:#131827; border:1px solid rgba(148,163,184,.08); border-radius:12px; overflow:hidden; margin-bottom:1.25rem; }
     .card-header { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem; border-bottom:1px solid rgba(148,163,184,.08); flex-wrap:wrap; gap:.75rem; }
     .tabs { display:flex; gap:.25rem; }
@@ -118,10 +105,7 @@ import { StatusBadgeComponent } from '../components/status-badge.component';
     .toolbar { display:flex; gap:.5rem; }
     .input { background:#0B0F19; border:1px solid rgba(148,163,184,.12); border-radius:8px; padding:.45rem .7rem; color:#F1F5F9; font-size:.82rem; }
     .input.search { width:200px; }
-    .data-table { width:100%; border-collapse:collapse; font-size:.82rem; }
-    .data-table th { text-align:left; padding:.7rem 1.25rem; color:#94A3B8; font-weight:500; border-bottom:1px solid rgba(148,163,184,.08); background:#0F131F; }
-    .data-table td { padding:.7rem 1.25rem; border-bottom:1px solid rgba(148,163,184,.06); color:#E2E8F0; }
-    .data-table tr:hover td { background:rgba(255,255,255,.02); }
+                .data-table tr:hover td { background:rgba(255,255,255,.02); }
     .data-table tr.active td { background:rgba(139,92,246,.06); }
     .tool-name { display:flex; align-items:center; gap:.6rem; }
     .tool-icon { width:2rem; height:2rem; border-radius:8px; background:rgba(139,92,246,.12); display:grid; place-items:center; font-size:.9rem; }
@@ -131,8 +115,7 @@ import { StatusBadgeComponent } from '../components/status-badge.component';
     .tag-purple { background:rgba(139,92,246,.12); color:#C4B5FD; }
     .tag-blue { background:rgba(59,130,246,.12); color:#93C5FD; }
     .muted { color:#94A3B8; }
-    .mono { font-family:'JetBrains Mono',monospace; }
-    .detail-header { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem; border-bottom:1px solid rgba(148,163,184,.08); }
+        .detail-header { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem; border-bottom:1px solid rgba(148,163,184,.08); }
     .detail-title { font-size:1.05rem; font-weight:600; color:#F1F5F9; }
     .detail-actions { display:flex; gap:.5rem; }
     .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; padding:1.25rem; }
@@ -141,8 +124,7 @@ import { StatusBadgeComponent } from '../components/status-badge.component';
     .detail-row { display:flex; justify-content:space-between; padding:.4rem 0; border-bottom:1px solid rgba(148,163,184,.06); font-size:.82rem; }
     .detail-row span:first-child { color:#94A3B8; }
     .detail-row span:last-child, .detail-row code { color:#F1F5F9; font-family:'JetBrains Mono',monospace; }
-    .code-block { background:#0B0F19; border:1px solid rgba(148,163,184,.08); border-radius:8px; padding:.75rem; font-size:.78rem; overflow:auto; max-height:300px; color:#E2E8F0; }
-  `]
+      `]
 })
 export class ToolsPage {
   readonly state = inject(StateService);
@@ -153,4 +135,3 @@ export class ToolsPage {
     this.selectedTool.set(tool);
   }
 }
-

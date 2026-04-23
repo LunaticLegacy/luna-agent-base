@@ -47,3 +47,195 @@ textarea
     animation-duration: 0.01ms !important
     animation-iteration-count: 1 !important
     transition-duration: 0.01ms !important
+
+/* ===== Global Page Layout ===== */
+.page
+  padding: 24px
+  color: #F1F5F9
+  font-family: 'Noto Sans SC', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif
+  background: #0B0F19
+  min-height: 100vh
+
+/* ===== Buttons ===== */
+.btn
+  display: inline-flex
+  align-items: center
+  gap: .4rem
+  padding: .55rem 1rem
+  border-radius: 8px
+  border: none
+  color: #fff
+  font-size: .82rem
+  font-weight: 600
+  cursor: pointer
+  transition: all 0.2s
+  background: rgba(255,255,255,.06)
+  color: #94A3B8
+
+.btn:hover:not(:disabled)
+  background: rgba(255,255,255,.1)
+  color: #F1F5F9
+
+.btn:disabled
+  opacity: .5
+  cursor: not-allowed
+
+.btn-primary
+  background: linear-gradient(135deg, #7C3AED, #A78BFA)
+  color: #fff
+
+.btn-primary:hover:not(:disabled)
+  background: linear-gradient(135deg, #6D28D9, #8B5CF6)
+
+.btn-secondary
+  background: #131827
+  border: 1px solid rgba(148,163,184,0.2)
+  color: #F1F5F9
+
+.btn-secondary:hover:not(:disabled)
+  background: #1e293b
+
+.btn-danger
+  background: rgba(239,68,68,.15)
+  color: #EF4444
+  border: 1px solid rgba(239,68,68,.2)
+
+.btn-sm
+  padding: .35rem .7rem
+  font-size: .78rem
+
+.btn-icon
+  width: 32px
+  height: 32px
+  padding: 0
+  display: flex
+  align-items: center
+  justify-content: center
+
+/* ===== Form Inputs ===== */
+.input,
+.filter-input,
+.filter-select
+  background: #0B0F19
+  border: 1px solid rgba(148,163,184,.12)
+  border-radius: 8px
+  padding: .45rem .7rem
+  color: #F1F5F9
+  font-size: .82rem
+  outline: none
+
+.input:focus,
+.filter-input:focus,
+.filter-select:focus
+  border-color: #8B5CF6
+
+.filter-input.search
+  min-width: 240px
+
+.filter-select
+  cursor: pointer
+
+/* ===== Data Tables ===== */
+.data-table
+  width: 100%
+  border-collapse: collapse
+  font-size: 13px
+
+.data-table th
+  text-align: left
+  padding: 10px 16px
+  color: #94a3b8
+  font-weight: 500
+  border-bottom: 1px solid rgba(148,163,184,.08)
+  white-space: nowrap
+  background: #0f1525
+
+.data-table td
+  padding: 10px 16px
+  color: #cbd5e1
+  border-bottom: 1px solid rgba(148,163,184,.05)
+  white-space: nowrap
+
+.data-table tr
+  cursor: pointer
+  transition: background 0.15s
+
+.data-table tr:hover
+  background: rgba(148,163,184,.03)
+
+.data-table tr.selected
+  background: rgba(139,92,246,.06)
+
+/* ===== Badges & Pills ===== */
+.badge,
+.pill
+  display: inline-flex
+  align-items: center
+  gap: .35rem
+  padding: .2rem .55rem
+  border-radius: 999px
+  font-size: .75rem
+  font-weight: 500
+
+.pill.online,
+.badge-success
+  background: rgba(16,185,129,.12)
+  color: #10B981
+
+.pill.offline
+  background: rgba(100,116,139,.12)
+  color: #94a3b8
+
+.pill.running,
+.badge-running
+  background: rgba(59,130,246,.12)
+  color: #60a5fa
+
+.pill.error,
+.badge-error
+  background: rgba(239,68,68,.12)
+  color: #EF4444
+
+.badge-warning
+  background: rgba(245,158,11,.12)
+  color: #F59E0B
+
+.badge-info
+  background: rgba(59,130,246,.12)
+  color: #93C5FD
+
+/* ===== Icon Buttons ===== */
+.icon-btn
+  background: transparent
+  border: 1px solid rgba(148,163,184,.15)
+  border-radius: 6px
+  color: #94A3B8
+  cursor: pointer
+  padding: 4px 8px
+  font-size: 12px
+  transition: all 0.2s
+
+.icon-btn:hover
+  background: rgba(148,163,184,.08)
+  color: #F1F5F9
+
+/* ===== Code Blocks ===== */
+.code-block
+  background: #0B0F19
+  border: 1px solid rgba(148,163,184,.08)
+  border-radius: 8px
+  padding: 12px
+  color: #cbd5e1
+  font-family: 'JetBrains Mono', monospace
+  font-size: 12px
+  overflow-x: auto
+  margin: 0
+
+/* ===== Mono text ===== */
+.mono
+  font-family: 'JetBrains Mono', monospace
+
+/* ===== Responsive ===== */
+@media (max-width: 768px)
+  .page
+    padding: 16px

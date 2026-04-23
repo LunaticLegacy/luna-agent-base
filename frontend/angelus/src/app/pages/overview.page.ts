@@ -1,68 +1,33 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { MiniChartComponent } from '../components/mini-chart.component';
+import { EmptyStateComponent, PageHeaderComponent, PanelCardComponent, StatCardGridComponent, StatCardItem } from '../shared';
 
 @Component({
   selector: 'app-overview-page',
   standalone: true,
-  imports: [CommonModule, GraphViewerComponent, MiniChartComponent],
+  imports: [CommonModule, GraphViewerComponent, MiniChartComponent, PageHeaderComponent, StatCardGridComponent, PanelCardComponent, EmptyStateComponent],
   template: `
     <div class="page">
       <!-- Section Header -->
-      <div class="section-header">
-        <div>
-          <h1>系统概览</h1>
-          <p class="subtitle">实时监控与系统状态仪表盘</p>
-        </div>
-        <div class="header-actions">
+      <app-page-header title="系统概览" subtitle="实时监控与系统状态仪表盘">
+        <div actions>
           <button class="btn btn-primary" (click)="state.refreshAll()" [disabled]="state.loading()">
             {{ state.loading() ? '刷新中...' : '刷新数据' }}
           </button>
         </div>
-      </div>
+      </app-page-header>
 
       <!-- Stat Cards Row -->
-      <div class="stat-cards-row">
-        <div class="stat-card">
-          <div class="stat-label">系统状态</div>
-          <div class="stat-value" [class.success]="state.health()?.status === 'ok'" [class.error]="state.health()?.status !== 'ok'">
-            {{ state.health()?.status === 'ok' ? '正常' : state.health()?.status || '未知' }}
-          </div>
-          <div class="stat-sub">{{ state.ready() ? '就绪' : '未就绪' }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">总Agents</div>
-          <div class="stat-value">{{ state.totalAgents() ?? 0 }}</div>
-          <div class="stat-sub">活跃运行中</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Swarm数量</div>
-          <div class="stat-value">{{ (state.swarms() || []).length }}</div>
-          <div class="stat-sub">已配置</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">当前任务</div>
-          <div class="stat-value">{{ state.activeRunStatusText() }}</div>
-          <div class="stat-sub">{{ state.streamState() || '等待中' }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Graph状态</div>
-          <div class="stat-value" [class.success]="!!state.resolvedGraph()">{{ state.resolvedGraph() ? '已加载' : '未加载' }}</div>
-          <div class="stat-sub">{{ state.graphSummary() || '—' }}</div>
-        </div>
-      </div>
+      <app-stat-card-grid [cards]="overviewStatCards()"></app-stat-card-grid>
 
       <!-- Two Column Layout -->
       <div class="two-column-layout">
         <!-- Left: Swarm Selection List -->
         <div class="column-left">
-          <div class="panel-card">
-            <div class="panel-header">
-              <h3>Swarm 列表</h3>
-              <span class="badge">{{ (state.swarms() || []).length }}</span>
-            </div>
+          <app-panel-card title="Swarm 列表" [badge]="(state.swarms() || []).length" [noPadding]="true">
             <div class="swarm-list">
               @for (swarm of state.swarms(); track swarm) {
                 <div
@@ -77,15 +42,15 @@ import { MiniChartComponent } from '../components/mini-chart.component';
                   </div>
                 </div>
               } @empty {
-                <div class="empty-state">暂无 Swarm</div>
+                <app-empty-state message="暂无 Swarm" variant="cell"></app-empty-state>
               }
             </div>
-          </div>
+          </app-panel-card>
         </div>
 
         <!-- Right: Swarm Detail -->
         <div class="column-right">
-          <div class="panel-card">
+          <app-panel-card [noPadding]="true">
             <div class="panel-header swarm-detail-header">
               <div>
                 <h3>{{ state.selectedSwarmName() || '未选择 Swarm' }}</h3>
@@ -104,21 +69,18 @@ import { MiniChartComponent } from '../components/mini-chart.component';
                 @if (state.resolvedGraph()) {
                   <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
                 } @else {
-                  <div class="empty-state">加载 Graph 中...</div>
+                  <app-empty-state message="加载 Graph 中..." variant="cell"></app-empty-state>
                 }
               </div>
             </div>
 
-          </div>
+          </app-panel-card>
         </div>
       </div>
 
       <!-- Execution Console -->
-      <div class="panel-card execution-console">
-        <div class="panel-header">
-          <h3>执行控制台</h3>
-          <div class="console-hints">{{ state.selectedRunHint() }} · {{ state.swarmExecutionTemplateLabel() }}</div>
-        </div>
+      <app-panel-card title="执行控制台" [hasActions]="true" [noPadding]="true">
+        <div actions class="console-hints">{{ state.selectedRunHint() }} · {{ state.swarmExecutionTemplateLabel() }}</div>
         <div class="console-body">
           <div class="console-section">
             <div class="console-section-header">
@@ -230,14 +192,11 @@ import { MiniChartComponent } from '../components/mini-chart.component';
             </div>
           </div>
         </div>
-      </div>
+      </app-panel-card>
 
       <!-- Response Chronicle -->
       @if (state.responseFeed() && (state.responseFeed() || []).length > 0) {
-        <div class="panel-card response-chronicle">
-          <div class="panel-header">
-            <h3>响应记录</h3>
-          </div>
+        <app-panel-card title="响应记录" class="response-chronicle" [noPadding]="true">
           <div class="response-list">
             @for (resp of state.responseFeed(); track $index) {
               <div class="response-item">
@@ -249,7 +208,7 @@ import { MiniChartComponent } from '../components/mini-chart.component';
               </div>
             }
           </div>
-        </div>
+        </app-panel-card>
       }
 
       <!-- Bottom Metrics Grid -->
@@ -273,10 +232,7 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       </div>
 
       <!-- System Info Panel -->
-      <div class="panel-card system-info">
-        <div class="panel-header">
-          <h3>系统信息</h3>
-        </div>
+      <app-panel-card title="系统信息" class="system-info" [noPadding]="true">
         <div class="info-grid">
           <div class="info-item">
             <span class="info-label">API Base URL</span>
@@ -303,97 +259,11 @@ import { MiniChartComponent } from '../components/mini-chart.component';
             <span class="info-value error-click" (click)="state.copyErrorToClipboard()">{{ state.error() ? 'Click to copy' : 'None' }}</span>
           </div>
         </div>
-      </div>
+      </app-panel-card>
     </div>
   `,
   styles: [`
-    .page {
-      padding: 24px;
-      color: #e2e8f0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-    .section-header h1 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 600;
-      color: #f8fafc;
-    }
-    .subtitle {
-      margin: 4px 0 0;
-      color: #94a3b8;
-      font-size: 14px;
-    }
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .btn {
-      padding: 8px 16px;
-      border-radius: 8px;
-      border: 1px solid rgba(148,163,184,0.2);
-      background: #1e293b;
-      color: #e2e8f0;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .btn:hover:not(:disabled) {
-      background: #334155;
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .btn-primary {
-      background: #8B5CF6;
-      border-color: #8B5CF6;
-      color: #fff;
-    }
-    .btn-primary:hover:not(:disabled) {
-      background: #7c3aed;
-    }
-    .btn-secondary {
-      background: #1e293b;
-      border-color: rgba(148,163,184,0.2);
-    }
-    .stat-cards-row {
-      display: grid;
-      grid-template-columns: repeat(6, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .stat-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      padding: 16px;
-    }
-    .stat-label {
-      font-size: 12px;
-      color: #94a3b8;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #f8fafc;
-      margin-bottom: 4px;
-    }
-    .stat-value.success { color: #10B981; }
-    .stat-value.error { color: #ef4444; }
-    .stat-sub {
-      font-size: 12px;
-      color: #64748b;
-    }
-    .two-column-layout {
+                                .two-column-layout {
       display: grid;
       grid-template-columns: 320px 1fr;
       gap: 16px;
@@ -403,12 +273,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       display: flex;
       flex-direction: column;
       gap: 16px;
-    }
-    .panel-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      overflow: hidden;
     }
     .panel-header {
       display: flex;
@@ -422,20 +286,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       font-size: 16px;
       font-weight: 600;
       color: #f8fafc;
-    }
-    .panel-header h4 {
-      margin: 0 0 12px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #cbd5e1;
-    }
-    .badge {
-      background: rgba(139,92,246,0.15);
-      color: #8B5CF6;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 12px;
     }
     .swarm-list {
       max-height: 400px;
@@ -493,55 +343,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       display: flex;
       gap: 8px;
     }
-    .run-menu {
-      position: relative;
-    }
-    .run-menu > summary {
-      list-style: none;
-    }
-    .run-menu > summary::-webkit-details-marker {
-      display: none;
-    }
-    .run-menu-toggle {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 72px;
-    }
-    .run-menu-toggle.disabled {
-      pointer-events: none;
-      opacity: 0.5;
-    }
-    .run-menu-panel {
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
-      min-width: 132px;
-      padding: 6px;
-      background: #0f1525;
-      border: 1px solid rgba(148,163,184,0.12);
-      border-radius: 10px;
-      box-shadow: 0 16px 40px rgba(0,0,0,0.28);
-      z-index: 20;
-    }
-    .run-menu-item {
-      width: 100%;
-      border: none;
-      background: transparent;
-      color: #e2e8f0;
-      font-size: 13px;
-      text-align: left;
-      padding: 8px 10px;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    .run-menu-item:hover:not(:disabled) {
-      background: rgba(148,163,184,0.1);
-    }
-    .run-menu-item:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
     .topology-section {
       padding: 16px 20px;
       border-bottom: 1px solid rgba(148,163,184,0.08);
@@ -561,45 +362,6 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       flex: 1 1 auto;
       min-width: 0;
       min-height: 0;
-    }
-    .live-activity {
-      padding: 16px 20px;
-    }
-    .event-list {
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    .event-item {
-      display: flex;
-      gap: 12px;
-      padding: 8px 0;
-      font-size: 13px;
-      border-bottom: 1px solid rgba(148,163,184,0.05);
-    }
-    .event-time {
-      color: #64748b;
-      font-family: monospace;
-      min-width: 60px;
-    }
-    .event-type {
-      background: rgba(139,92,246,0.12);
-      color: #a78bfa;
-      padding: 1px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      min-width: 50px;
-      text-align: center;
-    }
-    .event-msg {
-      color: #cbd5e1;
-      flex: 1;
-    }
-    .empty-state {
-      padding: 24px;
-      text-align: center;
-      color: #64748b;
-      font-size: 13px;
     }
     .execution-console {
       margin-bottom: 24px;
@@ -813,19 +575,24 @@ import { MiniChartComponent } from '../components/mini-chart.component';
       text-decoration: underline;
     }
     @media (max-width: 1200px) {
-      .stat-cards-row { grid-template-columns: repeat(3, 1fr); }
       .bottom-grid { grid-template-columns: repeat(3, 1fr); }
       .two-column-layout { grid-template-columns: 1fr; }
     }
     @media (max-width: 768px) {
-      .stat-cards-row { grid-template-columns: repeat(2, 1fr); }
       .bottom-grid { grid-template-columns: repeat(2, 1fr); }
       .info-grid { grid-template-columns: 1fr; }
-      .section-header { flex-direction: column; align-items: flex-start; gap: 12px; }
     }
   `]
 })
 export class OverviewPageComponent {
   readonly state = inject(StateService);
   protected readonly Math = Math;
+
+  readonly overviewStatCards = computed<StatCardItem[]>(() => [
+    { label: '系统状态', value: this.state.health()?.status === 'ok' ? '正常' : this.state.health()?.status || '未知', subtitle: this.state.ready() ? '就绪' : '未就绪', tone: this.state.health()?.status === 'ok' ? 'good' : 'bad' },
+    { label: '总Agents', value: this.state.totalAgents(), subtitle: '活跃运行中' },
+    { label: 'Swarm数量', value: (this.state.swarms() || []).length, subtitle: '已配置' },
+    { label: '当前任务', value: this.state.activeRunStatusText(), subtitle: this.state.streamState() || '等待中' },
+    { label: 'Graph状态', value: this.state.resolvedGraph() ? '已加载' : '未加载', subtitle: this.state.graphSummary() || '—', tone: this.state.resolvedGraph() ? 'good' : undefined },
+  ]);
 }

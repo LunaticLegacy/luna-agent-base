@@ -1,28 +1,25 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, MemoryItem } from '../services/state.service';
+import { EmptyStateComponent, FilterBarComponent, InfoGridComponent, ModalComponent, PageHeaderComponent, PanelCardComponent } from '../shared';
 
 @Component({
   selector: 'app-memory-page',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, PageHeaderComponent, PanelCardComponent, FilterBarComponent, EmptyStateComponent, InfoGridComponent, ModalComponent],
   template: `
     <div class="page">
       <!-- Header -->
-      <div class="section-header">
-        <div>
-          <h1>记忆系统</h1>
-          <p class="subtitle">Agent 记忆检索、管理与持久化</p>
-        </div>
-        <div class="header-actions">
+      <app-page-header title="记忆系统" subtitle="Agent 记忆检索、管理与持久化">
+        <div actions>
           <button class="btn btn-secondary" (click)="createMemory()">+ 新建记忆</button>
           <button class="btn btn-primary" (click)="state.refreshAll()" [disabled]="state.loading()">
             {{ state.loading() ? '刷新中...' : '刷新记忆' }}
           </button>
         </div>
-      </div>
+      </app-page-header>
 
-      <!-- Stat Cards -->
+      <!-- Stat Cards (kept inline due to custom 4th card) -->
       <div class="stat-cards-row">
         <div class="stat-card">
           <div class="stat-label">总记忆数</div>
@@ -63,12 +60,8 @@ import { StateService, MemoryItem } from '../services/state.service';
       <div class="two-column-layout">
         <!-- Left: Memory List -->
         <div class="column-left">
-          <div class="panel-card">
-            <div class="panel-header">
-              <h3>记忆列表</h3>
-              <span class="badge">{{ filteredMemories().length }}</span>
-            </div>
-            <div class="list-filters">
+          <app-panel-card title="记忆列表" [badge]="filteredMemories().length" [noPadding]="true">
+            <app-filter-bar>
               <input
                 type="text"
                 class="filter-input search"
@@ -83,7 +76,7 @@ import { StateService, MemoryItem } from '../services/state.service';
                 <option value="procedural">程序</option>
                 <option value="working">工作</option>
               </select>
-            </div>
+            </app-filter-bar>
             <div class="memory-list">
               @for (mem of filteredMemories(); track mem.id) {
                 <div
@@ -104,15 +97,15 @@ import { StateService, MemoryItem } from '../services/state.service';
                   </div>
                 </div>
               } @empty {
-                <div class="empty-state">暂无匹配记忆</div>
+                <app-empty-state message="暂无匹配记忆"></app-empty-state>
               }
             </div>
-          </div>
+          </app-panel-card>
         </div>
 
         <!-- Right: Memory Detail -->
         <div class="column-right">
-      <div class="panel-card detail-card">
+          <div class="detail-card">
             @if (selectedMemory(); as mem) {
               <div class="detail-header">
                 <h3>{{ mem.summary }}</h3>
@@ -169,13 +162,13 @@ import { StateService, MemoryItem } from '../services/state.service';
                       }
                     </div>
                   } @else {
-                    <div class="empty-state">无关联记忆</div>
+                    <app-empty-state message="无关联记忆"></app-empty-state>
                   }
                 </div>
               </div>
             } @else {
               <div class="detail-placeholder">
-                <div class="empty-state">选择左侧记忆查看详情</div>
+                <app-empty-state message="选择左侧记忆查看详情"></app-empty-state>
               </div>
             }
           </div>
@@ -183,159 +176,62 @@ import { StateService, MemoryItem } from '../services/state.service';
       </div>
 
       <!-- Memory Editor Modal -->
-      @if (editorOpen()) {
-        <div class="modal-overlay" (click)="closeEditor()"></div>
-        <div class="modal">
-          <div class="modal-header">
-            <div>
-              <h3>新建记忆</h3>
-              <div class="modal-sub">创建一条新的持久化记忆</div>
-            </div>
-            <button class="icon-btn close" (click)="closeEditor()">✕</button>
-          </div>
-          <div class="modal-body">
-            <label class="field">
-              <span>摘要</span>
-              <input class="input" [value]="editorSummary()" (input)="editorSummary.set($any($event).target.value)" />
-            </label>
-            <label class="field">
-              <span>类型</span>
-              <select class="input" [value]="editorType()" (change)="editorType.set($any($event).target.value)">
-                <option value="episodic">情景</option>
-                <option value="semantic">语义</option>
-                <option value="procedural">程序</option>
-                <option value="working">工作</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>来源</span>
-              <input class="input" [value]="editorSource()" (input)="editorSource.set($any($event).target.value)" />
-            </label>
-            <label class="field">
-              <span>情感</span>
-              <input class="input" type="number" step="0.1" [value]="editorSentiment()" (input)="editorSentiment.set($any($event).target.value)" />
-            </label>
-            <label class="field">
-              <span>重要性</span>
-              <input class="input" type="number" min="0" max="100" [value]="editorImportance()" (input)="editorImportance.set($any($event).target.value)" />
-            </label>
-            <label class="field">
-              <span>关联 IDs</span>
-              <input class="input" [value]="editorRelatedIds()" (input)="editorRelatedIds.set($any($event).target.value)" placeholder="用逗号分隔" />
-            </label>
-            <label class="field full">
-              <span>内容</span>
-              <textarea class="textarea" rows="8" [value]="editorContent()" (input)="editorContent.set($any($event).target.value)"></textarea>
-            </label>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-secondary" (click)="closeEditor()">取消</button>
-            <button class="btn btn-primary" (click)="saveMemory()" [disabled]="state.loadingDetails()">{{ state.loadingDetails() ? '保存中...' : '保存' }}</button>
-          </div>
+      <app-modal [open]="editorOpen()" title="新建记忆" subtitle="创建一条新的持久化记忆" [hasFooter]="true" (close)="closeEditor()">
+        <div class="editor-grid">
+          <label class="field">
+            <span>摘要</span>
+            <input class="input" [value]="editorSummary()" (input)="editorSummary.set($any($event).target.value)" />
+          </label>
+          <label class="field">
+            <span>类型</span>
+            <select class="input" [value]="editorType()" (change)="editorType.set($any($event).target.value)">
+              <option value="episodic">情景</option>
+              <option value="semantic">语义</option>
+              <option value="procedural">程序</option>
+              <option value="working">工作</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>来源</span>
+            <input class="input" [value]="editorSource()" (input)="editorSource.set($any($event).target.value)" />
+          </label>
+          <label class="field">
+            <span>情感</span>
+            <input class="input" type="number" step="0.1" [value]="editorSentiment()" (input)="editorSentiment.set($any($event).target.value)" />
+          </label>
+          <label class="field">
+            <span>重要性</span>
+            <input class="input" type="number" min="0" max="100" [value]="editorImportance()" (input)="editorImportance.set($any($event).target.value)" />
+          </label>
+          <label class="field">
+            <span>关联 IDs</span>
+            <input class="input" [value]="editorRelatedIds()" (input)="editorRelatedIds.set($any($event).target.value)" placeholder="用逗号分隔" />
+          </label>
+          <label class="field full">
+            <span>内容</span>
+            <textarea class="textarea" rows="8" [value]="editorContent()" (input)="editorContent.set($any($event).target.value)"></textarea>
+          </label>
         </div>
-      }
+        <div footer>
+          <button class="btn btn-secondary" (click)="closeEditor()">取消</button>
+          <button class="btn btn-primary" (click)="saveMemory()" [disabled]="state.loadingDetails()">{{ state.loadingDetails() ? '保存中...' : '保存' }}</button>
+        </div>
+      </app-modal>
 
       <!-- System Memory Panel -->
-      <div class="panel-card system-memory">
-        <div class="panel-header">
-          <h3>System Memory</h3>
-          <span class="badge">{{ state.streamState() }}</span>
-        </div>
-        <div class="system-body">
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="info-key">API Base URL</span>
-              <span class="info-val mono">{{ state.apiBaseUrl() }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">Health</span>
-              <span class="info-val" [class.success]="state.health()?.status === 'ok'">{{ state.health()?.status || 'unknown' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">Ready</span>
-              <span class="info-val">{{ state.ready() ? 'Yes' : 'No' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">Selected Swarm</span>
-              <span class="info-val mono">{{ state.selectedSwarmName() || 'None' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-key">Active Run</span>
-              <span class="info-val mono">{{ state.activeRun()?.run_id || 'None' }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <app-panel-card class="system-memory" title="System Memory" [badge]="state.streamState()">
+        <app-info-grid [items]="[
+          { label: 'API Base URL', value: state.apiBaseUrl(), mono: true },
+          { label: 'Health', value: state.health()?.status || 'unknown', tone: state.health()?.status === 'ok' ? 'good' : 'neutral' },
+          { label: 'Ready', value: state.ready() ? 'Yes' : 'No' },
+          { label: 'Selected Swarm', value: state.selectedSwarmName() || 'None', mono: true },
+          { label: 'Active Run', value: state.activeRun()?.run_id || 'None', mono: true }
+        ]" [columns]="3"></app-info-grid>
+      </app-panel-card>
     </div>
   `,
   styles: [`
-    .page {
-      padding: 24px;
-      color: #F1F5F9;
-      font-family: 'Noto Sans SC', sans-serif;
-      background: #0B0F19;
-      min-height: 100vh;
-    }
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-    .section-header h1 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 600;
-      color: #F1F5F9;
-    }
-    .subtitle {
-      margin: 4px 0 0;
-      color: #94A3B8;
-      font-size: 14px;
-    }
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .btn {
-      padding: 8px 16px;
-      border-radius: 8px;
-      border: 1px solid rgba(148,163,184,0.2);
-      background: #131827;
-      color: #F1F5F9;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: 'Noto Sans SC', sans-serif;
-    }
-    .btn:hover:not(:disabled) {
-      background: #1e293b;
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .btn-primary {
-      background: #8B5CF6;
-      border-color: #8B5CF6;
-      color: #fff;
-    }
-    .btn-primary:hover:not(:disabled) {
-      background: #7c3aed;
-    }
-    .btn-secondary {
-      background: #1e293b;
-      border-color: rgba(148,163,184,0.2);
-      color: #F1F5F9;
-    }
-    .btn-secondary:hover:not(:disabled) {
-      background: #243244;
-    }
-    .btn-sm {
-      padding: 6px 10px;
-      font-size: 12px;
-    }
-    .btn-sm.danger {
+                                        .btn-sm.danger {
       background: rgba(239,68,68,0.15);
       border-color: rgba(239,68,68,0.25);
       color: #FCA5A5;
@@ -412,39 +308,6 @@ import { StateService, MemoryItem } from '../services/state.service';
       display: flex;
       flex-direction: column;
       gap: 16px;
-    }
-    .panel-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .panel-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 16px 20px;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-    }
-    .panel-header h3 {
-      margin: 0;
-      font-size: 16px;
-      font-weight: 600;
-      color: #f8fafc;
-    }
-    .badge {
-      background: rgba(139,92,246,0.15);
-      color: #8B5CF6;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 12px;
-    }
-    .list-filters {
-      display: flex;
-      gap: 8px;
-      padding: 12px 16px;
-      border-bottom: 1px solid rgba(148,163,184,0.06);
     }
     .filter-input, .filter-select {
       background: #0B0F19;
@@ -539,6 +402,10 @@ import { StateService, MemoryItem } from '../services/state.service';
       text-align: right;
     }
     .detail-card {
+      background: #131827;
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 12px;
+      overflow: hidden;
       min-height: 480px;
       display: flex;
       flex-direction: column;
@@ -649,95 +516,16 @@ import { StateService, MemoryItem } from '../services/state.service';
     .system-memory {
       margin-bottom: 24px;
     }
-    .system-body {
-      padding: 16px 20px;
-    }
-    .info-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-    }
-    .info-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 12px;
-      background: #0B0F19;
-      border-radius: 8px;
-    }
-    .info-key {
-      font-size: 12px;
-      color: #94A3B8;
-    }
-    .info-val {
-      font-size: 13px;
-      color: #F1F5F9;
-      font-weight: 500;
-    }
-    .info-val.success { color: #10B981; }
-    .info-val.mono {
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .empty-state {
-      padding: 24px;
-      text-align: center;
-      color: #64748b;
-      font-size: 13px;
-    }
     .detail-id-row {
       display: flex;
       align-items: center;
       gap: 8px;
       justify-content: flex-end;
     }
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(2, 6, 23, 0.72);
-      backdrop-filter: blur(8px);
-      z-index: 40;
-    }
-    .modal {
-      position: fixed;
-      inset: 50% auto auto 50%;
-      transform: translate(-50%, -50%);
-      width: min(680px, calc(100vw - 32px));
-      max-height: min(90vh, 860px);
-      overflow: auto;
-      background: #0F172A;
-      border: 1px solid rgba(148,163,184,0.14);
-      border-radius: 16px;
-      box-shadow: 0 30px 80px rgba(0,0,0,0.45);
-      z-index: 41;
-    }
-    .modal-header, .modal-footer {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 16px 20px;
-    }
-    .modal-header {
-      border-bottom: 1px solid rgba(148,163,184,0.12);
-    }
-    .modal-footer {
-      border-top: 1px solid rgba(148,163,184,0.12);
-    }
-    .modal-header h3 {
-      margin: 0;
-      color: #F1F5F9;
-      font-size: 18px;
-    }
-    .modal-sub {
-      margin-top: 4px;
-      color: #94A3B8;
-      font-size: 12px;
-    }
-    .modal-body {
+    .editor-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 14px;
-      padding: 18px 20px;
     }
     .field {
       display: flex;
@@ -770,9 +558,7 @@ import { StateService, MemoryItem } from '../services/state.service';
     }
     @media (max-width: 768px) {
       .stat-cards-row { grid-template-columns: repeat(2, 1fr); }
-      .info-grid { grid-template-columns: 1fr; }
       .meta-grid { grid-template-columns: 1fr; }
-      .section-header { flex-direction: column; align-items: flex-start; gap: 12px; }
     }
   `]
 })
