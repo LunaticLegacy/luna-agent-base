@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 from ..cognitive import CognitiveGraph, CognitiveSubgraphDescriptor, merge_cognitive_graphs
@@ -9,6 +10,18 @@ from ..task_graph import TaskGraph
 
 class CognitiveRuntimeMixin:
     """Shared cognitive-graph helpers for a runtime core."""
+
+    def _public_thought_graph(self) -> CognitiveGraph:
+        graph = CognitiveGraph(graph_id=self.swarm_cognitive_graph.graph_id)
+        for node in self.swarm_cognitive_graph.nodes.values():
+            if node.node_type == CognitiveNodeType.EXECUTION_TRACE:
+                continue
+            graph.add_node(deepcopy(node))
+        for edge in self.swarm_cognitive_graph.edges:
+            if edge.source_id not in graph.nodes or edge.target_id not in graph.nodes:
+                continue
+            graph.add_edge(deepcopy(edge))
+        return graph
 
     def merge_agent_cognitive_graph(self, agent_id: str) -> None:
         agent = self.agents.get(agent_id)
@@ -76,26 +89,35 @@ class CognitiveRuntimeMixin:
         purpose: str = "",
         max_nodes: int = 16,
     ) -> str:
+        public_graph = self._public_thought_graph()
         main_graph = self.build_context_graph_export(
             agent_id=agent_id,
             query=query,
             purpose=purpose or "Continue the current agent task using relevant shared reasoning.",
             max_nodes=max_nodes,
         )
-        descriptor, subgraph = self.schedule_thought_subgraph(
+        self.schedule_thought_subgraph(
             agent_id=agent_id,
             query=query,
             purpose=purpose or "Continue the current agent task using relevant shared reasoning.",
             expected_next_information="Identify missing facts, uncertain claims, and useful next evidence.",
             max_nodes=max_nodes,
         )
-        subgraph_export = self.swarm_cognitive_graph.export_subgraph_for_llm(descriptor, subgraph)
+        descriptor, subgraph = public_graph.describe_subgraph(
+            owner_agent=agent_id,
+            query=query,
+            purpose=purpose or "Continue the current agent task using relevant shared reasoning.",
+            expected_next_information="Identify missing facts, uncertain claims, and useful next evidence.",
+            max_nodes=max_nodes,
+        )
+        subgraph_export = public_graph.export_subgraph_for_llm(descriptor, subgraph)
         private_summary = self.get_private_workspace_summary(agent_id)
         return (
             "## Swarm Thought Context\n\n"
             "Use the shared graph as public reasoning state. Use the active subgraph as the current "
             "schedulable slice. Treat private workspace notes as agent-local context; only promote "
-            "private information by emitting explicit thought graph nodes and relations.\n\n"
+            "private information by emitting explicit thought graph nodes and relations. Keep execution "
+            "traces in the execution graph / run trace, not in the thought graph.\n\n"
             "### Main Shared Graph Summary\n"
             f"{main_graph}\n\n"
             "### Active Schedulable Subgraph\n"
@@ -105,7 +127,8 @@ class CognitiveRuntimeMixin:
             "### Thought Graph Output Contract\n"
             "When you discover reusable reasoning, include a <cognitive_graph> JSON block with nodes "
             "and edges. Prefer node types fact, evidence, hypothesis, guess, claim, question, "
-            "assumption, decision, risk, counterevidence, and tool_result. Prefer relations supports, "
+            "assumption, decision, risk, counterevidence, and tool_result. Do not emit execution_trace "
+            "nodes. Prefer relations supports, "
             "opposes, derives_from, leads_to, depends_on, questions, refines, verifies, disproves, "
             "and speculates."
         )
@@ -118,7 +141,8 @@ class CognitiveRuntimeMixin:
         purpose: str = "",
         max_nodes: int = 16,
     ) -> str:
-        descriptor, subgraph = self.swarm_cognitive_graph.describe_subgraph(
+        public_graph = self._public_thought_graph()
+        descriptor, subgraph = public_graph.describe_subgraph(
             owner_agent=agent_id,
             query=query,
             purpose=purpose or "General thought graph context",
@@ -180,9 +204,14 @@ class CognitiveRuntimeMixin:
         return prompt
 
     def get_cognitive_graph_snapshot(self) -> Dict[str, Any]:
-        snapshot = self.swarm_cognitive_graph.snapshot()
+        public_graph = self._public_thought_graph()
+        snapshot = public_graph.snapshot()
         snapshot["active_subgraphs"] = [
-            descriptor.to_dict()
+            {
+                **descriptor.to_dict(),
+                "root_node_ids": [node_id for node_id in descriptor.root_node_ids if node_id in public_graph.nodes],
+                "frontier_node_ids": [node_id for node_id in descriptor.frontier_node_ids if node_id in public_graph.nodes],
+            }
             for descriptor in self.active_thought_subgraphs.values()
             if descriptor.status == "active"
         ]

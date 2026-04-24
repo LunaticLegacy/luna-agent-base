@@ -255,7 +255,7 @@ web_search = ["network_access"]
 
 - **Agent 图** 负责描述 swarm 的纯 Agent 拓扑，只包含 Agent 节点，不把工具当作图节点
 - **执行轨迹图** 负责记录一次 run 里实际发生的事件、分支、汇合、重试和回退
-- **思维图谱** 负责事实、证据、假设、猜测、问题、风险和决策
+- **思维图谱** 负责事实、证据、假设、猜测、问题、风险和决策，不包含执行轨迹节点
 - **任务图谱** 负责 swarm 共享任务 DAG
 - **agent private workspace** 负责 agent 私有草稿和本地思考工件
 
@@ -272,6 +272,8 @@ web_search = ["network_access"]
 - `risk`
 - `counterevidence`
 - `tool_result`
+
+`execution_trace` 属于执行轨迹图和运行事件，不作为思维图谱节点类型输出。
 
 关系类型支持：
 
