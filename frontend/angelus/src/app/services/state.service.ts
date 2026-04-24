@@ -22,6 +22,7 @@ import type {
   ReadyResponse,
   RunSnapshot,
   SwarmDetails,
+  SwarmApisResponse,
   SwarmSummary,
   SwarmStatsResponse,
   ToolCatalogItem,
@@ -137,6 +138,13 @@ export interface ToolItem {
   errorRate: number;
   created: string;
   schema: Record<string, string>;
+}
+
+export interface ApiItem {
+  name: string;
+  origin: 'native' | 'package' | string;
+  source: string | null;
+  type: string;
 }
 
 export interface LogItem {
@@ -293,6 +301,8 @@ export class StateService {
   readonly tasksLoaded = signal(false);
   readonly tools = signal<ToolItem[]>([]);
   readonly toolsLoaded = signal(false);
+  readonly apis = signal<ApiItem[]>([]);
+  readonly apisLoaded = signal(false);
   readonly swarmStats = signal<SwarmStatsResponse | null>(null);
   readonly swarmStatsLoaded = signal(false);
   readonly logs = signal<LogItem[]>([]);
@@ -647,14 +657,17 @@ export class StateService {
         throughput: stats.throughput,
         tokenUsage: `${Math.round(stats.token_usage / 1000)}K`,
         taskCount: stats.task_distribution.completed + stats.task_distribution.running + stats.task_distribution.pending,
+        apiCount: stats.api_count,
       };
     }
     const run = this.activeRun();
+    const swarm = this.selectedSwarm();
     return {
       successRate: run?.status === 'completed' ? 100 : run?.status === 'failed' ? 0 : 98,
       throughput: run ? Math.round(run.event_count / Math.max(1, run.rounds || 1)) : 0,
       tokenUsage: run ? `${Math.round(run.event_count * 0.5)}K` : '-',
       taskCount: run ? 1 : 0,
+      apiCount: swarm?.api_count ?? this.apis().length,
     };
   });
 
@@ -980,6 +993,15 @@ export class StateService {
       errorRate: item.error_rate ?? 0,
       created: item.created_at,
       schema: (item.schema && typeof item.schema === 'object' ? (item.schema as Record<string, string>) : {}),
+    };
+  }
+
+  private mapApiCatalogItem(item: SwarmApisResponse['apis'][number]): ApiItem {
+    return {
+      name: item.name,
+      origin: item.origin,
+      source: item.source,
+      type: item.type,
     };
   }
 
@@ -1420,6 +1442,8 @@ this.loadLogs(),
       this.tasksLoaded.set(true);
       this.tools.set([]);
       this.toolsLoaded.set(true);
+      this.apis.set([]);
+      this.apisLoaded.set(true);
       this.swarmStats.set(null);
       this.swarmStatsLoaded.set(false);
       return;
@@ -1440,6 +1464,7 @@ this.loadLogs(),
         this.loadAgents(),
         this.loadTasks(),
         this.loadTools(),
+        this.loadApis(),
         this.loadSwarmStats(),
       ]);
     } catch (error) {
@@ -1464,12 +1489,16 @@ this.loadLogs(),
         this.ensureAgentSelection(fallback);
         this.selectedExecutionTrace.set(null);
         this.selectedTaskGraph.set(null);
+        this.apis.set([]);
+        this.apisLoaded.set(true);
       } else {
         this.selectedSwarm.set(null);
         this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
         this.selectedExecutionTrace.set(null);
         this.selectedTaskGraph.set(null);
+        this.apis.set([]);
+        this.apisLoaded.set(true);
       }
       if (options.gracefulOffline ?? this.refreshGraceful) {
         if (this.isOfflineLikeError(error)) {
@@ -1863,6 +1892,28 @@ this.loadLogs(),
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
         this.pushFeed('Tools 列表失败', 'GET', `${this.baseUrl()}/tools`, 'error', { error: errorSummary(error) });
+      }
+    }
+  }
+
+  async loadApis(): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.apis.set([]);
+      this.apisLoaded.set(true);
+      return;
+    }
+    try {
+      const response = await this.apiService.getSwarmApis(this.baseUrl(), swarmName);
+      this.apis.set(response.apis.map((item) => this.mapApiCatalogItem(item)));
+      this.apisLoaded.set(true);
+      this.pushFeed(`APIs 列表 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/apis`, 'info', response);
+    } catch (error) {
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.apis.set([]);
+        this.apisLoaded.set(false);
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`APIs 列表失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/apis`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -2348,6 +2399,13 @@ this.loadLogs(),
         return status || '未知';
     }
   }
+
+  readonly swarmSummaryText = computed(() => {
+    const swarm = this.selectedSwarm();
+    return swarm
+      ? `${swarm.agent_count} 智能体 · ${swarm.skill_count} 技能 · ${swarm.tool_count} 工具 · ${swarm.api_count ?? 0} API`
+      : '未选择 Swarm';
+  });
 
   private resolveRunUrl(run: RunSnapshot, kind: 'status' | 'events'): string {
     const legacyPattern = /\/api\/runs\//;

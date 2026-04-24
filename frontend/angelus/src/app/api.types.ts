@@ -39,6 +39,7 @@ export interface SwarmSummary {
   agent_count: number;
   skill_count: number;
   tool_count: number;
+  api_count: number;
   graph_attached: boolean;
   graph_valid: boolean;
   graph_errors: string[];
@@ -52,6 +53,13 @@ export interface SwarmSummary {
 export interface SwarmDetails extends SwarmSummary {
   agent_files: string[];
   graph?: GraphSnapshot | null;
+}
+
+export interface SwarmApiCatalogItem {
+  name: string;
+  origin: 'native' | 'package' | string;
+  source: string | null;
+  type: string;
 }
 
 export interface SwarmListResponse {
@@ -544,6 +552,15 @@ export interface SwarmStatsResponse {
   active_runs: number;
   agent_count: number;
   tool_count: number;
+  api_count: number;
+  native_api_count: number;
+  package_api_count: number;
+}
+
+export interface SwarmApisResponse {
+  success: boolean;
+  swarm: string;
+  apis: SwarmApiCatalogItem[];
 }
 
 export interface MetricsResponse {
