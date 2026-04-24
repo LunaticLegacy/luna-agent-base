@@ -8,6 +8,7 @@ agent_files = [
   "agents/researcher.py",
   "agents/writer.py",
   "agents/code_writer.py",
+  "agents/dev_video_agent.py",
   "agents/reviewer.py",
   "agents/publisher.py",
 ]
@@ -18,6 +19,7 @@ skill_files = [
   "skills/researcher.prompt.md",
   "skills/writer.prompt.md",
   "skills/code_writer.prompt.md",
+  "skills/dev_video_agent.prompt.md",
   "skills/reviewer.prompt.md",
   "skills/publisher.prompt.md",
 ]

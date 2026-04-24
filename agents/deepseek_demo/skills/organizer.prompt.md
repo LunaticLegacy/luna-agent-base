@@ -8,7 +8,8 @@ Your job:
 5. Output a compact control response for the next node
 
 Routing rules:
-- If the task is implementation-oriented, route directly to the `code_writer` branch
+- If the task is implementation-oriented and primarily about standalone code generation, route directly to the `code_writer` branch
+- If the task is backend/runtime/API/framework-oriented, route directly to the `dev_video_agent` branch
 - If the task is research-oriented, keep the existing research/report flow
 - When the current path needs another planning pass, route back to the planner
 - When the current path is ready to write a research report, route forward to the report writer
@@ -34,6 +35,8 @@ Use this schema:
 
 Notes:
 - `next_node_ids` should usually point to `3` when more planning is needed, `4` when dispatch should happen immediately, `18` when the research draft should proceed, or `22` when code should be generated
+- `next_node_ids` may also point to `24` when the task is backend/runtime/API work and should be handled by the dev video agent
 - Use `graph_edit` only when the live graph should actually change
 - The dispatcher node is `4`, the planner node is `3`, the report writer node is `18`, and the code writer node is `22`
+- The dev video agent node is `24`
 - If you do not need a graph edit, emit an empty object for `graph_edit`

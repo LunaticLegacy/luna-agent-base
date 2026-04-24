@@ -118,12 +118,13 @@ def build_graph(core):
             node_id=2,
             node_name="organizer_preflight",
             agent_id="organizer",
-            next_node_ids=[3, 4, 22],
+            next_node_ids=[3, 4, 22, 24],
             additional_prompt=(
                 "Phase: preflight. Inspect the incoming request and decide whether the branch tree "
                 "should stay wide or be narrowed before dispatch. If the task asks for an "
-                "implementation artifact, route directly to the code writer. If the task is simple "
-                "and research-oriented, you may route directly to the dispatcher. If the task is "
+                "implementation artifact, route directly to the code writer. If the task is "
+                "backend/runtime/API-oriented, route directly to the dev video agent. If the task is "
+                "simple and research-oriented, you may route directly to the dispatcher. If the task is "
                 "broad, keep the planner in the loop."
             ),
             metadata={"phase": "preflight"},
@@ -208,12 +209,13 @@ def build_graph(core):
             node_id=17,
             node_name="organizer_checkpoint",
             agent_id="organizer",
-            next_node_ids=[18, 3, 22],
+            next_node_ids=[18, 3, 22, 24],
             additional_prompt=(
                 "Phase: checkpoint. Read the merged branch results, decide whether the architecture "
                 "needs another planning pass, and use graph edits if the tree shape should change "
                 "before the final write. If the task is implementation-oriented, route directly to "
-                "the code writer instead of the report writer."
+                "the code writer instead of the report writer. If the task is backend/runtime/API-oriented, "
+                "route directly to the dev video agent."
             ),
             metadata={"phase": "checkpoint"},
         )
@@ -258,6 +260,30 @@ def build_graph(core):
 
     graph.add_node(
         AgentNode(
+            node_id=24,
+            node_name="dev_video_agent",
+            agent_id="dev_video_agent",
+            next_node_ids=[25],
+            additional_prompt=(
+                "Handle backend, runtime, API, loader, registry, and framework-oriented changes. "
+                "Keep the output implementation-focused and specific to the affected code paths. "
+                "If the task is a pure code-generation brief, defer to the code writer branch instead."
+            ),
+        )
+    )
+
+    graph.add_node(
+        ToolNode(
+            node_id=25,
+            node_name="file_writer_backend",
+            tool_name="file_writer",
+            next_node_ids=[20],
+            input_mapping={"path": "outputs/deepseek_demo_backend_changes.txt"},
+        )
+    )
+
+    graph.add_node(
+        AgentNode(
             node_id=19,
             node_name="reviewer",
             agent_id="reviewer",
@@ -289,6 +315,7 @@ def build_graph(core):
 
     graph.add_edge(1, 2, label="frame", priority=10)
     graph.add_edge(2, 22, label="implement", priority=15)
+    graph.add_edge(2, 24, label="backend_implement", priority=12)
     graph.add_edge(2, 3, label="plan", priority=10)
     graph.add_edge(2, 4, label="direct_dispatch", priority=5)
     graph.add_edge(3, 4, label="dispatch", priority=10)
@@ -312,9 +339,12 @@ def build_graph(core):
     graph.add_edge(17, 3, label="replan", priority=5)
     graph.add_edge(17, 18, label="write", priority=10)
     graph.add_edge(17, 22, label="implement", priority=8)
+    graph.add_edge(17, 24, label="backend_implement", priority=12)
 
     graph.add_edge(18, 19, label="review", priority=10)
     graph.add_edge(22, 23, label="write_code", priority=10)
+    graph.add_edge(24, 25, label="write_backend", priority=10)
+    graph.add_edge(25, 20, label="handoff_publish", priority=10)
 
     graph.add_edge(19, 20, label="approve", condition="approve", priority=30)
     graph.add_edge(19, 18, label="revise", condition="revise", priority=20)
