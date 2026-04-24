@@ -14,6 +14,8 @@ agents/
       reviewer.py
     skills/
       planner.prompt.md
+    apis/
+      metrics_api.py
     tools/
       echo_tool.py
       tool_requirements.txt
@@ -28,6 +30,7 @@ agents/
 - `agents/*.py`：Agent 蓝图定义
 - `skills/*`：可复用的角色提示词或 skill contract
 - `tools/*`：包内专用工具模块
+- `apis/*`：包内专用 API 模块，或通过 `native:` 前缀显式引用原生 API
 
 顶层 `tools/` 目录则存放可被多个 swarm 复用的默认工具。
 
@@ -46,8 +49,9 @@ agents/
 3. 构建核心 `Core`
 4. 注册 LLM backend
 5. 加载 tool 模块
-6. 加载 Agent blueprints
-7. 绑定 execution graph
+6. 加载 API 模块
+7. 加载 Agent blueprints
+8. 绑定 execution graph
 
 这意味着：
 
@@ -63,12 +67,20 @@ name = "deepseek_demo"
 graph_file = "graph.py"
 agent_files = ["agents/planner.py", "agents/reviewer.py"]
 skill_files = ["skills/planner.prompt.md", "skills/reviewer.prompt.md"]
-tool_files = ["tools.echo_tool", "tools.file_writer_tool"]
+    tool_files = ["tools.echo_tool", "tools.file_writer_tool"]
+    api_files = ["apis/metrics_api.py"]
 default_backend = "deepseek"
 
 [workspace]
 default_mode = "workspace"
 default_root = "."
+
+[globals]
+project_name = "angelus"
+release_channel = "beta"
+
+[globals.visibility]
+release_channel = ["orchestrator", "planner", "reviewer"]
 
 [llm.default]
 name = "deepseek"
@@ -87,12 +99,13 @@ model = "deepseek-reasoner"
 - `agent_files`：Agent 定义文件列表
 - `skill_files`：Skill 文件列表
 - `tool_files`：Tool 模块列表
+- `api_files`：API 模块列表，默认按包内文件解析；如果需要引用框架原生 API，可以写成 `native:module.path`
 - `default_backend`：默认使用的 backend 名称
 
 其中：
 
 - `graph_file` 和 `agent_files` 是必需的
-- `skill_files` 和 `tool_files` 是可选的
+- `skill_files`、`tool_files` 和 `api_files` 是可选的
 - `default_backend` 只在你有多个 backend 时特别有用
 
 ## Workspace 配置
@@ -111,6 +124,37 @@ model = "deepseek-reasoner"
 - 大多数 agent 使用 `workspace`
 - 只有明确可信的系统 agent 才使用 `full_access`
 - `file_writer` 等文件工具会根据这个配置限制写入路径
+
+## Global Variables 配置
+
+`globals` 用来给部分 agent 注入框架级全局变量。它更适合放那些：
+
+- 需要在多个节点间共享的固定配置
+- 需要被 agent 读入 prompt 的项目级常量
+- 不适合放进环境变量、但又需要在 swarm 内显式配置的值
+
+常见写法如下：
+
+```toml
+[globals]
+project_name = "angelus"
+release_channel = "beta"
+
+[globals.visibility]
+release_channel = ["orchestrator", "planner", "reviewer"]
+```
+
+规则如下：
+
+- `[globals]` 里的键值会作为全局变量值
+- `[globals.visibility]` 用来限制某个变量只对哪些 agent 可见
+- 如果某个变量没有出现在 `visibility` 里，它默认对该 swarm 内所有 agent 可见
+- 运行时会把允许可见的变量注入到 agent prompt 中
+
+建议：
+
+- 放配置常量、项目名、目标模式、开关、稳定版本号
+- 不要放敏感 secret；敏感信息仍然应该走环境变量或更严格的 secret 方案
 
 ## Agent 文件
 
@@ -178,6 +222,26 @@ Tool 可以放在两类位置：
 - 顶层 `tools/`：给多个 swarm 复用
 
 如果你不确定要放哪里，优先放到包内，等多个 swarm 都需要再提升到顶层。
+
+## API 模块
+
+每个 API 模块会在加载 swarm 时同步导入，并注册到 runtime 的 API registry 中。API 的来源会被区分为两类：
+
+- `package`：swarm 包内声明的 API
+- `native`：框架原生 API，使用 `native:` 前缀显式引用
+
+`swarm.toml` 示例：
+
+```toml
+[swarm]
+api_files = ["apis/metrics_api.py", "native:web.routes.health"]
+```
+
+建议：
+
+- 包内 API 放在 `apis/` 目录，便于和工具、角色提示词分层
+- 如果 API 依赖额外第三方包，可以在 API 模块旁边放一个 `api_requirements.txt`
+- 如果你不确定某个能力更像 tool 还是 API，优先把它做成 tool；API 更适合框架级导入和注册
 
 ## 常见坑
 

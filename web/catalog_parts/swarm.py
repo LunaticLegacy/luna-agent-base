@@ -55,4 +55,15 @@ def build_swarm_stats(
         "active_runs": registry.runs.active_run_count(swarm_name),
         "agent_count": agent_stats["total"],
         "tool_count": len(swarm.core.tools),
+        "api_count": len(getattr(swarm.core, "apis", {})),
+        "native_api_count": sum(
+            1
+            for metadata in getattr(swarm.core, "api_sources", {}).values()
+            if str(metadata.get("origin", "")).strip().lower() == "native"
+        ),
+        "package_api_count": sum(
+            1
+            for metadata in getattr(swarm.core, "api_sources", {}).values()
+            if str(metadata.get("origin", "")).strip().lower() == "package"
+        ),
     }

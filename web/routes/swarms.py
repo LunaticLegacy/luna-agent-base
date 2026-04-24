@@ -6,6 +6,7 @@ import time
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 from web.errors import ApiError, ConflictError, NotFoundError
+from web.swarm_globals_store import save_global_variables, serialize_global_variables
 from web.runs import (
     RunRegistry,
     serialize_graph_snapshot,
@@ -169,6 +170,85 @@ def get_swarm(swarm_name: str):
 def get_swarm_graph(swarm_name: str):
     swarm = _get_swarm_or_404(swarm_name)
     return jsonify({"success": True, "swarm": swarm_name, "graph": _serialize_graph_with_state(swarm)})
+
+
+@swarms_bp.get("/<string:swarm_name>/globals")
+def get_swarm_globals(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    return jsonify(
+        {
+            "success": True,
+            "swarm": swarm_name,
+            "globals": serialize_global_variables(swarm.manifest.global_variables),
+        }
+    )
+
+
+@swarms_bp.get("/<string:swarm_name>/apis")
+def get_swarm_apis(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    apis = []
+    for api_name in sorted(getattr(swarm.core, "apis", {}).keys()):
+        api = swarm.core.get_api(api_name)
+        metadata = swarm.core.get_api_metadata(api_name)
+        apis.append(
+            {
+                "name": api_name,
+                "origin": metadata.get("origin", "package"),
+                "source": metadata.get("source"),
+                "type": api.__class__.__name__,
+            }
+        )
+    return jsonify({"success": True, "swarm": swarm_name, "apis": apis})
+
+
+@swarms_bp.put("/<string:swarm_name>/globals")
+def update_swarm_globals(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    request_data = request.get_json(silent=True) or {}
+    globals_section = request_data.get("globals")
+    visibility_section = request_data.get("visibility")
+    if globals_section is None and visibility_section is None:
+        raise ApiError("Request body must include 'globals' and/or 'visibility'.")
+    if globals_section is not None and not isinstance(globals_section, dict):
+        raise ApiError("'globals' must be a JSON object.")
+    if visibility_section is not None and not isinstance(visibility_section, dict):
+        raise ApiError("'visibility' must be a JSON object.")
+
+    current_globals = swarm.manifest.global_variables
+    values = dict(current_globals.values)
+    visibility = {key: list(value) for key, value in current_globals.visibility.items()}
+    if isinstance(globals_section, dict):
+        for key, value in globals_section.items():
+            values[str(key).strip()] = value
+    if isinstance(visibility_section, dict):
+        for key, agent_list in visibility_section.items():
+            if agent_list is None:
+                visibility.pop(str(key).strip(), None)
+                continue
+            if isinstance(agent_list, str):
+                agent_list = [agent_list]
+            if not isinstance(agent_list, list):
+                raise ApiError(f"visibility for '{key}' must be a string array.")
+            visibility[str(key).strip()] = [str(item).strip() for item in agent_list if str(item).strip()]
+
+    updated_globals = type(current_globals)(values=values, visibility=visibility)
+    save_global_variables(swarm.manifest_path, updated_globals)
+    swarm.manifest.global_variables = updated_globals
+    swarm.core.set_global_variables(updated_globals)
+    swarm.core.record_runtime_change(
+        action="set_global_variables",
+        subject_kind="globals",
+        subject_id=swarm_name,
+        detail=serialize_global_variables(updated_globals),
+    )
+    return jsonify(
+        {
+            "success": True,
+            "swarm": swarm_name,
+            "globals": serialize_global_variables(updated_globals),
+        }
+    )
 
 
 @swarms_bp.get("/<string:swarm_name>/execution-graph")

@@ -11,6 +11,14 @@ class CognitiveContextMixin:
     """Inject shared cognitive context into agent prompts."""
 
     def _inject_cognitive_context(self, core: "Core", node: "AgentNode") -> Optional[str]:
+        global_context = ""
+        try:
+            build_globals = getattr(core, "build_global_context_export", None)
+            if callable(build_globals):
+                global_context = build_globals(agent_id=node.agent_id)
+        except Exception:
+            global_context = ""
+
         try:
             build_context = getattr(core, "build_thought_context_export", None)
             if callable(build_context):
@@ -23,8 +31,11 @@ class CognitiveContextMixin:
             else:
                 cg_export = core.get_cognitive_graph_export(max_nodes=12)
         except Exception:
-            return None
+            return global_context or None
+        if global_context and cg_export:
+            return f"{global_context}\n\n{cg_export}"
+        if global_context:
+            return global_context
         if not cg_export or cg_export.endswith("nodes=0, edges=0):"):
             return None
         return cg_export
-
