@@ -282,6 +282,18 @@ def build_graph(core):
             input_mapping={'path': 'outputs/deepseek_demo_final.txt'},
         ),
     )
+    graph.add_node(
+        AgentNode(
+            node_id=32,
+            node_name='evidence_researcher_runtime',
+            next_node_ids=[11],
+            metadata={'runtime_transient': True},
+            agent_id='evidence_researcher_runtime',
+            additional_prompt=('Focus on implementation evidence, configuration fidelity, runtime behavior, '
+ 'and the parts of the demo that prove the architecture is real rather than '
+ 'decorative.'),
+        ),
+    )
     graph.add_edge(1, 2, label='frame', condition=None, priority=10)
     graph.add_edge(2, 4, label='direct_dispatch', condition=None, priority=5)
     graph.add_edge(2, 3, label='plan', condition=None, priority=10)
@@ -305,6 +317,7 @@ def build_graph(core):
     graph.add_edge(19, 18, label='revise', condition='revise', priority=20)
     graph.add_edge(19, 20, label='approve', condition='approve', priority=30)
     graph.add_edge(20, 21, label='publish', condition=None, priority=10)
+    graph.add_edge(32, 11, label=None, condition=None, priority=0)
     graph.set_entry(1)
     graph.set_exit(21)
     return graph

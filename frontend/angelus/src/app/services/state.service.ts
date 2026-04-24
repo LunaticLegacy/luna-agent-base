@@ -310,6 +310,7 @@ export class StateService {
   private readonly feedId = signal(0);
   private eventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private runRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshGraceful = false;
   private readonly LS_PREFIX = 'angelus_';
 
@@ -1863,7 +1864,42 @@ this.loadLogs(),
         }, delayMs);
       }
     };
-    source.addEventListener('run.snapshot', (event) => { const parsed = this.safeParseEvent(event); if (parsed) { this.activeRun.set(parsed as RunSnapshot); } });
+    source.addEventListener('run.snapshot', (event) => {
+      const parsed = this.safeParseEvent(event);
+      if (parsed) {
+        this.activeRun.set(parsed as RunSnapshot);
+      }
+    });
+
+    const refreshOnEvent = () => {
+      this.scheduleRunRefresh(run.run_id);
+    };
+    for (const eventName of ['run.started', 'node.started', 'branch.started', 'run.completed', 'run.failed', 'node.failed', 'branch.failed']) {
+      source.addEventListener(eventName, refreshOnEvent);
+    }
+  }
+
+  private scheduleRunRefresh(runId: string): void {
+    if (this.runRefreshTimer) {
+      clearTimeout(this.runRefreshTimer);
+    }
+    this.runRefreshTimer = setTimeout(() => {
+      void this.refreshRunSnapshot(runId);
+    }, 75);
+  }
+
+  private async refreshRunSnapshot(runId: string): Promise<void> {
+    if (this.activeRun()?.run_id !== runId) {
+      return;
+    }
+    try {
+      const response = await this.apiService.getRun(this.baseUrl(), runId);
+      if (this.activeRun()?.run_id === runId) {
+        this.activeRun.set(response.run);
+      }
+    } catch {
+      // Ignore transient refresh failures; the SSE stream will try again on the next event.
+    }
   }
 
   private safeParseEvent(event: Event): unknown | null {
@@ -1875,6 +1911,7 @@ this.loadLogs(),
   private closeStream(): void {
     if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.runRefreshTimer) { clearTimeout(this.runRefreshTimer); this.runRefreshTimer = null; }
     this.streamState.set('closed');
   }
 

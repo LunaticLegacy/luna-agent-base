@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
+import { THOUGHT_NODE_LEGEND_ENTRIES, THOUGHT_RELATION_LEGEND_ENTRIES } from '../thought-graph.taxonomy';
 import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent } from '../shared';
 
 @Component({
@@ -206,36 +207,156 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       </div>
         }
         @case ('拓扑视图') {
-          <div class="topology-canvas topology-fullscreen">
-            <div class="panel-header">
-              <h3>Swarm 拓扑</h3>
+          <div class="topology-shell topology-fullscreen">
+            <div class="panel-header topology-header">
+              <div>
+                <h3>Swarm 拓扑</h3>
+                <p class="panel-subtitle">展示执行节点实例、流转关系和当前活跃路径。</p>
+              </div>
               <div class="panel-actions">
                 <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
               </div>
             </div>
-            <div class="topology-graph">
-              @if (state.resolvedGraph()) {
-                <app-graph-viewer [graph]="state.resolvedGraph()"></app-graph-viewer>
-              } @else {
-                <app-empty-state message="暂无拓扑数据"></app-empty-state>
-              }
+            <div class="topology-layout">
+              <div class="topology-stage">
+                <div class="topology-stage-frame">
+                  @if (state.resolvedGraph()) {
+                    <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
+                  } @else {
+                    <app-empty-state message="暂无拓扑数据"></app-empty-state>
+                  }
+                </div>
+                <div class="topology-summary-strip">
+                  <div class="summary-item">
+                    <span class="summary-label">节点实例</span>
+                    <span class="summary-value">{{ state.resolvedGraph()?.nodes?.length ?? 0 }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="summary-label">关系边</span>
+                    <span class="summary-value">{{ state.resolvedGraph()?.edges?.length ?? 0 }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="summary-label">入口 / 退出</span>
+                    <span class="summary-value">{{ state.resolvedGraph()?.entry_node_id ?? '—' }} / {{ state.resolvedGraph()?.exit_node_id ?? '—' }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="topology-rail">
+                <app-panel-card title="图例" [noPadding]="true">
+                  <div class="legend-list topology-legend">
+                    @for (item of state.topologyLegendItems(); track item.label) {
+                      <div class="legend-item">
+                        @if (item.kind === 'dot') {
+                          <span class="legend-dot" [style.background]="item.color"></span>
+                        } @else if (item.kind === 'dashed') {
+                          <span class="legend-line dashed" [style.background]="item.color"></span>
+                        } @else {
+                          <span class="legend-line" [style.background]="item.color"></span>
+                        }
+                        <span class="legend-name">{{ item.label }}</span>
+                        <span class="legend-detail">{{ item.detail }}</span>
+                      </div>
+                    }
+                  </div>
+                </app-panel-card>
+                <app-panel-card title="节点实例" [badge]="state.resolvedGraph()?.nodes?.length ?? 0" [noPadding]="true">
+                  <div class="topology-instance-list">
+                    @for (node of state.resolvedGraph()?.nodes ?? []; track node.node_id) {
+                      <div class="topology-instance-item">
+                        <div class="topology-instance-head">
+                          <div class="topology-instance-name">{{ node.node_name }}</div>
+                          <span class="pill active">{{ node.node_type }}</span>
+                        </div>
+                        <div class="topology-instance-meta mono">ID {{ node.node_id }}</div>
+                        <div class="topology-instance-detail">next: {{ node.next_node_ids.length ? node.next_node_ids.join(', ') : 'none' }}</div>
+                      </div>
+                    } @empty {
+                      <app-empty-state message="暂无节点实例"></app-empty-state>
+                    }
+                  </div>
+                </app-panel-card>
+              </div>
             </div>
           </div>
         }
         @case ('思考图') {
-          <div class="topology-canvas topology-fullscreen thought-fullscreen">
-            <div class="panel-header">
-              <h3>Swarm 思考图</h3>
+          <div class="thought-shell thought-fullscreen">
+            <div class="panel-header thought-header">
+              <div>
+                <h3>Swarm 思考图</h3>
+                <p class="panel-subtitle">展示认知节点、关系边和活跃子图。</p>
+              </div>
               <div class="panel-actions">
                 <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
               </div>
             </div>
-            <div class="topology-graph thought-graph">
-              @if (state.resolvedThoughtGraph()) {
-                <app-thought-graph-viewer [graph]="state.resolvedThoughtGraph()"></app-thought-graph-viewer>
-              } @else {
-                <app-empty-state message="暂无思考图数据"></app-empty-state>
-              }
+            <div class="thought-layout">
+              <div class="thought-stage">
+                <div class="thought-stage-frame">
+                  @if (state.resolvedThoughtGraph()) {
+                    <app-thought-graph-viewer [graph]="state.resolvedThoughtGraph()"></app-thought-graph-viewer>
+                  } @else {
+                    <app-empty-state message="暂无思考图数据"></app-empty-state>
+                  }
+                </div>
+                <div class="thought-summary-strip">
+                  <div class="summary-item">
+                    <span class="summary-label">节点</span>
+                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.nodes?.length ?? 0 }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="summary-label">边</span>
+                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.edges?.length ?? 0 }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="summary-label">活跃子图</span>
+                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.active_subgraphs?.length ?? 0 }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="thought-rail">
+                <app-panel-card title="图例" [noPadding]="true">
+                  <div class="thought-legend">
+                    <div class="thought-legend-group">
+                      <div class="legend-group-title">节点类型</div>
+                      <div class="legend-grid legend-grid-nodes">
+                        @for (item of thoughtNodeLegendItems; track item.key) {
+                          <div class="legend-item">
+                            <span class="legend-dot" [style.background]="item.color"></span>
+                            <span class="legend-name">{{ item.label }}</span>
+                            <span class="legend-detail">{{ item.detail }}</span>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                    <div class="thought-legend-group">
+                      <div class="legend-group-title">关系类型</div>
+                      <div class="legend-grid legend-grid-relations">
+                        @for (item of thoughtRelationLegendItems; track item.key) {
+                          <div class="legend-item">
+                            <span class="legend-line" [class.dashed]="!!item.dash" [style.background]="item.color"></span>
+                            <span class="legend-name">{{ item.label }}</span>
+                            <span class="legend-detail">{{ item.detail }}</span>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </app-panel-card>
+                <app-panel-card title="活跃子图" [noPadding]="true">
+                  <div class="thought-subgraph-list">
+                    @for (subgraph of state.resolvedThoughtGraph()?.active_subgraphs ?? []; track subgraph.subgraph_id) {
+                      <div class="thought-subgraph-item">
+                        <div class="thought-subgraph-title">{{ subgraph.purpose || subgraph.subgraph_id }}</div>
+                        <div class="thought-subgraph-meta mono">{{ subgraph.subgraph_id }}</div>
+                        <div class="thought-subgraph-detail">owner: {{ subgraph.owner_agent }} · status: {{ subgraph.status }}</div>
+                      </div>
+                    } @empty {
+                      <app-empty-state message="暂无活跃子图"></app-empty-state>
+                    }
+                  </div>
+                </app-panel-card>
+              </div>
             </div>
           </div>
         }
@@ -413,6 +534,34 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
     }
     .panel-actions { display: flex; gap: 6px; }
     .legend-list { padding: 12px 18px; }
+    .thought-legend {
+      display: grid;
+      gap: 14px;
+      padding: 12px 14px 14px;
+      max-height: 520px;
+      overflow: auto;
+    }
+    .thought-legend-group {
+      display: grid;
+      gap: 8px;
+    }
+    .legend-group-title {
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .legend-grid {
+      display: grid;
+      gap: 2px;
+    }
+    .legend-grid-nodes {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .legend-grid-relations {
+      grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
     .legend-item {
       display: flex;
       align-items: center;
@@ -420,9 +569,11 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       padding: 8px 0;
       font-size: 13px;
       color: #cbd5e1;
+      min-width: 0;
     }
     .legend-name {
       flex: 0 0 auto;
+      white-space: nowrap;
     }
     .legend-detail {
       margin-left: auto;
@@ -435,12 +586,15 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       height: 12px;
       border-radius: 50%;
       flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(8, 12, 22, 0.55), 0 0 8px rgba(148,163,184,0.16);
     }
     .legend-line {
       width: 20px;
       height: 2px;
       background: #94a3b8;
       flex-shrink: 0;
+      border-radius: 999px;
+      box-shadow: 0 0 0 1px rgba(8, 12, 22, 0.4);
     }
     .legend-line.dashed {
       background: repeating-linear-gradient(90deg, #94a3b8, #94a3b8 4px, transparent 4px, transparent 8px);
@@ -576,7 +730,213 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                 .data-table tr:hover td { background: rgba(148,163,184,0.03); }
         .tab-content { padding: 16px 0; }
     .topology-fullscreen { height: calc(100vh - 220px); min-height: 480px; }
-        .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .topology-shell,
+    .thought-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      height: calc(100vh - 220px);
+      min-height: 560px;
+      margin-bottom: 18px;
+      padding: 14px;
+      background:
+        radial-gradient(circle at top left, rgba(94, 234, 212, 0.12), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(139, 92, 246, 0.10), transparent 24%),
+        linear-gradient(180deg, #0c1220, #090d17);
+      border: 1px solid rgba(148,163,184,0.1);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .topology-shell {
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.12), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.10), transparent 24%),
+        linear-gradient(180deg, #0c1220, #090d17);
+    }
+    .topology-header {
+      padding: 0 4px;
+      border-bottom: none;
+    }
+    .thought-header {
+      padding: 0 4px;
+      border-bottom: none;
+    }
+    .panel-subtitle {
+      margin: 4px 0 0;
+      color: #94a3b8;
+      font-size: 12px;
+    }
+    .thought-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 312px;
+      gap: 14px;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .topology-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 312px;
+      gap: 14px;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .thought-stage {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      gap: 10px;
+    }
+    .topology-stage {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      gap: 10px;
+    }
+    .thought-stage-frame {
+      flex: 1 1 auto;
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid rgba(148,163,184,0.10);
+      background: rgba(2, 6, 23, 0.45);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .topology-stage-frame {
+      flex: 1 1 auto;
+      min-height: 0;
+      min-width: 0;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid rgba(148,163,184,0.10);
+      background: rgba(2, 6, 23, 0.45);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .thought-stage-frame app-thought-graph-viewer {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+    }
+    .topology-stage-frame app-graph-viewer {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+    }
+    .thought-summary-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .topology-summary-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .summary-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(148,163,184,0.08);
+    }
+    .summary-label {
+      color: #94a3b8;
+      font-size: 12px;
+    }
+    .summary-value {
+      color: #f8fafc;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .thought-rail {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      min-height: 0;
+    }
+    .topology-rail {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      min-height: 0;
+    }
+    .topology-legend {
+      max-height: 260px;
+      overflow: auto;
+    }
+    .topology-instance-list {
+      max-height: 420px;
+      overflow: auto;
+      padding: 12px 14px 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .topology-instance-item {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(148,163,184,0.06);
+    }
+    .topology-instance-item:last-child {
+      border-bottom: none;
+    }
+    .topology-instance-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .topology-instance-name {
+      color: #f8fafc;
+      font-size: 13px;
+      font-weight: 600;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .topology-instance-meta,
+    .topology-instance-detail {
+      color: #94a3b8;
+      font-size: 11px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .thought-legend,
+    .thought-subgraph-list {
+      padding: 12px 14px;
+    }
+    .thought-subgraph-item {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(148,163,184,0.06);
+    }
+    .thought-subgraph-item:last-child {
+      border-bottom: none;
+    }
+    .thought-subgraph-title {
+      color: #f8fafc;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .thought-subgraph-meta,
+    .thought-subgraph-detail {
+      color: #94a3b8;
+      font-size: 11px;
+    }
+    .thought-subgraph-meta {
+      margin-bottom: 2px;
+    }
+    .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.busy { background: rgba(139,92,246,0.15); color: #a78bfa; }
@@ -621,9 +981,24 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       .bottom-tables { grid-template-columns: 1fr; }
       .right-stack { flex-direction: row; flex-wrap: wrap; }
       .right-stack app-panel-card { flex: 1; min-width: 240px; }
+      .legend-grid-nodes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .topology-layout,
+      .thought-layout { grid-template-columns: 1fr; }
+      .topology-rail,
+      .thought-rail { flex-direction: row; flex-wrap: wrap; }
+      .topology-rail app-panel-card,
+      .thought-rail app-panel-card { flex: 1; min-width: 260px; }
+      .topology-instance-list { max-height: 280px; }
     }
     @media (max-width: 768px) {
       .page-header { flex-direction: column; gap: 12px; }
+      .legend-grid-nodes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topology-summary-strip,
+      .thought-summary-strip { grid-template-columns: 1fr; }
+      .topology-rail,
+      .thought-rail { flex-direction: column; }
+      .topology-rail app-panel-card,
+      .thought-rail app-panel-card { min-width: 0; }
     }
   `]
 })
@@ -632,6 +1007,8 @@ export class SwarmManagementPageComponent {
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
   readonly tabs = ['概览', '拓扑视图', '思考图', 'Agents', '任务', '知识', '记忆', '设置'];
+  readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
+  readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
 
   async loadSwarm(): Promise<void> {
     const source = window.prompt('输入要加载的 Swarm 路径或名称');

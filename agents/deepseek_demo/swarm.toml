@@ -42,4 +42,4 @@ model = "deepseek-reasoner"
 
 [workspace]
 default_mode = "workspace"
-default_root = "../.."
+default_root = "."
