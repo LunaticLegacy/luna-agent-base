@@ -27,8 +27,10 @@ def serialize_node(node: Node) -> Dict[str, Any]:
     if isinstance(node, AgentNode):
         payload.update(
             {
+                "blueprint_ref": node.blueprint_ref,
                 "agent_id": node.agent_id,
                 "additional_prompt": node.additional_prompt,
+                "instance_policy": node.instance_policy,
             }
         )
     elif isinstance(node, ToolNode):

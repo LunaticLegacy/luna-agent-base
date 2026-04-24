@@ -32,6 +32,19 @@ class CognitiveRuntimeMixin:
             return
         merge_cognitive_graphs(self.swarm_cognitive_graph, agent_cg)
 
+    def merge_agent_cognitive_delta(
+        self,
+        agent_id: str,
+        snapshot: Optional[Dict[str, Any]],
+    ) -> None:
+        if not snapshot:
+            return
+        try:
+            delta_graph = CognitiveGraph.from_dict(snapshot)
+        except Exception:
+            return
+        merge_cognitive_graphs(self.swarm_cognitive_graph, delta_graph)
+
     def get_cognitive_graph_export(self, query: Optional[str] = None, max_nodes: int = 20) -> str:
         return self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=max_nodes)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import shutil
 import unittest
-import tempfile
 from pathlib import Path
 
 from core.agent import Agent
@@ -12,6 +12,18 @@ from core.cognitive import (
     CognitiveNodeType,
     CognitiveRelationType,
 )
+
+
+TEST_TMP_ROOT = Path(".test_tmp")
+TEST_TMP_ROOT.mkdir(exist_ok=True)
+
+
+def make_test_dir(name: str) -> Path:
+    path = (TEST_TMP_ROOT / name).resolve()
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class ThoughtGraphTest(unittest.TestCase):
@@ -78,51 +90,51 @@ class ThoughtGraphTest(unittest.TestCase):
         self.assertEqual(CognitiveEdge.from_dict(edge.to_dict()).relation, CognitiveRelationType.DISPROVES)
 
     def test_private_workspace_snapshot_stays_agent_local(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            workspace_root = Path(tmp_dir)
-            shared = CognitiveGraph(graph_id="shared")
-            private = CognitiveGraph(graph_id="agent_reviewer")
-            private.add_node(
-                CognitiveNode(
-                    node_type=CognitiveNodeType.HYPOTHESIS,
-                    content="Private draft hypothesis",
-                    source="reviewer",
-                )
+        workspace_root = make_test_dir("thought_graph_private_snapshot")
+        shared = CognitiveGraph(graph_id="shared")
+        private = CognitiveGraph(graph_id="agent_reviewer")
+        private.add_node(
+            CognitiveNode(
+                node_type=CognitiveNodeType.HYPOTHESIS,
+                content="Private draft hypothesis",
+                source="reviewer",
             )
-            agent = Agent(
-                agent_id="reviewer",
-                llm_handler=object(),
-                character_prompt="review",
-                cognitive_graph=private,
-                workspace_root=workspace_root,
-                swarm_name="test_swarm",
-            )
+        )
+        agent = Agent(
+            agent_id="reviewer",
+            llm_handler=object(),
+            character_prompt="review",
+            cognitive_graph=private,
+            workspace_root=workspace_root,
+            swarm_name="test_swarm",
+        )
 
-            agent.persist_private_thought_snapshot()
-            snapshot_path = agent.private_workspace_dir / "cognitive_graph_snapshot.json"
+        agent.persist_private_thought_snapshot()
+        snapshot_path = agent.private_workspace_dir / "cognitive_graph_snapshot.json"
 
-            self.assertTrue(snapshot_path.exists())
-            self.assertIn("Private draft hypothesis", snapshot_path.read_text(encoding="utf-8"))
-            self.assertEqual(shared.nodes, {})
+        self.assertTrue(snapshot_path.exists())
+        self.assertIn("Private draft hypothesis", snapshot_path.read_text(encoding="utf-8"))
+        self.assertEqual(shared.nodes, {})
+        shutil.rmtree(workspace_root)
 
     def test_private_workspace_summary_is_run_scoped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            workspace_root = Path(tmp_dir)
-            agent = Agent(
-                agent_id="reviewer",
-                llm_handler=object(),
-                character_prompt="review",
-                workspace_root=workspace_root,
-                swarm_name="test_swarm",
-            )
-            agent.set_run_id("run-a")
-            run_a_dir = agent.private_workspace_dir
-            run_a_dir.mkdir(parents=True)
-            (run_a_dir / "notes.txt").write_text("old task secret", encoding="utf-8")
+        workspace_root = make_test_dir("thought_graph_run_scoped")
+        agent = Agent(
+            agent_id="reviewer",
+            llm_handler=object(),
+            character_prompt="review",
+            workspace_root=workspace_root,
+            swarm_name="test_swarm",
+        )
+        agent.set_run_id("run-a")
+        run_a_dir = agent.private_workspace_dir
+        run_a_dir.mkdir(parents=True, exist_ok=True)
+        (run_a_dir / "notes.txt").write_text("old task secret", encoding="utf-8")
 
-            agent.set_run_id("run-b")
+        agent.set_run_id("run-b")
 
-            self.assertNotIn("old task secret", agent.summarize_private_workspace())
+        self.assertNotIn("old task secret", agent.summarize_private_workspace())
+        shutil.rmtree(workspace_root)
 
 
 if __name__ == "__main__":

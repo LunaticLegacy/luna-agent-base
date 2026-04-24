@@ -24,6 +24,7 @@ class AgentRoundResult:
     raw_response: Any = None
     additional_prompt: Optional[str] = None
     cognitive_graph_snapshot: Optional[Dict[str, Any]] = None
+    cognitive_graph_delta: Optional[Dict[str, Any]] = None
 
 
 @dataclass
