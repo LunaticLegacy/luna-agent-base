@@ -64,64 +64,72 @@ class GraphExecutor(
             ),
         )
         try:
-            result = await self._execute_from_node(
-                graph,
-                core,
-                state,
-                graph.entry_node_id,
-                run_id=effective_run_id,
-                swarm_name=swarm_name,
-                event_sink=event_sink,
-            )
-        except Exception as exc:
-            failure = FailureEvent(
-                run_id=effective_run_id,
-                swarm_name=swarm_name or "",
-                graph_revision=self._graph_revision(core),
-                failure_scope="run",
-                failure_kind=self._classify_failure_kind(exc),
-                message=str(exc),
-                state_snapshot=state.snapshot(),
-            )
-            regulate_failure = getattr(core, "regulate_failure", None)
-            regulation = None
-            if callable(regulate_failure):
-                try:
-                    regulation = regulate_failure(failure, graph=graph)
-                except Exception:
-                    regulation = None
+            try:
+                result = await self._execute_from_node(
+                    graph,
+                    core,
+                    state,
+                    graph.entry_node_id,
+                    run_id=effective_run_id,
+                    swarm_name=swarm_name,
+                    event_sink=event_sink,
+                )
+            except Exception as exc:
+                failure = FailureEvent(
+                    run_id=effective_run_id,
+                    swarm_name=swarm_name or "",
+                    graph_revision=self._graph_revision(core),
+                    failure_scope="run",
+                    failure_kind=self._classify_failure_kind(exc),
+                    message=str(exc),
+                    state_snapshot=state.snapshot(),
+                )
+                regulate_failure = getattr(core, "regulate_failure", None)
+                regulation = None
+                if callable(regulate_failure):
+                    try:
+                        regulation = regulate_failure(failure, graph=graph)
+                    except Exception:
+                        regulation = None
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=effective_run_id,
+                        swarm_name=swarm_name,
+                        event_type="run.failed",
+                        rounds=state.rounds,
+                        status="failed",
+                        data={
+                            "error": str(exc),
+                            "state_snapshot": state.snapshot(),
+                            "failure": failure.to_dict(),
+                            "regulation": regulation.to_dict() if regulation is not None else None,
+                        },
+                    ),
+                )
+                raise
+
             self._emit(
                 event_sink,
                 ExecutionEvent(
                     run_id=effective_run_id,
                     swarm_name=swarm_name,
-                    event_type="run.failed",
-                    rounds=state.rounds,
-                    status="failed",
+                    event_type="run.completed",
+                    rounds=result.rounds,
+                    status="completed",
                     data={
-                        "error": str(exc),
-                        "state_snapshot": state.snapshot(),
-                        "failure": failure.to_dict(),
-                        "regulation": regulation.to_dict() if regulation is not None else None,
+                        "state_snapshot": result.snapshot(),
                     },
                 ),
             )
-            raise
-
-        self._emit(
-            event_sink,
-            ExecutionEvent(
-                run_id=effective_run_id,
-                swarm_name=swarm_name,
-                event_type="run.completed",
-                rounds=result.rounds,
-                status="completed",
-                data={
-                    "state_snapshot": result.snapshot(),
-                },
-            ),
-        )
-        return result
+            return result
+        finally:
+            cleanup = getattr(core, "cleanup_transient_execution_nodes", None)
+            if callable(cleanup):
+                try:
+                    cleanup(graph=graph)
+                except Exception:
+                    pass
 
     async def _execute_from_node(
         self,

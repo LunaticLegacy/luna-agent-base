@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from core.policy import AgentNode, ToolNode
+from core.policy import AgentNode, ToolNode, _node_is_transient
 from web.utils import to_jsonable
 
 
@@ -89,7 +89,7 @@ def _agent_tags(agent_id: str, node: Optional[Any]) -> List[str]:
         return tags
     role = _agent_role(agent_id, node)
     base = ["core"] if role in {"coordinator", "reviewer"} else ["system"]
-    if node is not None and isinstance(node.metadata, dict) and node.metadata.get("runtime_transient"):
+    if node is not None and isinstance(node.metadata, dict) and _node_is_transient(node.metadata):
         base.append("transient")
     return base
 

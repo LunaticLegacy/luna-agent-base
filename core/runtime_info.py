@@ -368,6 +368,11 @@ class RuntimeInfoManager:
         if action == "graph_add_tool_node":
             return f"added tool node {detail.get('graph_node_id')}"
         if action == "graph_remove_node":
+            node_ids = detail.get("graph_node_ids")
+            if isinstance(node_ids, list) and node_ids:
+                if len(node_ids) == 1:
+                    return f"removed node {node_ids[0]}"
+                return f"removed {len(node_ids)} transient nodes"
             return f"removed node {detail.get('graph_node_id')}"
         if action == "graph_replace_next":
             return f"replaced next nodes for {detail.get('graph_from_node_id')}"

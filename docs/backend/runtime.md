@@ -190,6 +190,14 @@ web_search = ["network_access"]
 - `web_search` 需要 `network_access`
 - `file_writer` 写 `config.toml`、`.env` 等配置/密钥文件时额外需要 `config_write`
 
+`graph_editor` 新增节点时会读取生命周期字段：
+
+- `runtime_transient`
+- `persistence`
+- `lifetime_policy`
+
+其中 `runtime_transient` 仍然兼容旧语义，但现在更推荐显式使用 `persistence = "transient" | "persistent"` 来表达临时/持久节点。
+
 如果 manifest 没有授予对应能力，即使 agent 绑定了工具，工具调用也会被拒绝。`agent_manager` 创建运行时 agent 时还会阻止从 `workspace` 升级到 `full_access`。
 
 ### 全量加载时的额外动作

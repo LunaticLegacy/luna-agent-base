@@ -151,7 +151,8 @@ agents/deepseek_demo/
   - `graph_editor` 插入临时节点
   - `agent_manager` 销毁临时 researcher
   - `graph_editor` 移除临时节点
-- 临时节点标记为 `runtime_transient = true`。
+- 临时节点默认标记为 `runtime_transient = true`
+- 若需要长期保留，则显式标记为 `persistence = "persistent"`，并将其作为可长期存在的 swarm 结构
 - `reviewer` 通过返回 `next_node_ids` 控制路由：approve → 20, revise → 18, re_research → 2。
 - `file_writer` 是出口节点（exit_node_id = 21）。
 
@@ -178,6 +179,19 @@ agents/deepseek_demo/
 - 设置出口节点
 
 这意味着文件中定义的图只是初始图，运行时可以继续演化。
+
+新增节点现在有明确生命周期语义：
+
+- `transient`：用完即弃的运行态节点
+- `persistent`：长期保留的节点，直到被显式编辑删除、禁用或替换
+
+运行时会把生命周期写成结构化 `node_lifecycle` 元数据，建议包含：
+
+- `runtime_transient`
+- `persistence`
+- `lifetime_policy`
+
+默认情况下，新增节点应当是 `transient`，只有明确声明时才进入 `persistent`。
 
 ### 5.2 `agent_manager_tool`
 

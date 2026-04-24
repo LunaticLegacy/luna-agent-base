@@ -16,6 +16,18 @@ class FailingPersistCore:
         raise RuntimeError("persist failed")
 
 
+class NoopPersistCore:
+    def __init__(self) -> None:
+        self.agents = {"agent-3": object()}
+        self.tools = {"tool-4": object()}
+
+    def persist_execution_graph(self):
+        return None
+
+    def record_runtime_change(self, **kwargs):
+        return None
+
+
 class GraphEditorToolTest(unittest.TestCase):
     def test_graph_editor_requires_mutation_capability(self) -> None:
         graph = _build_graph()
@@ -47,6 +59,56 @@ class GraphEditorToolTest(unittest.TestCase):
 
         self.assertEqual(graph.nodes[1].next_node_ids, [])
         self.assertEqual(graph.edges, [])
+
+    def test_graph_editor_supports_persistent_and_transient_lifecycle(self) -> None:
+        graph = _build_graph()
+        tool = GraphEditorTool()
+
+        asyncio.run(
+            tool.execute(
+                {
+                    "action": "add_agent_node",
+                    "node_id": 3,
+                    "node_name": "persistent-agent",
+                    "agent_id": "agent-3",
+                    "next_node_ids": [],
+                    "persistence": "persistent",
+                    "lifetime_policy": "manual",
+                },
+                context=ToolContext(
+                    graph=graph,
+                    core=NoopPersistCore(),
+                    capabilities={"graph_mutation"},
+                ),
+            )
+        )
+
+        self.assertFalse(graph.nodes[3].metadata["runtime_transient"])
+        self.assertEqual(graph.nodes[3].metadata["persistence"], "persistent")
+        self.assertEqual(graph.nodes[3].metadata["lifetime_policy"], "manual")
+        self.assertEqual(graph.nodes[3].metadata["node_lifecycle"]["persistence"], "persistent")
+
+        asyncio.run(
+            tool.execute(
+                {
+                    "action": "add_tool_node",
+                    "node_id": 4,
+                    "node_name": "temporary-tool",
+                    "tool_name": "tool-4",
+                    "next_node_ids": [],
+                    "runtime_transient": True,
+                },
+                context=ToolContext(
+                    graph=graph,
+                    core=NoopPersistCore(),
+                    capabilities={"graph_mutation"},
+                ),
+            )
+        )
+
+        self.assertTrue(graph.nodes[4].metadata["runtime_transient"])
+        self.assertEqual(graph.nodes[4].metadata["persistence"], "transient")
+        self.assertEqual(graph.nodes[4].metadata["lifetime_policy"], "run")
 
 
 def _build_graph() -> ExecutionGraph:

@@ -36,6 +36,11 @@ class DummyCore:
     def get_cognitive_graph_export(self, query=None, max_nodes=20):
         return "cognitive export"
 
+    def cleanup_transient_execution_nodes(self, *, graph=None):
+        if graph is None:
+            return []
+        return graph.purge_transient_nodes()
+
 
 class FaultToleranceTest(unittest.TestCase):
     def test_architecture_regulator_quarantines_node_with_fallback(self) -> None:
@@ -87,7 +92,12 @@ class FaultToleranceTest(unittest.TestCase):
                 node_name="quarantined",
                 agent_id="quarantined",
                 next_node_ids=[2],
-                metadata={"fault_tolerance": {"quarantined": True, "fallback_node_id": 2, "last_failure_message": "quarantined"}},
+                metadata={
+                    "fault_tolerance": {"quarantined": True, "fallback_node_id": 2, "last_failure_message": "quarantined"},
+                    "runtime_transient": True,
+                    "persistence": "transient",
+                    "lifetime_policy": "run",
+                },
             )
         )
         graph.add_node(
@@ -122,6 +132,8 @@ class FaultToleranceTest(unittest.TestCase):
         self.assertIn("node.started", event_types)
         self.assertIn("node.completed", event_types)
         self.assertEqual(state.payload, "round-1:{'task': 'demo'}")
+        self.assertNotIn(1, graph.nodes)
+        self.assertIn(2, graph.nodes)
 
 
 if __name__ == "__main__":
