@@ -33,6 +33,7 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self._execution_graph_source_path = None
         self._execution_graph_backup_path = None
         self._runtime_info: Optional[RuntimeInfoManager] = None
+        self._runtime_info_dir: Optional[Path] = None
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
         self.active_thought_subgraphs = {}
         self.current_run_id: Optional[str] = None
@@ -44,6 +45,7 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
             self.check_execution_graph_complete()
 
     def set_runtime_info_dir(self, runtime_dir: Path) -> None:
+        self._runtime_info_dir = Path(runtime_dir)
         self._runtime_info = RuntimeInfoManager(runtime_dir=runtime_dir, agent_name=self.agent_name)
         self._record_runtime_change(
             action="runtime_info_initialized",
@@ -51,6 +53,9 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
             subject_id=self.agent_name,
             detail={"runtime_dir": str(runtime_dir)},
         )
+
+    def get_runtime_info_dir(self) -> Optional[Path]:
+        return self._runtime_info_dir
 
     def set_task_graph(self, task_graph: TaskGraph, *, persist_path: Optional[Path] = None) -> None:
         self.task_graph = task_graph
@@ -101,3 +106,42 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
             subject_id=subject_id,
             detail=detail,
         )
+
+    def get_runtime_info_snapshot(self) -> Optional[Dict[str, Any]]:
+        if self._runtime_info is None:
+            return None
+        return self._runtime_info._build_snapshot(core=self)  # noqa: SLF001
+
+    def get_graph_runtime_state(self) -> Dict[str, Any]:
+        if self._runtime_info is None:
+            return {
+                "graph_name": None,
+                "entry_node_id": None,
+                "exit_node_id": None,
+                "node_count": 0,
+                "edge_count": 0,
+                "nodes": [],
+                "edges": [],
+                "revision": 0,
+                "hash": "",
+                "updated_at": "",
+                "last_change": None,
+            }
+        return self._runtime_info.get_graph_state(core=self)
+
+    def get_graph_runtime_events(self, *, since_revision: int = 0) -> list[Dict[str, Any]]:
+        if self._runtime_info is None:
+            return []
+        return self._runtime_info.get_graph_events(since_revision=since_revision)
+
+    def get_graph_runtime_diff(self, *, since_revision: int) -> Dict[str, Any]:
+        if self._runtime_info is None:
+            return {
+                "base_revision": since_revision,
+                "current_revision": 0,
+                "graph_id": None,
+                "is_gap_free": True,
+                "operations": [],
+                "last_change": None,
+            }
+        return self._runtime_info.get_graph_diff(since_revision=since_revision, core=self)

@@ -239,6 +239,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     <span class="summary-label">入口 / 退出</span>
                     <span class="summary-value">{{ state.resolvedGraph()?.entry_node_id ?? '—' }} / {{ state.resolvedGraph()?.exit_node_id ?? '—' }}</span>
                   </div>
+                  <div class="summary-item">
+                    <span class="summary-label">版本</span>
+                    <span class="summary-value">
+                      {{ state.resolvedGraph()?.revision !== undefined && state.resolvedGraph()?.revision !== null ? '#' + state.resolvedGraph()?.revision : '—' }}
+                    </span>
+                  </div>
                 </div>
               </div>
               <div class="topology-rail">

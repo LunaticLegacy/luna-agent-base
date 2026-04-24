@@ -105,6 +105,57 @@ class DummyCore:
     def get_execution_graph(self):
         return self._graph
 
+    def get_graph_runtime_state(self):
+        return {
+            "graph_name": self._graph.graph_name,
+            "entry_node_id": self._graph.entry_node_id,
+            "exit_node_id": self._graph.exit_node_id,
+            "node_count": len(self._graph.nodes),
+            "edge_count": len(self._graph.edges),
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "node_name": node.node_name,
+                    "node_type": node.node_type,
+                    "next_node_ids": node.next_node_ids,
+                    "metadata": node.metadata,
+                }
+                for node in self._graph.nodes.values()
+            ],
+            "edges": [
+                {
+                    "from_node_id": edge.from_node_id,
+                    "to_node_id": edge.to_node_id,
+                    "label": edge.label,
+                    "condition": edge.condition,
+                    "priority": edge.priority,
+                }
+                for edge in self._graph.edges
+            ],
+            "revision": 1,
+            "hash": "sha256:test",
+            "updated_at": "2026-04-24T00:00:00Z",
+            "last_change": {
+                "change_id": "graph-00000001",
+                "kind": "set_execution_graph",
+                "subject": {"type": "graph", "id": "demo-graph"},
+                "summary": "initialized execution graph",
+            },
+        }
+
+    def get_graph_runtime_diff(self, *, since_revision: int):
+        return {
+            "base_revision": since_revision,
+            "current_revision": 1,
+            "graph_id": "demo-graph",
+            "is_gap_free": True,
+            "operations": [],
+            "last_change": None,
+        }
+
+    def get_graph_runtime_events(self, *, since_revision: int = 0):
+        return []
+
     def get_cognitive_graph_snapshot(self):
         return {
             "graph_id": "thought-demo",
@@ -226,6 +277,20 @@ class RouteSmokeTest(unittest.TestCase):
         graph = graph_response.get_json()
         self.assertTrue(graph["success"])
         self.assertEqual(graph["graph"]["graph_name"], "demo-graph")
+        self.assertEqual(graph["graph"]["revision"], 1)
+
+        graph_state_response = self.client.get("/api/swarms/demo/graph/state?since_revision=0")
+        self.assertEqual(graph_state_response.status_code, 200)
+        graph_state = graph_state_response.get_json()
+        self.assertTrue(graph_state["success"])
+        self.assertTrue(graph_state["has_changes_since"])
+        self.assertEqual(graph_state["graph"]["revision"], 1)
+
+        graph_diff_response = self.client.get("/api/swarms/demo/graph/diff?since_revision=0")
+        self.assertEqual(graph_diff_response.status_code, 200)
+        graph_diff = graph_diff_response.get_json()
+        self.assertTrue(graph_diff["success"])
+        self.assertEqual(graph_diff["patch"]["current_revision"], 1)
 
         thought_response = self.client.get("/api/swarms/demo/thought-graph")
         self.assertEqual(thought_response.status_code, 200)

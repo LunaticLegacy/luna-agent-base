@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
 from core.results import ExecutionEvent
@@ -17,6 +18,7 @@ class RunRecord:
 
     run_id: str
     swarm_name: str
+    storage_dir: Optional[Path] = None
     status: str = "queued"
     created_at: str = field(default_factory=_utc_now_iso)
     started_at: Optional[str] = None
@@ -32,12 +34,33 @@ class RunRecord:
     _done: bool = False
     _condition: threading.Condition = field(default_factory=threading.Condition, repr=False, compare=False)
 
+    def __post_init__(self) -> None:
+        if self.storage_dir is not None:
+            self.bind_storage_dir(self.storage_dir)
+
+    @property
+    def events_path(self) -> Optional[Path]:
+        if self.storage_dir is None:
+            return None
+        return self.storage_dir / "events.jsonl"
+
+    @property
+    def snapshot_path(self) -> Optional[Path]:
+        if self.storage_dir is None:
+            return None
+        return self.storage_dir / "current.json"
+
+    def bind_storage_dir(self, storage_dir: Path) -> None:
+        self.storage_dir = Path(storage_dir)
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+
     def append_event(self, event: ExecutionEvent | Dict[str, Any]) -> Dict[str, Any]:
         """Store one event and update the live snapshot."""
         payload = to_jsonable(event)
         with self._condition:
             self.events.append(payload)
             self._apply_event(payload)
+            self._persist_locked(payload)
             self._condition.notify_all()
         return payload
 
@@ -138,3 +161,18 @@ class RunRecord:
                 yield frame
             if done:
                 break
+
+    def _persist_locked(self, event: Dict[str, Any]) -> None:
+        if self.storage_dir is None:
+            return
+        events_path = self.events_path
+        snapshot_path = self.snapshot_path
+        if events_path is None or snapshot_path is None:
+            return
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        with events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True))
+            handle.write("\n")
+        tmp_path = snapshot_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(self.snapshot(), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        tmp_path.replace(snapshot_path)

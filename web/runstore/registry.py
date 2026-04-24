@@ -4,6 +4,7 @@ import asyncio
 import threading
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.results import ExecutionEvent
@@ -32,6 +33,11 @@ class RunRegistry:
         """Create a run record and execute the graph in a daemon thread."""
         run_id = uuid.uuid4().hex
         record = RunRecord(run_id=run_id, swarm_name=swarm_name, rounds=rounds)
+        runtime_info_dir = getattr(core, "get_runtime_info_dir", None)
+        if callable(runtime_info_dir):
+            storage_root = runtime_info_dir()
+            if storage_root is not None:
+                record.bind_storage_dir(Path(storage_root) / "runs" / run_id)
         with self._lock:
             self._runs[run_id] = record
 

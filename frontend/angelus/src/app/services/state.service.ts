@@ -5,7 +5,9 @@ import type {
   AgentCatalogItem,
   ApiIndexResponse,
   ApiSettings,
+  GraphDiffResponse,
   GraphSnapshot,
+  GraphStateSnapshot,
   HealthResponse,
   KnowledgeCatalogItem,
   LogCatalogItem,
@@ -261,6 +263,7 @@ export class StateService {
   readonly selectedSwarm = signal<SwarmSummary | null>(null);
   readonly selectedAgentIdChoice = signal<string | null>(null);
   readonly selectedGraph = signal<GraphSnapshot | null>(null);
+  readonly selectedGraphState = signal<GraphStateSnapshot | null>(null);
   readonly selectedThoughtGraph = signal<ThoughtGraphSnapshot | null>(null);
   readonly swarmExecutionTemplate = signal<SwarmExecutionTemplate>('summary');
   readonly swarmExecutionPrompt = signal<string>(SWARM_EXECUTION_PRESETS.summary.prompt);
@@ -275,6 +278,8 @@ export class StateService {
   readonly activeRun = signal<RunSnapshot | null>(null);
   readonly streamState = signal<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle');
   readonly streamNote = signal<string>('未连接实时运行');
+  readonly graphStreamState = signal<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle');
+  readonly graphStreamNote = signal<string>('未连接图变更流');
   readonly agents = signal<AgentRow[]>([]);
   readonly agentsLoaded = signal(false);
   readonly tasks = signal<TaskItem[]>([]);
@@ -310,14 +315,19 @@ export class StateService {
 
   private readonly feedId = signal(0);
   private eventSource: EventSource | null = null;
+  private graphEventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private graphReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private runRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private graphRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private selectedGraphRevision: number | null = null;
+  private graphStreamRevision: number | null = null;
   private refreshGraceful = false;
   private readonly LS_PREFIX = 'angelus_';
 
   readonly totalAgents = computed(() => this.swarms().reduce((sum, s) => sum + s.agent_count, 0));
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
-  readonly resolvedGraph = computed<GraphSnapshot | null>(() => this.selectedSwarm()?.graph ?? this.selectedGraph());
+  readonly resolvedGraph = computed<GraphSnapshot | null>(() => this.selectedGraph() ?? this.selectedSwarm()?.graph ?? null);
   readonly resolvedThoughtGraph = computed<ThoughtGraphSnapshot | null>(() => this.selectedThoughtGraph());
   readonly activeRunNodeId = computed(() => {
     const run = this.activeRun();
@@ -1215,7 +1225,7 @@ export class StateService {
   refreshAll(): void { void this.loadOverview(); }
   refreshSelectedSwarm(): void { void this.reloadSelectedSwarm(); }
   refreshGraph(): void {
-    void this.loadSelectedGraph();
+    void this.syncSelectedGraph({ forceFull: true });
     void this.loadSelectedThoughtGraph();
   }
 
@@ -1272,15 +1282,29 @@ export class StateService {
         if (selectedFromList) {
           this.selectedSwarm.set(selectedFromList);
           this.selectedGraph.set(selectedFromList.graph ?? null);
+          this.selectedGraphRevision = selectedFromList.graph?.revision ?? null;
+          this.selectedGraphState.set(selectedFromList.graph ? {
+            graph_name: selectedFromList.graph.graph_name,
+            entry_node_id: selectedFromList.graph.entry_node_id,
+            exit_node_id: selectedFromList.graph.exit_node_id,
+            node_count: selectedFromList.graph.node_count,
+            edge_count: selectedFromList.graph.edge_count,
+            nodes: selectedFromList.graph.nodes,
+            edges: selectedFromList.graph.edges,
+            revision: selectedFromList.graph.revision ?? 0,
+            hash: selectedFromList.graph.hash ?? '',
+            updated_at: selectedFromList.graph.updated_at ?? '',
+            last_change: selectedFromList.graph.last_change ?? null,
+          } : null);
           this.ensureAgentSelection(selectedFromList);
         } else {
           this.selectedSwarm.set(null);
-          this.selectedGraph.set(null);
+          this.clearSelectedGraph();
           this.selectedThoughtGraph.set(null);
         }
       } else {
         this.selectedSwarm.set(null);
-        this.selectedGraph.set(null);
+        this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
       }
       } else if (this.isOfflineLikeError(swarmResult.reason)) {
@@ -1298,7 +1322,7 @@ this.loadLogs(),
         await this.reloadSelectedSwarm({ clearError: false, gracefulOffline });
       } else {
         this.selectedSwarm.set(null);
-        this.selectedGraph.set(null);
+        this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
         this.agents.set([]);
         this.agentsLoaded.set(true);
@@ -1364,10 +1388,24 @@ this.loadLogs(),
       if (fallback) {
         this.selectedSwarm.set(fallback);
         this.selectedGraph.set(fallback.graph ?? null);
+        this.selectedGraphRevision = fallback.graph?.revision ?? null;
+        this.selectedGraphState.set(fallback.graph ? {
+          graph_name: fallback.graph.graph_name,
+          entry_node_id: fallback.graph.entry_node_id,
+          exit_node_id: fallback.graph.exit_node_id,
+          node_count: fallback.graph.node_count,
+          edge_count: fallback.graph.edge_count,
+          nodes: fallback.graph.nodes,
+          edges: fallback.graph.edges,
+          revision: fallback.graph.revision ?? 0,
+          hash: fallback.graph.hash ?? '',
+          updated_at: fallback.graph.updated_at ?? '',
+          last_change: fallback.graph.last_change ?? null,
+        } : null);
         this.ensureAgentSelection(fallback);
       } else {
         this.selectedSwarm.set(null);
-        this.selectedGraph.set(null);
+        this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
       }
       if (options.gracefulOffline ?? this.refreshGraceful) {
@@ -1384,28 +1422,263 @@ this.loadLogs(),
   }
 
   async loadSelectedGraph(): Promise<void> {
+    await this.syncSelectedGraph({ forceFull: true });
+  }
+
+  async syncSelectedGraph(options: { forceFull?: boolean } = {}): Promise<void> {
     const swarmName = this.selectedSwarmName();
-    if (!swarmName) { this.selectedGraph.set(null); return; }
-    const cached = this.swarms().find((item) => item.swarm_name === swarmName);
-    if (cached?.graph) {
-      this.selectedGraph.set(cached.graph);
+    if (!swarmName) {
+      this.clearSelectedGraph();
       return;
     }
     try {
       const baseUrl = this.baseUrl();
-      const response = await this.apiService.getGraph(baseUrl, swarmName);
-      this.selectedGraph.set(response.graph);
-      this.pushFeed(`图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/graph`, 'info', response);
-    } catch (error) {
-      if (cached?.graph) {
-        this.selectedGraph.set(cached.graph);
+      const stateResponse = await this.apiService.getGraphState(baseUrl, swarmName, this.selectedGraphRevision ?? undefined);
+      const graphState = stateResponse.graph;
+      this.selectedGraphState.set(graphState);
+
+      const localRevision = this.selectedGraphRevision;
+      const remoteRevision = graphState.revision;
+      const hasLocalGraph = !!this.selectedGraph();
+
+      if (options.forceFull || !hasLocalGraph || localRevision === null) {
+        await this.loadGraphSnapshot(baseUrl, swarmName, '强制刷新');
+        this.watchGraphEvents();
         return;
       }
+
+      if (remoteRevision === localRevision) {
+        this.watchGraphEvents();
+        return;
+      }
+
+      if (remoteRevision < localRevision) {
+        await this.loadGraphSnapshot(baseUrl, swarmName, '版本回退');
+        this.watchGraphEvents();
+        return;
+      }
+
+      const diffResponse = await this.apiService.getGraphDiff(baseUrl, swarmName, localRevision);
+      const patch = diffResponse.patch;
+      const applied = this.applyGraphPatch(patch);
+      if (applied) {
+        this.selectedGraphRevision = patch.current_revision;
+        this.selectedGraphState.update((state) => state ? { ...state, revision: patch.current_revision, last_change: patch.last_change } : state);
+        this.pushFeed(`图增量 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/graph/diff?since_revision=${localRevision}`, 'info', diffResponse);
+        this.watchGraphEvents();
+        return;
+      }
+
+      await this.loadGraphSnapshot(baseUrl, swarmName, '增量失败回退');
+      this.watchGraphEvents();
+    } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
       }
-      this.selectedGraph.set(null);
+      if (!this.selectedGraph()) {
+        this.clearSelectedGraph();
+      }
     }
+  }
+
+  private async loadGraphSnapshot(baseUrl: string, swarmName: string, meta: string): Promise<void> {
+    const response = await this.apiService.getGraph(baseUrl, swarmName);
+    this.selectedGraph.set(response.graph);
+    this.selectedGraphRevision = response.graph.revision ?? this.selectedGraphState()?.revision ?? this.selectedGraphRevision;
+    this.selectedGraphState.set({
+      graph_name: response.graph.graph_name,
+      entry_node_id: response.graph.entry_node_id,
+      exit_node_id: response.graph.exit_node_id,
+      node_count: response.graph.node_count,
+      edge_count: response.graph.edge_count,
+      nodes: response.graph.nodes,
+      edges: response.graph.edges,
+      revision: response.graph.revision ?? 0,
+      hash: response.graph.hash ?? '',
+      updated_at: response.graph.updated_at ?? '',
+      last_change: response.graph.last_change ?? null,
+    });
+    this.pushFeed(`图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/graph`, 'info', response, meta);
+  }
+
+  private applyGraphPatch(patch: GraphDiffResponse['patch']): boolean {
+    const current = this.selectedGraph();
+    if (!current) {
+      return false;
+    }
+    if (this.selectedGraphRevision !== null && patch.base_revision !== this.selectedGraphRevision) {
+      return false;
+    }
+
+    const nextGraph: GraphSnapshot = {
+      ...current,
+      nodes: current.nodes.map((node) => ({ ...node, next_node_ids: [...node.next_node_ids] })),
+      edges: current.edges.map((edge) => ({ ...edge })),
+    };
+    const nodesById = new Map(nextGraph.nodes.map((node) => [node.node_id, node] as const));
+    const edgeKey = (edge: { from_node_id: number; to_node_id: number; label: string | null; condition: string | null; priority: number }) =>
+      `${edge.from_node_id}|${edge.to_node_id}|${edge.label ?? ''}|${edge.condition ?? ''}|${edge.priority}`;
+    const edgesByKey = new Map(nextGraph.edges.map((edge) => [edgeKey(edge), edge] as const));
+
+    const removeNode = (nodeId: number) => {
+      nodesById.delete(nodeId);
+      nextGraph.nodes = nextGraph.nodes.filter((node) => node.node_id !== nodeId).map((node) => ({
+        ...node,
+        next_node_ids: node.next_node_ids.filter((nextId) => nextId !== nodeId),
+      }));
+      nextGraph.edges = nextGraph.edges.filter((edge) => edge.from_node_id !== nodeId && edge.to_node_id !== nodeId);
+      for (const key of Array.from(edgesByKey.keys())) {
+        const edge = edgesByKey.get(key);
+        if (edge && (edge.from_node_id === nodeId || edge.to_node_id === nodeId)) {
+          edgesByKey.delete(key);
+        }
+      }
+      for (const node of nextGraph.nodes) {
+        node.next_node_ids = node.next_node_ids.filter((nextId) => nextId !== nodeId);
+      }
+    };
+
+    for (const op of patch.operations) {
+      switch (op.op) {
+        case 'upsert_node':
+          if (!op.node) return false;
+          nodesById.set(op.node.node_id, op.node);
+          break;
+        case 'remove_node':
+          if (typeof op.node_id !== 'number') return false;
+          removeNode(op.node_id);
+          break;
+        case 'add_edge':
+          if (!op.edge) return false;
+          edgesByKey.set(edgeKey(op.edge), op.edge);
+          const sourceNode = nodesById.get(op.edge.from_node_id);
+          if (sourceNode && !sourceNode.next_node_ids.includes(op.edge.to_node_id)) {
+            sourceNode.next_node_ids = [...sourceNode.next_node_ids, op.edge.to_node_id];
+          }
+          break;
+        case 'remove_edge': {
+          if (typeof op.from_node_id !== 'number' || typeof op.to_node_id !== 'number') return false;
+          const key = edgeKey({
+            from_node_id: op.from_node_id,
+            to_node_id: op.to_node_id,
+            label: op.label ?? null,
+            condition: op.condition ?? null,
+            priority: op.priority ?? 0,
+          });
+          edgesByKey.delete(key);
+          const sourceNode = nodesById.get(op.from_node_id);
+          if (sourceNode) {
+            sourceNode.next_node_ids = sourceNode.next_node_ids.filter((nextId) => nextId !== op.to_node_id);
+          }
+          break;
+        }
+        case 'update_graph_meta':
+          nextGraph.entry_node_id = op.entry_node_id ?? null;
+          nextGraph.exit_node_id = op.exit_node_id ?? null;
+          break;
+        default:
+          return false;
+      }
+    }
+
+    nextGraph.nodes = Array.from(nodesById.values()).sort((a, b) => a.node_id - b.node_id);
+    nextGraph.edges = Array.from(edgesByKey.values()).sort((a, b) =>
+      a.from_node_id - b.from_node_id ||
+      a.priority - b.priority ||
+      a.to_node_id - b.to_node_id ||
+      String(a.label ?? '').localeCompare(String(b.label ?? '')) ||
+      String(a.condition ?? '').localeCompare(String(b.condition ?? ''))
+    );
+    nextGraph.node_count = nextGraph.nodes.length;
+    nextGraph.edge_count = nextGraph.edges.length;
+    nextGraph.revision = patch.current_revision;
+    nextGraph.last_change = patch.last_change;
+    this.selectedGraph.set(nextGraph);
+    this.selectedGraphRevision = patch.current_revision;
+    return true;
+  }
+
+  private clearSelectedGraph(): void {
+    this.selectedGraph.set(null);
+    this.selectedGraphState.set(null);
+    this.selectedGraphRevision = null;
+    this.closeGraphStream();
+  }
+
+  private watchGraphEvents(): void {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.closeGraphStream();
+      return;
+    }
+    const currentRevision = this.selectedGraphRevision ?? 0;
+    if (
+      this.graphEventSource &&
+      this.graphStreamState() === 'open' &&
+      this.graphStreamRevision === currentRevision
+    ) {
+      return;
+    }
+    if (this.graphEventSource) {
+      this.graphEventSource.close();
+      this.graphEventSource = null;
+    }
+    if (this.graphReconnectTimer) {
+      clearTimeout(this.graphReconnectTimer);
+      this.graphReconnectTimer = null;
+    }
+    this.graphStreamState.set('connecting');
+    this.graphStreamNote.set(`正在监听 ${swarmName} 图变更`);
+    const sourceUrl = `${joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/graph/events`)}?since_revision=${currentRevision}`;
+    const source = new EventSource(sourceUrl);
+    this.graphEventSource = source;
+    this.graphStreamRevision = currentRevision;
+    source.onopen = () => {
+      this.graphStreamState.set('open');
+      this.graphStreamNote.set(`图变更流已开启: ${swarmName}`);
+    };
+    source.onerror = () => {
+      this.graphStreamState.set('error');
+      this.graphStreamNote.set(`图变更流已中断: ${swarmName}`);
+      if (this.autoReconnect()) {
+        const delayMs = this.reconnectInterval() * 1000;
+        this.graphStreamNote.set(`${delayMs / 1000}秒后重连图变更流...`);
+        this.graphReconnectTimer = setTimeout(() => {
+          if (this.selectedSwarmName() === swarmName) {
+            this.watchGraphEvents();
+          }
+        }, delayMs);
+      }
+    };
+    source.addEventListener('graph.changed', () => {
+      this.scheduleGraphRefresh();
+    });
+  }
+
+  private scheduleGraphRefresh(): void {
+    if (this.graphRefreshTimer) {
+      clearTimeout(this.graphRefreshTimer);
+    }
+    this.graphRefreshTimer = setTimeout(() => {
+      void this.syncSelectedGraph();
+    }, 100);
+  }
+
+  private closeGraphStream(): void {
+    if (this.graphEventSource) {
+      this.graphEventSource.close();
+      this.graphEventSource = null;
+    }
+    if (this.graphReconnectTimer) {
+      clearTimeout(this.graphReconnectTimer);
+      this.graphReconnectTimer = null;
+    }
+    if (this.graphRefreshTimer) {
+      clearTimeout(this.graphRefreshTimer);
+      this.graphRefreshTimer = null;
+    }
+    this.graphStreamRevision = null;
+    this.graphStreamState.set('closed');
   }
 
   async loadSelectedThoughtGraph(): Promise<void> {
@@ -1921,7 +2194,9 @@ this.loadLogs(),
     this.health.set({ success: false, status: 'offline' });
     this.ready.set({ success: false, ready: false, reason: '离线' });
     this.streamNote.set('系统离线，已同步本地状态');
+    this.graphStreamNote.set('系统离线，图变更流已暂停');
     this.closeStream();
+    this.closeGraphStream();
   }
 
   private isOfflineLikeError(error: unknown): boolean {

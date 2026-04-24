@@ -84,6 +84,16 @@ export interface GraphEdgeSnapshot {
   priority: number;
 }
 
+export interface GraphChangeSummary {
+  change_id: string;
+  kind: string;
+  subject: {
+    type: string;
+    id: string | number | null;
+  };
+  summary: string;
+}
+
 export interface GraphSnapshot {
   graph_name: string;
   entry_node_id: number | null;
@@ -92,6 +102,67 @@ export interface GraphSnapshot {
   edge_count: number;
   nodes: GraphNodeSnapshot[];
   edges: GraphEdgeSnapshot[];
+  revision?: number;
+  hash?: string;
+  updated_at?: string;
+  last_change?: GraphChangeSummary | null;
+}
+
+export interface GraphStateSnapshot {
+  graph_name: string | null;
+  entry_node_id: number | null;
+  exit_node_id: number | null;
+  node_count: number;
+  edge_count: number;
+  nodes: GraphNodeSnapshot[];
+  edges: GraphEdgeSnapshot[];
+  revision: number;
+  hash: string;
+  updated_at: string;
+  last_change: GraphChangeSummary | null;
+}
+
+export interface GraphPatchOp {
+  op: 'upsert_node' | 'remove_node' | 'add_edge' | 'remove_edge' | 'update_graph_meta';
+  node?: GraphNodeSnapshot;
+  node_id?: number;
+  edge?: GraphEdgeSnapshot;
+  from_node_id?: number;
+  to_node_id?: number;
+  label?: string | null;
+  condition?: string | null;
+  priority?: number;
+  entry_node_id?: number | null;
+  exit_node_id?: number | null;
+}
+
+export interface GraphPatch {
+  base_revision: number;
+  current_revision: number;
+  graph_id: string | null;
+  is_gap_free: boolean;
+  operations: GraphPatchOp[];
+  last_change: GraphChangeSummary | null;
+}
+
+export interface GraphStateResponse {
+  success: boolean;
+  swarm: string;
+  graph: GraphStateSnapshot;
+  has_changes_since: boolean;
+}
+
+export interface GraphDiffResponse {
+  success: boolean;
+  swarm: string;
+  patch: GraphPatch;
+}
+
+export interface GraphEventsResponse {
+  success: boolean;
+  swarm: string;
+  graph: GraphStateSnapshot;
+  has_changes_since: boolean;
 }
 
 export interface ThoughtGraphNodeSnapshot {
