@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..cognitive import CognitiveGraph, CognitiveSubgraphDescriptor, merge_cognitive_graphs
+from ..context_graph import ContextEntry, ContextEntryType, ContextGraph, ContextReference, ContextRelation
 from ..task_graph import TaskGraph
 
 
@@ -75,7 +76,12 @@ class CognitiveRuntimeMixin:
         purpose: str = "",
         max_nodes: int = 16,
     ) -> str:
-        main_graph = self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=12)
+        main_graph = self.build_context_graph_export(
+            agent_id=agent_id,
+            query=query,
+            purpose=purpose or "Continue the current agent task using relevant shared reasoning.",
+            max_nodes=max_nodes,
+        )
         descriptor, subgraph = self.schedule_thought_subgraph(
             agent_id=agent_id,
             query=query,
@@ -103,6 +109,75 @@ class CognitiveRuntimeMixin:
             "opposes, derives_from, leads_to, depends_on, questions, refines, verifies, disproves, "
             "and speculates."
         )
+
+    def build_context_graph_export(
+        self,
+        *,
+        agent_id: str,
+        query: Optional[str] = None,
+        purpose: str = "",
+        max_nodes: int = 16,
+    ) -> str:
+        descriptor, subgraph = self.swarm_cognitive_graph.describe_subgraph(
+            owner_agent=agent_id,
+            query=query,
+            purpose=purpose or "General thought graph context",
+            expected_next_information="Identify missing facts, uncertain claims, and useful next evidence.",
+            max_nodes=max_nodes,
+        )
+        context_graph, anchor_ids = ContextGraph.from_cognitive_graph(
+            subgraph,
+            query=query,
+            seed_ids=descriptor.root_node_ids,
+            purpose=purpose,
+            max_nodes=max_nodes,
+        )
+        system_entry = ContextEntry(
+            id=f"system:{agent_id}",
+            summary="Swarm thought context instructions",
+            content=(
+                "Use the shared graph as public reasoning state. Use the active subgraph as the current "
+                "schedulable slice. Treat private workspace notes as agent-local context; only promote "
+                "private information by emitting explicit thought graph nodes and relations."
+            ),
+            token_count=0,
+            timestamp=0.0,
+            entry_type=ContextEntryType.SYSTEM,
+            metadata={"agent_id": agent_id, "purpose": purpose},
+            is_retained=True,
+        )
+        context_graph.add_entry(system_entry)
+        private_summary = self.get_private_workspace_summary(agent_id)
+        workspace_entry = ContextEntry(
+            id=f"workspace:{agent_id}",
+            summary="Private workspace summary",
+            content=private_summary,
+            token_count=0,
+            timestamp=0.0,
+            entry_type=ContextEntryType.WORKSPACE,
+            metadata={"agent_id": agent_id, "swarm": self.agent_name},
+            is_retained=True,
+        )
+        context_graph.add_entry(workspace_entry)
+
+        anchor_id = anchor_ids[0] if anchor_ids else next(iter(context_graph.entries.keys()), "")
+        if anchor_id and anchor_id in context_graph.entries:
+            context_graph.add_reference(
+                system_entry.id,
+                ContextReference(
+                    target_id=anchor_id,
+                    relation=ContextRelation.REFERENCES,
+                    target_hash=context_graph.entries[anchor_id].content_hash(),
+                    fallback_inline=context_graph.entries[anchor_id].summary,
+                    weight=1.2,
+                ),
+            )
+        prompt = context_graph.assemble_prompt(
+            anchor_id=anchor_id or None,
+            token_budget=max(1200, max_nodes * 180),
+            title="Swarm Context Graph",
+        )
+        return prompt
 
     def get_cognitive_graph_snapshot(self) -> Dict[str, Any]:
         snapshot = self.swarm_cognitive_graph.snapshot()
