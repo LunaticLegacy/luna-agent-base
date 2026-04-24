@@ -1,11 +1,23 @@
 from __future__ import annotations
 
-import tempfile
+import shutil
 import unittest
 from pathlib import Path
 
 from core.task_graph import Task, TaskGraph
 from web.task_store import TaskStore
+
+
+TEST_TMP_ROOT = Path(".test_tmp")
+TEST_TMP_ROOT.mkdir(exist_ok=True)
+
+
+def make_test_dir(name: str) -> Path:
+    path = (TEST_TMP_ROOT / name).resolve()
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class TaskGraphTest(unittest.TestCase):
@@ -36,17 +48,18 @@ class TaskGraphTest(unittest.TestCase):
             graph.transition_task("child", status="running")
 
     def test_task_store_claims_ready_tasks(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            store = TaskStore(data_dir=Path(tmp_dir))
-            graph = store.get_graph("demo")
-            graph.add_task(Task(task_id="a", name="a", status="success", swarm_name="demo"))
-            graph.add_task(Task(task_id="b", name="b", swarm_name="demo", dependencies=["a"]))
-            claimed = store.claim_ready_tasks("demo", agent_id="planner")
+        data_dir = make_test_dir("task_store_claims_ready")
+        store = TaskStore(data_dir=data_dir)
+        graph = store.get_graph("demo")
+        graph.add_task(Task(task_id="a", name="a", status="success", swarm_name="demo"))
+        graph.add_task(Task(task_id="b", name="b", swarm_name="demo", dependencies=["a"]))
+        claimed = store.claim_ready_tasks("demo", agent_id="planner")
 
-            self.assertEqual([task.task_id for task in claimed], ["b"])
-            self.assertEqual(store.get_task("demo", "b").status, "running")
-            graph_snapshot = store.get_graph_snapshot("demo")
-            self.assertEqual(graph_snapshot["summary"]["status_counts"]["running"], 1)
+        self.assertEqual([task.task_id for task in claimed], ["b"])
+        self.assertEqual(store.get_task("demo", "b").status, "running")
+        graph_snapshot = store.get_graph_snapshot("demo")
+        self.assertEqual(graph_snapshot["summary"]["status_counts"]["running"], 1)
+        shutil.rmtree(data_dir)
 
 
 if __name__ == "__main__":

@@ -198,7 +198,15 @@ class GraphExecutor(
 
             try:
                 if isinstance(node, AgentNode):
-                    agent = core.get_agent(node.agent_id)
+                    blueprint_ref = node.blueprint_ref
+                    acquire_agent_instance = getattr(core, "acquire_agent_instance", None)
+                    if callable(acquire_agent_instance):
+                        agent = acquire_agent_instance(
+                            blueprint_ref,
+                            instance_policy=node.instance_policy,
+                        )
+                    else:
+                        agent = core.get_agent(node.agent_id)
                     state.rounds += 1
                     agent_input = self._format_agent_input(state.payload, node)
                     cognitive_prompt = self._inject_cognitive_context(core, node)
@@ -264,7 +272,14 @@ class GraphExecutor(
                         routing_payload = state.payload
 
                     self._capture_report_payload(state, node, state.payload)
-                    core.merge_agent_cognitive_graph(node.agent_id)
+                    merge_delta = getattr(core, "merge_agent_cognitive_delta", None)
+                    if callable(merge_delta):
+                        merge_delta(blueprint_ref, getattr(result, "cognitive_graph_delta", None))
+                    else:
+                        core.merge_agent_cognitive_graph(node.agent_id)
+                    release_agent_instance = getattr(core, "release_agent_instance", None)
+                    if callable(release_agent_instance):
+                        release_agent_instance(blueprint_ref)
                 elif isinstance(node, ToolNode):
                     tool = core.get_tool(node.tool_name)
                     get_capabilities = getattr(core, "get_tool_capabilities", None)
@@ -312,6 +327,10 @@ class GraphExecutor(
                     ).__dict__
                 )
             except Exception as exc:
+                if isinstance(node, AgentNode):
+                    release_agent_instance = getattr(core, "release_agent_instance", None)
+                    if callable(release_agent_instance):
+                        release_agent_instance(node.blueprint_ref)
                 failure = FailureEvent(
                     run_id=run_id or "",
                     swarm_name=swarm_name or "",

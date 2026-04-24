@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set
 
@@ -12,8 +13,81 @@ from ..skills import SkillAsset
 from ..toodefl import ToolDefinition, normalize_capabilities
 
 
+class AgentInstancePool:
+    """Resolve agent blueprints into runtime instances."""
+
+    def __init__(self, core: Any) -> None:
+        self.core = core
+        self._quarantined: Set[str] = set()
+        self._active_counts: Dict[str, int] = {}
+
+    def acquire(self, blueprint_ref: str, *, instance_policy: str = "singleton") -> AgentLike:
+        if blueprint_ref in self._quarantined:
+            raise RuntimeError(f"Agent blueprint '{blueprint_ref}' is quarantined.")
+        normalized_policy = str(instance_policy or "singleton").strip().lower() or "singleton"
+        self._active_counts[blueprint_ref] = self._active_counts.get(blueprint_ref, 0) + 1
+        if normalized_policy == "singleton":
+            return self.core.get_agent_blueprint(blueprint_ref)
+
+        if normalized_policy != "per_call":
+            raise ValueError(f"Unsupported agent instance policy: {instance_policy}")
+
+        prototype = self.core.get_agent_blueprint(blueprint_ref)
+        clone_for_runtime = getattr(prototype, "clone_for_runtime", None)
+        if not callable(clone_for_runtime):
+            return prototype
+        instance = clone_for_runtime()
+        set_run_id = getattr(instance, "set_run_id", None)
+        if callable(set_run_id):
+            set_run_id(self.core.current_run_id)
+        return instance
+
+    def release(self, blueprint_ref: str) -> None:
+        if blueprint_ref not in self._active_counts:
+            return
+        remaining = max(0, int(self._active_counts.get(blueprint_ref, 0)) - 1)
+        if remaining == 0:
+            self._active_counts.pop(blueprint_ref, None)
+            return
+        self._active_counts[blueprint_ref] = remaining
+
+    def quarantine(self, blueprint_ref: str) -> None:
+        if blueprint_ref:
+            self._quarantined.add(blueprint_ref)
+
+    def restore(self, blueprint_ref: str) -> None:
+        self._quarantined.discard(blueprint_ref)
+
+    async def drain(self, blueprint_ref: str, timeout: float = 5.0) -> Dict[str, Any]:
+        deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout))
+        while self._active_counts.get(blueprint_ref, 0) > 0:
+            if asyncio.get_running_loop().time() >= deadline:
+                return {
+                    "blueprint_ref": blueprint_ref,
+                    "drained": False,
+                    "active_count": self._active_counts.get(blueprint_ref, 0),
+                }
+            await asyncio.sleep(0.01)
+        return {
+            "blueprint_ref": blueprint_ref,
+            "drained": True,
+            "active_count": 0,
+        }
+
+
 class RuntimeRegistryMixin:
     """Agent, tool, and skill registry helpers for a runtime core."""
+
+    def register_agent_blueprint(self, blueprint_ref: str, agent: AgentLike) -> None:
+        self.agent_blueprints[blueprint_ref] = agent
+
+    def has_agent_blueprint(self, blueprint_ref: str) -> bool:
+        return blueprint_ref in self.agent_blueprints or blueprint_ref in self.agents
+
+    def get_agent_blueprint(self, blueprint_ref: str) -> AgentLike:
+        if blueprint_ref in self.agent_blueprints:
+            return self.agent_blueprints[blueprint_ref]
+        return self.get_agent(blueprint_ref)
 
     def create_agent(
         self,
@@ -48,6 +122,7 @@ class RuntimeRegistryMixin:
         )
         agent.set_run_id(self.current_run_id)
         self.add_agent(agent)
+        self.register_agent_blueprint(agent_id, agent)
         return agent
 
     def add_agent(self, agent: AgentLike) -> None:
@@ -80,6 +155,20 @@ class RuntimeRegistryMixin:
             return self.agents[agent_id]
         except KeyError as exc:
             raise KeyError(f"Unknown agent_id: {agent_id}") from exc
+
+    def acquire_agent_instance(
+        self,
+        blueprint_ref: str,
+        *,
+        instance_policy: str = "singleton",
+    ) -> AgentLike:
+        return self.agent_instance_pool.acquire(
+            blueprint_ref,
+            instance_policy=instance_policy,
+        )
+
+    def release_agent_instance(self, blueprint_ref: str) -> None:
+        self.agent_instance_pool.release(blueprint_ref)
 
     def list_agents(self) -> List[AgentLike]:
         return list(self.agents.values())

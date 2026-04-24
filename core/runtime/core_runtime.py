@@ -12,7 +12,7 @@ from ..policy import ExecutionGraph
 from ..swarm_spec import GlobalVariablesConfig
 from .cognitive_state import CognitiveRuntimeMixin
 from .graph_state import ExecutionGraphStateMixin
-from .registry import RuntimeRegistryMixin
+from .registry import AgentInstancePool, RuntimeRegistryMixin
 
 
 class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin):
@@ -29,6 +29,8 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
         self.workspace_mode = "workspace"
         self.agents = {}
+        self.agent_blueprints = {}
+        self.agent_instance_pool = AgentInstancePool(self)
         self.tools = {}
         self.apis = {}
         self.api_sources = {}

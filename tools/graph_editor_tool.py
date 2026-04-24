@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from core import AgentNode, ExecutionGraph, Node, ToolNode
+from core.graph_transaction import GraphMutationRecord, GraphTransaction
 from core.toodefl import ToolContext, ToolDefinition, require_tool_capability
 
 
@@ -42,6 +43,9 @@ class GraphEditorTool(ToolDefinition):
             "graph_action": action,
             "graph_name": graph.graph_name,
         }
+        transaction = GraphTransaction(graph, core=context.core)
+        author = str(context.agent_id or runtime_metadata.get("agent_id") or "graph_editor")
+        reason = str(normalized.get("reason") or normalized.get("change_reason") or action)
 
         if action == "add_agent_node":
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
@@ -75,7 +79,20 @@ class GraphEditorTool(ToolDefinition):
                 for next_node_id in next_node_ids:
                     target_graph.add_edge(node_id, next_node_id)
 
-            self._commit_graph_edit(graph, context, action, mutate_add_agent)
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={
+                    "graph_node_id": node_id,
+                    "graph_node_name": node_name,
+                    "graph_node_agent_id": agent_id,
+                    "graph_node_next_node_ids": list(next_node_ids),
+                    "instance_policy": "singleton",
+                },
+                mutate=mutate_add_agent,
+                author=author,
+                reason=reason,
+            )
             metadata_patch.update(
                 {
                     "graph_node_id": node_id,
@@ -119,7 +136,19 @@ class GraphEditorTool(ToolDefinition):
                 for next_node_id in next_node_ids:
                     target_graph.add_edge(node_id, next_node_id)
 
-            self._commit_graph_edit(graph, context, action, mutate_add_tool)
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={
+                    "graph_node_id": node_id,
+                    "graph_node_name": node_name,
+                    "graph_node_tool_name": tool_name,
+                    "graph_node_next_node_ids": list(next_node_ids),
+                },
+                mutate=mutate_add_tool,
+                author=author,
+                reason=reason,
+            )
             metadata_patch.update(
                 {
                     "graph_node_id": node_id,
@@ -141,11 +170,13 @@ class GraphEditorTool(ToolDefinition):
                 )
         elif action == "remove_node":
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
-            self._commit_graph_edit(
-                graph,
-                context,
-                action,
-                lambda target_graph: target_graph.remove_node(node_id),
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={"graph_node_id": node_id},
+                mutate=lambda target_graph: target_graph.remove_node(node_id),
+                author=author,
+                reason=reason,
             )
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
@@ -160,11 +191,16 @@ class GraphEditorTool(ToolDefinition):
             to_node_ids = self._coerce_node_id_list(
                 self._pick_optional_value(control_source, runtime_metadata, "to_node_ids") or []
             )
-            self._commit_graph_edit(
-                graph,
-                context,
-                action,
-                lambda target_graph: target_graph.replace_next(from_node_id, to_node_ids),
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={
+                    "graph_from_node_id": from_node_id,
+                    "graph_to_node_ids": list(to_node_ids),
+                },
+                mutate=lambda target_graph: target_graph.replace_next(from_node_id, to_node_ids),
+                author=author,
+                reason=reason,
             )
             metadata_patch.update(
                 {
@@ -182,11 +218,16 @@ class GraphEditorTool(ToolDefinition):
         elif action == "add_edge":
             from_node_id = int(self._pick_value(control_source, runtime_metadata, "from_node_id"))
             to_node_id = int(self._pick_value(control_source, runtime_metadata, "to_node_id"))
-            self._commit_graph_edit(
-                graph,
-                context,
-                action,
-                lambda target_graph: target_graph.add_edge(from_node_id, to_node_id),
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={
+                    "graph_from_node_id": from_node_id,
+                    "graph_to_node_id": to_node_id,
+                },
+                mutate=lambda target_graph: target_graph.add_edge(from_node_id, to_node_id),
+                author=author,
+                reason=reason,
             )
             metadata_patch.update(
                 {
@@ -204,11 +245,16 @@ class GraphEditorTool(ToolDefinition):
         elif action == "remove_edge":
             from_node_id = int(self._pick_value(control_source, runtime_metadata, "from_node_id"))
             to_node_id = int(self._pick_value(control_source, runtime_metadata, "to_node_id"))
-            self._commit_graph_edit(
-                graph,
-                context,
-                action,
-                lambda target_graph: target_graph.remove_edge(from_node_id, to_node_id),
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={
+                    "graph_from_node_id": from_node_id,
+                    "graph_to_node_id": to_node_id,
+                },
+                mutate=lambda target_graph: target_graph.remove_edge(from_node_id, to_node_id),
+                author=author,
+                reason=reason,
             )
             metadata_patch.update(
                 {
@@ -225,11 +271,13 @@ class GraphEditorTool(ToolDefinition):
                 )
         elif action == "set_entry":
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
-            self._commit_graph_edit(
-                graph,
-                context,
-                action,
-                lambda target_graph: target_graph.set_entry(node_id),
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={"graph_node_id": node_id},
+                mutate=lambda target_graph: target_graph.set_entry(node_id),
+                author=author,
+                reason=reason,
             )
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
@@ -241,11 +289,13 @@ class GraphEditorTool(ToolDefinition):
                 )
         elif action == "set_exit":
             node_id = int(self._pick_value(control_source, runtime_metadata, "node_id"))
-            self._commit_graph_edit(
-                graph,
-                context,
-                action,
-                lambda target_graph: target_graph.set_exit(node_id),
+            await self._commit_graph_edit(
+                transaction,
+                action=action,
+                detail={"graph_node_id": node_id},
+                mutate=lambda target_graph: target_graph.set_exit(node_id),
+                author=author,
+                reason=reason,
             )
             metadata_patch.update({"graph_node_id": node_id})
             if context.core is not None:
@@ -349,43 +399,26 @@ class GraphEditorTool(ToolDefinition):
             return [int(item) for item in raw]
         return [int(raw)]
 
-    def _validate_graph(self, graph: ExecutionGraph, core: Any, action: str) -> None:
-        validation = graph.validate(core)
-        if not validation.is_valid:
-            detail = "; ".join(validation.errors)
-            raise ValueError(f"graph_editor action '{action}' left graph invalid: {detail}")
-
-    def _commit_graph_edit(self, graph: ExecutionGraph, context: ToolContext, action: str, mutate) -> None:
-        previous = graph.clone()
-        candidate = graph.clone()
-        mutate(candidate)
-        self._validate_graph(candidate, context.core, action)
-        self._copy_graph_state(graph, candidate)
-        try:
-            self._persist_graph(context)
-        except Exception:
-            self._copy_graph_state(graph, previous)
-            raise
-
-    def _copy_graph_state(self, target: ExecutionGraph, source: ExecutionGraph) -> None:
-        target.graph_name = source.graph_name
-        target.nodes = {
-            node_id: source._clone_node(node)
-            for node_id, node in source.nodes.items()
-        }
-        target.edges = [
-            edge
-            for edge in source.clone().edges
-        ]
-        target.entry_node_id = source.entry_node_id
-        target.exit_node_id = source.exit_node_id
-
-    def _persist_graph(self, context: ToolContext) -> None:
-        if context.core is None:
-            return
-        persist = getattr(context.core, "persist_execution_graph", None)
-        if callable(persist):
-            persist()
+    async def _commit_graph_edit(
+        self,
+        transaction: GraphTransaction,
+        *,
+        action: str,
+        detail: Dict[str, Any],
+        mutate,
+        author: str,
+        reason: str,
+    ) -> None:
+        transaction.prepare(
+            GraphMutationRecord(
+                action=action,
+                detail=detail,
+                author=author,
+                reason=reason,
+            ),
+            mutate,
+        )
+        await transaction.commit()
 
     def _cleanup_metadata_keys(self) -> List[str]:
         return [
