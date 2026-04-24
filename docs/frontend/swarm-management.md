@@ -139,7 +139,7 @@
 - agents 数量
 - 当前任务状态
 - 成功率、吞吐量、Token 使用
-- 拓扑图
+- Agent 图
 - 节点图例
 - swarm 信息
 - 资源使用趋势
@@ -149,9 +149,9 @@
 
 这些数据大部分来自 `StateService` 的派生计算值，而不是手写死数据。
 
-### 拓扑视图
+### Agent 图
 
-`拓扑视图` 和 `概览` 页共享同一个 graph 渲染：
+`Agent 图` 和 `概览` 页共享同一个 graph 渲染：
 
 - 通过 `resolvedGraph()` 获取 graph
 - 通过 `app-graph-viewer` 展示

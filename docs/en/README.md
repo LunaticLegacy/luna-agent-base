@@ -123,7 +123,7 @@ This page is the consolidated English documentation entry point for Angelus.
 Each swarm package is a standalone directory containing:
 
 - `swarm.toml`
-- one execution graph
+- one Agent graph
 - one or more agent definitions
 - one or more skills
 - one or more tools

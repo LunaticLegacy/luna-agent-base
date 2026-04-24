@@ -65,12 +65,21 @@ class DummyGraph:
     entry_node_id = 1
     exit_node_id = 2
 
-    def __init__(self) -> None:
-        self.nodes = {
-            1: DummyGraphNode(1, "start", "AgentNode", [2]),
-            2: DummyGraphNode(2, "end", "ToolNode", []),
-        }
-        self.edges = [SimpleNamespace(from_node_id=1, to_node_id=2, label="next", condition=None, priority=0)]
+    def __init__(self, *, agent_only: bool = False) -> None:
+        self.agent_only = agent_only
+        if agent_only:
+            self.nodes = {
+                1: DummyGraphNode(1, "start", "AgentNode", []),
+            }
+            self.entry_node_id = 1
+            self.exit_node_id = 1
+            self.edges = []
+        else:
+            self.nodes = {
+                1: DummyGraphNode(1, "start", "AgentNode", [2]),
+                2: DummyGraphNode(2, "end", "ToolNode", []),
+            }
+            self.edges = [SimpleNamespace(from_node_id=1, to_node_id=2, label="next", condition=None, priority=0)]
 
     async def run(self, core, initial_payload, rounds=0, **kwargs):
         return SimpleNamespace(
@@ -93,6 +102,7 @@ class DummyCore:
     def __init__(self) -> None:
         self.name = "demo-core"
         self._graph = DummyGraph()
+        self._agent_graph = DummyGraph(agent_only=True)
         self.tools = {"tool-a": object()}
         self.reset_calls = 0
 
@@ -105,13 +115,17 @@ class DummyCore:
     def get_execution_graph(self):
         return self._graph
 
+    def get_agent_graph(self):
+        return self._agent_graph
+
     def get_graph_runtime_state(self):
         return {
-            "graph_name": self._graph.graph_name,
-            "entry_node_id": self._graph.entry_node_id,
-            "exit_node_id": self._graph.exit_node_id,
-            "node_count": len(self._graph.nodes),
-            "edge_count": len(self._graph.edges),
+            "graph_name": self._agent_graph.graph_name,
+            "graph_kind": "agent",
+            "entry_node_id": self._agent_graph.entry_node_id,
+            "exit_node_id": self._agent_graph.exit_node_id,
+            "node_count": len(self._agent_graph.nodes),
+            "edge_count": len(self._agent_graph.edges),
             "nodes": [
                 {
                     "node_id": node.node_id,
@@ -120,7 +134,7 @@ class DummyCore:
                     "next_node_ids": node.next_node_ids,
                     "metadata": node.metadata,
                 }
-                for node in self._graph.nodes.values()
+                for node in self._agent_graph.nodes.values()
             ],
             "edges": [
                 {
@@ -130,16 +144,16 @@ class DummyCore:
                     "condition": edge.condition,
                     "priority": edge.priority,
                 }
-                for edge in self._graph.edges
+                for edge in self._agent_graph.edges
             ],
             "revision": 1,
             "hash": "sha256:test",
             "updated_at": "2026-04-24T00:00:00Z",
             "last_change": {
                 "change_id": "graph-00000001",
-                "kind": "set_execution_graph",
+                "kind": "set_agent_graph",
                 "subject": {"type": "graph", "id": "demo-graph"},
-                "summary": "initialized execution graph",
+                "summary": "initialized agent graph",
             },
         }
 

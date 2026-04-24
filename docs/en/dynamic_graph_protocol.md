@@ -4,16 +4,15 @@ This document summarizes how the current dynamic graph editing mechanism works, 
 
 ## 1. Protocol Goal
 
-The goal of the dynamic graph editing protocol is to let the swarm:
+The goal of the dynamic graph editing protocol is to let the swarm evolve its **Agent graph** at runtime while recording execution separately in an **execution trace graph**:
 
-- create temporary agents
-- insert temporary agents into the live graph
+- create temporary or persistent agent nodes
+- insert new agents into the live graph
 - change next-hop relationships at runtime
-- delete temporary agents
-- remove temporary nodes
+- delete, disable, or archive agent nodes
 - record every mutation into `runtime_info`
 
-In other words, the file-based `graph.py` is only the initial graph; the execution graph may keep evolving during runtime.
+In other words, the file-based `graph.py` is only the initial Agent graph; the Agent graph may keep evolving during runtime. Tools are no longer graph nodes. They are called orthogonally by agents at runtime.
 
 ## 2. Current Execution Mechanism
 

@@ -58,7 +58,8 @@ def build_metrics_catalog(
     total_nodes = 0
     total_swarm_count = len(registry.swarms)
     for loaded_swarm in registry.swarms.values():
-        graph = loaded_swarm.core.get_execution_graph()
+        graph_getter = getattr(loaded_swarm.core, "get_agent_graph", None)
+        graph = graph_getter() if callable(graph_getter) else loaded_swarm.core.get_execution_graph()
         if graph is not None:
             total_nodes += len(graph.nodes)
 
