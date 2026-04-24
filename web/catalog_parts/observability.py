@@ -94,6 +94,7 @@ def build_log_catalog(
                 "message": f"{item.get('event', '')} — {item.get('detail', '')}"
                 if item.get("detail")
                 else str(item.get("event", "")),
+                "raw": item,
             }
         )
 

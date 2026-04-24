@@ -138,6 +138,7 @@ export interface LogItem {
   level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
   service: string;
   message: string;
+  raw?: Record<string, any>;
 }
 
 export interface KnowledgeEntry {
@@ -927,6 +928,7 @@ export class StateService {
       level: item.level,
       service: item.service,
       message: item.message,
+      raw: item.raw,
     };
   }
 

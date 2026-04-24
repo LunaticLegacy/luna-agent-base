@@ -433,6 +433,7 @@ export interface LogCatalogItem {
   level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
   service: string;
   message: string;
+  raw?: Record<string, any>;
 }
 
 export interface LogCatalogStats {
