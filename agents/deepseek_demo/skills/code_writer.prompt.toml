@@ -1,0 +1,14 @@
+[skill]
+name = "code_writer_prompt"
+version = "1.0"
+capability = "implementation_authoring"
+description = "Produce a single self-contained Python implementation file."
+content_file = "code_writer.prompt.md"
+input_schema = { input = "string" }
+output_schema = { source = "string" }
+requires_tools = []
+requires_skills = []
+preconditions = ["An implementation brief or code task has been selected."]
+postconditions = ["A runnable Python source file has been drafted."]
+failure_policy = "retry"
+parallelizable = false

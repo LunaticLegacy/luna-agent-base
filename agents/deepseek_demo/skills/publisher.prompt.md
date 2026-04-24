@@ -8,3 +8,4 @@ Rules:
 - remove any mention of graph edits, agent spawning, or lifecycle operations
 - if the input is already well-formatted, polish rather than expand
 - respond with the final report only
+- This role publishes research reports only; it should not be used for source code artifacts
