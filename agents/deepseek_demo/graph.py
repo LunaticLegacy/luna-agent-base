@@ -17,12 +17,13 @@ def build_graph(core):
         AgentNode(
             node_id=2,
             node_name='organizer_preflight',
-            next_node_ids=[3, 4, 22],
+            next_node_ids=[3, 4, 22, 24],
             metadata={'phase': 'preflight'},
             agent_id='organizer',
             additional_prompt=('Phase: preflight. Inspect the incoming request and decide whether the branch '
  'tree should stay wide or be narrowed before dispatch. If the task asks for an '
  'implementation artifact, route directly to the code writer. If the task is '
+ 'backend/runtime/API-oriented, route directly to the dev video agent. If the task is '
  'simple and research-oriented, you may route directly to the dispatcher. If the '
  'task is broad, keep the planner in the loop.'),
         ),
@@ -232,13 +233,14 @@ def build_graph(core):
         AgentNode(
             node_id=17,
             node_name='organizer_checkpoint',
-            next_node_ids=[18, 3, 22],
+            next_node_ids=[18, 3, 22, 24],
             metadata={'phase': 'checkpoint'},
             agent_id='organizer',
             additional_prompt=('Phase: checkpoint. Read the merged branch results, decide whether the '
  'architecture needs another planning pass, and use graph edits if the tree '
  'shape should change before the final write. If the task is implementation-oriented, '
- 'route directly to the code writer instead of the report writer.'),
+ 'route directly to the code writer instead of the report writer. If the task is '
+ 'backend/runtime/API-oriented, route directly to the dev video agent.'),
         ),
     )
     graph.add_node(
@@ -278,6 +280,28 @@ def build_graph(core):
     )
     graph.add_node(
         AgentNode(
+            node_id=24,
+            node_name='dev_video_agent',
+            next_node_ids=[25],
+            metadata={},
+            agent_id='dev_video_agent',
+            additional_prompt=('Handle backend, runtime, API, loader, registry, and framework-oriented changes. '
+ 'Keep the output implementation-focused and specific to the affected code paths. If the task is a '
+ 'pure code-generation brief, defer to the code writer branch instead.'),
+        ),
+    )
+    graph.add_node(
+        ToolNode(
+            node_id=25,
+            node_name='file_writer_backend',
+            next_node_ids=[20],
+            metadata={},
+            tool_name='file_writer',
+            input_mapping={'path': 'outputs/deepseek_demo_backend_changes.txt'},
+        ),
+    )
+    graph.add_node(
+        AgentNode(
             node_id=19,
             node_name='reviewer',
             next_node_ids=[20, 18, 2],
@@ -309,6 +333,7 @@ def build_graph(core):
     )
     graph.add_edge(1, 2, label='frame', condition=None, priority=10)
     graph.add_edge(2, 22, label='implement', condition=None, priority=15)
+    graph.add_edge(2, 24, label='backend_implement', condition=None, priority=12)
     graph.add_edge(2, 4, label='direct_dispatch', condition=None, priority=5)
     graph.add_edge(2, 3, label='plan', condition=None, priority=10)
     graph.add_edge(3, 4, label='dispatch', condition=None, priority=10)
@@ -327,8 +352,11 @@ def build_graph(core):
     graph.add_edge(17, 3, label='replan', condition=None, priority=5)
     graph.add_edge(17, 18, label='write', condition=None, priority=10)
     graph.add_edge(17, 22, label='implement', condition=None, priority=8)
+    graph.add_edge(17, 24, label='backend_implement', condition=None, priority=12)
     graph.add_edge(18, 19, label='review', condition=None, priority=10)
     graph.add_edge(22, 23, label='write_code', condition=None, priority=10)
+    graph.add_edge(24, 25, label='write_backend', condition=None, priority=10)
+    graph.add_edge(25, 20, label='handoff_publish', condition=None, priority=10)
     graph.add_edge(19, 2, label='re_research', condition='re_research', priority=10)
     graph.add_edge(19, 18, label='revise', condition='revise', priority=20)
     graph.add_edge(19, 20, label='approve', condition='approve', priority=30)
