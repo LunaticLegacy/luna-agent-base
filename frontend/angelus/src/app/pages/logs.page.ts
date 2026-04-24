@@ -76,6 +76,34 @@ import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, Paginat
         </button>
       </app-pagination>
     </app-panel-card>
+
+    <app-modal
+      [open]="!!selectedLog()"
+      [title]="'日志详情'"
+      (close)="selectedLog.set(null)">
+      @if (selectedLog(); as log) {
+        <div class="log-detail">
+          <div class="detail-row">
+            <span class="detail-label">时间</span>
+            <span class="detail-value mono">{{ log.time }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">级别</span>
+            <span class="detail-value">
+              <span class="level-badge" [class]="'level-'+log.level.toLowerCase()">{{ log.level }}</span>
+            </span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">服务</span>
+            <span class="detail-value mono">{{ log.service }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">消息</span>
+          </div>
+          <div class="detail-message">{{ log.message }}</div>
+        </div>
+      }
+    </app-modal>
   `,
   styles: [`
     :host { display:block; }
