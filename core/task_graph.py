@@ -32,6 +32,34 @@ class Task:
     failed_count: int = 0
     completed_count: int = 0
 
+    TERMINAL_STATUSES = {"success", "failed", "cancelled"}
+    VALID_STATUSES = {"pending", "running", "success", "failed", "cancelled"}
+
+    def is_ready(self, graph: "TaskGraph") -> bool:
+        """Return True when all dependencies have completed successfully."""
+        if self.status != "pending":
+            return False
+        for dep_id in self.dependencies:
+            dep = graph.tasks.get(dep_id)
+            if dep is None or dep.status != "success":
+                return False
+        return True
+
+    def is_terminal(self) -> bool:
+        return self.status in self.TERMINAL_STATUSES
+
+    def can_transition_to(self, next_status: str) -> bool:
+        next_status = str(next_status or "").strip().lower()
+        if next_status not in self.VALID_STATUSES:
+            return False
+        if self.status == next_status:
+            return True
+        if self.status == "pending":
+            return next_status in {"running", "cancelled", "failed", "success"}
+        if self.status == "running":
+            return next_status in {"success", "failed", "cancelled"}
+        return False
+
     def snapshot(self) -> Dict[str, Any]:
         return {
             "task_id": self.task_id,
@@ -148,6 +176,13 @@ class TaskGraph:
             result = [t for t in result if t.agent_id == agent_id]
         return result
 
+    def status_counts(self) -> Dict[str, int]:
+        counts = {status: 0 for status in ["pending", "running", "success", "failed", "cancelled"]}
+        for task in self.tasks.values():
+            status = str(task.status or "pending")
+            counts[status] = counts.get(status, 0) + 1
+        return counts
+
     # ------------------------------------------------------------------ #
     # Graph edges
     # ------------------------------------------------------------------ #
@@ -233,16 +268,78 @@ class TaskGraph:
 
     def ready_tasks(self) -> List[Task]:
         """Return tasks whose dependencies are all satisfied (status == success)."""
-        ready = []
+        return [task for task in self.tasks.values() if task.is_ready(self)]
+
+    def blocked_tasks(self) -> List[Task]:
+        """Return pending tasks that are waiting on unmet dependencies."""
+        return [task for task in self.tasks.values() if task.status == "pending" and not task.is_ready(self)]
+
+    def transition_task(
+        self,
+        task_id: str,
+        *,
+        status: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        input: Any = None,
+        output: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Task:
+        task = self.get_task(task_id)
+        if status is not None:
+            next_status = str(status).strip().lower()
+            if not task.can_transition_to(next_status):
+                raise ValueError(f"Invalid task status transition: {task.status} -> {next_status}")
+            previous_status = task.status
+            task.status = next_status
+            if next_status == "running" and previous_status != "running":
+                task.executed_count += 1
+            elif next_status == "success" and previous_status != "success":
+                if previous_status != "running":
+                    task.executed_count += 1
+                task.completed_count += 1
+            elif next_status == "failed" and previous_status != "failed":
+                if previous_status != "running":
+                    task.executed_count += 1
+                task.failed_count += 1
+        if agent_id is not None:
+            task.agent_id = agent_id
+        if input is not None:
+            task.input = input
+        if output is not None:
+            task.output = output
+        if metadata:
+            task.metadata.update(metadata)
+        return task
+
+    def graph_edges(self) -> List[Dict[str, str]]:
+        edges: List[Dict[str, str]] = []
         for task in self.tasks.values():
-            if task.status != "pending":
-                continue
-            if all(
-                self.tasks.get(dep_id, Task(task_id=dep_id)).status == "success"
-                for dep_id in task.dependencies
-            ):
-                ready.append(task)
-        return ready
+            for dep_id in task.dependencies:
+                edges.append({"from_task_id": dep_id, "to_task_id": task.task_id})
+        return edges
+
+    def summary(self) -> Dict[str, Any]:
+        counts = self.status_counts()
+        ready = self.ready_tasks()
+        blocked = self.blocked_tasks()
+        terminal = [task for task in self.tasks.values() if task.is_terminal()]
+        return {
+            "graph_id": self.graph_id,
+            "task_count": len(self.tasks),
+            "edge_count": sum(len(task.dependencies) for task in self.tasks.values()),
+            "status_counts": counts,
+            "ready_task_ids": [task.task_id for task in ready],
+            "blocked_task_ids": [task.task_id for task in blocked],
+            "terminal_task_ids": [task.task_id for task in terminal],
+        }
+
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "graph_id": self.graph_id,
+            "tasks": [task.snapshot() for task in self.tasks.values()],
+            "edges": self.graph_edges(),
+            "summary": self.summary(),
+        }
 
     # ------------------------------------------------------------------ #
     # Serialization

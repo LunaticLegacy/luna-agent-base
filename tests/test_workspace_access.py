@@ -20,7 +20,7 @@ class WorkspaceAccessTest(unittest.TestCase):
         self.assertEqual(manifest.workspace.default_root, ".")
         self.assertEqual(manifest.tool_capabilities["file_writer"], ["file_write"])
 
-    def test_workspace_root_resolves_relative_to_package(self) -> None:
+    def test_workspace_root_resolves_to_swarm_workspace_dir(self) -> None:
         with patch.dict("os.environ", {"MOONSHOT_API_KEY": "test-key"}):
             manifest_path, manifest = load_swarm_manifest(Path("agents/docs_verifier"))
             loaded = build_core_from_package(
@@ -28,7 +28,8 @@ class WorkspaceAccessTest(unittest.TestCase):
                 manifest=manifest,
                 manifest_path=manifest_path,
             )
-        self.assertEqual(loaded.core.workspace_root, Path("agents/docs_verifier").resolve())
+        self.assertEqual(loaded.core.workspace_root, Path("agents/docs_verifier/workspace").resolve())
+        self.assertTrue(loaded.core.workspace_root.exists())
         self.assertEqual(loaded.core.get_tool_capabilities("file_writer"), {"file_write"})
 
     def test_workspace_config_rejects_invalid_mode(self) -> None:

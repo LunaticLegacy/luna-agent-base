@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import time
+
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 from web.errors import ApiError, ConflictError, NotFoundError
@@ -39,6 +42,32 @@ def _serialize_swarm_with_runtime(swarm) -> dict:
     return payload
 
 
+def _parse_int(raw, default: int = 0) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _serialize_graph_with_state(swarm) -> dict:
+    graph_getter = getattr(swarm.core, "get_agent_graph", None)
+    graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
+    if graph is None:
+        raise ApiError(f"Swarm '{swarm.manifest.swarm_name}' has no execution graph attached.")
+    payload = serialize_graph_snapshot(graph)
+    payload.update(swarm.core.get_graph_runtime_state())
+    return payload
+
+
+def _serialize_execution_graph_with_state(swarm) -> dict:
+    graph = swarm.core.get_execution_graph()
+    if graph is None:
+        raise ApiError(f"Swarm '{swarm.manifest.swarm_name}' has no execution graph attached.")
+    payload = serialize_graph_snapshot(graph)
+    payload["graph_kind"] = getattr(graph, "graph_kind", "execution")
+    return payload
+
+
 def _parse_bool(raw, default: bool = False) -> bool:
     if raw is None:
         return default
@@ -58,7 +87,7 @@ async def _execute_swarm_run(swarm_name: str, *, use_background: bool = False):
     swarm = _get_swarm_or_404(swarm_name)   # get a swarm
     graph = swarm.core.get_execution_graph()    # get the execution graph
     if graph is None:
-        raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
+        raise ApiError(f"Swarm '{swarm_name}' has no agent graph attached.")
         
     request_data = request.get_json(silent=True) or {}
     payload = request_data.get("input")
@@ -139,10 +168,81 @@ def get_swarm(swarm_name: str):
 @swarms_bp.get("/<string:swarm_name>/graph")
 def get_swarm_graph(swarm_name: str):
     swarm = _get_swarm_or_404(swarm_name)
-    graph = swarm.core.get_execution_graph()
+    return jsonify({"success": True, "swarm": swarm_name, "graph": _serialize_graph_with_state(swarm)})
+
+
+@swarms_bp.get("/<string:swarm_name>/execution-graph")
+def get_swarm_execution_graph(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    return jsonify({"success": True, "swarm": swarm_name, "graph": _serialize_execution_graph_with_state(swarm)})
+
+
+@swarms_bp.get("/<string:swarm_name>/graph/state")
+def get_swarm_graph_state(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    graph_getter = getattr(swarm.core, "get_agent_graph", None)
+    graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
+    if graph is None:
+        raise ApiError(f"Swarm '{swarm_name}' has no agent graph attached.")
+    state = swarm.core.get_graph_runtime_state()
+    since_revision = _parse_int(request.args.get("since_revision"), 0)
+    return jsonify(
+        {
+            "success": True,
+            "swarm": swarm_name,
+            "graph": state,
+            "has_changes_since": int(state.get("revision") or 0) > since_revision,
+        }
+    )
+
+
+@swarms_bp.get("/<string:swarm_name>/graph/diff")
+def get_swarm_graph_diff(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    graph_getter = getattr(swarm.core, "get_agent_graph", None)
+    graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
+    if graph is None:
+        raise ApiError(f"Swarm '{swarm_name}' has no agent graph attached.")
+    since_revision = _parse_int(request.args.get("since_revision"), 0)
+    diff = swarm.core.get_graph_runtime_diff(since_revision=since_revision)
+    return jsonify({"success": True, "swarm": swarm_name, "patch": diff})
+
+
+@swarms_bp.get("/<string:swarm_name>/graph/events")
+def stream_swarm_graph_events(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    graph_getter = getattr(swarm.core, "get_agent_graph", None)
+    graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
     if graph is None:
         raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
-    return jsonify({"success": True, "swarm": swarm_name, "graph": serialize_graph_snapshot(graph)})
+    since_revision = _parse_int(request.args.get("since_revision"), 0)
+
+    def _stream():
+        last_revision = since_revision
+        yield "retry: 3000\n\n"
+        while True:
+            events = swarm.core.get_graph_runtime_events(since_revision=last_revision)
+            if events:
+                for event in events:
+                    last_revision = max(last_revision, int(event.get("revision") or last_revision))
+                    payload = {
+                        "swarm": swarm_name,
+                        "graph_id": event.get("snapshot", {}).get("graph_name"),
+                        "revision": event.get("revision"),
+                        "change": event.get("change"),
+                        "action": event.get("action"),
+                        "subject_kind": event.get("subject_kind"),
+                        "subject_id": event.get("subject_id"),
+                    }
+                    yield f"event: graph.changed\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            else:
+                yield ": keepalive\n\n"
+            time.sleep(1.5)
+
+    response = Response(stream_with_context(_stream()), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 
 
 @swarms_bp.get("/<string:swarm_name>/thought-graph")
@@ -150,6 +250,38 @@ def get_swarm_thought_graph(swarm_name: str):
     swarm = _get_swarm_or_404(swarm_name)
     snapshot = swarm.core.get_cognitive_graph_snapshot()
     return jsonify({"success": True, "swarm": swarm_name, "thought_graph": to_jsonable(snapshot)})
+
+
+@swarms_bp.get("/<string:swarm_name>/execution-trace")
+def get_swarm_execution_trace(swarm_name: str):
+    runs = [record for record in _get_runs_registry().list_runs(swarm_name) if record.swarm_name == swarm_name]
+    run_id = request.args.get("run_id")
+    record = None
+    if run_id:
+        record = _get_runs_registry().get_run(run_id)
+        if record is None or record.swarm_name != swarm_name:
+            raise NotFoundError(f"Unknown run for swarm '{swarm_name}': {run_id}")
+    elif runs:
+        record = runs[-1]
+
+    if record is None:
+        return jsonify(
+            {
+                "success": True,
+                "swarm": swarm_name,
+                "run": None,
+                "events": [],
+            }
+        )
+
+    return jsonify(
+        {
+            "success": True,
+            "swarm": swarm_name,
+            "run": record.snapshot(),
+            "events": to_jsonable(record.events),
+        }
+    )
 
 
 @swarms_bp.post("/<string:swarm_name>/run")

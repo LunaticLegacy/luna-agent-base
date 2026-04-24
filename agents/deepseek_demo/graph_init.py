@@ -118,11 +118,13 @@ def build_graph(core):
             node_id=2,
             node_name="organizer_preflight",
             agent_id="organizer",
-            next_node_ids=[3, 4],
+            next_node_ids=[3, 4, 22],
             additional_prompt=(
                 "Phase: preflight. Inspect the incoming request and decide whether the branch tree "
-                "should stay wide or be narrowed before dispatch. If the task is simple, you may "
-                "route directly to the dispatcher. If the task is broad, keep the planner in the loop."
+                "should stay wide or be narrowed before dispatch. If the task asks for an "
+                "implementation artifact, route directly to the code writer. If the task is simple "
+                "and research-oriented, you may route directly to the dispatcher. If the task is "
+                "broad, keep the planner in the loop."
             ),
             metadata={"phase": "preflight"},
         )
@@ -206,11 +208,12 @@ def build_graph(core):
             node_id=17,
             node_name="organizer_checkpoint",
             agent_id="organizer",
-            next_node_ids=[18, 3],
+            next_node_ids=[18, 3, 22],
             additional_prompt=(
                 "Phase: checkpoint. Read the merged branch results, decide whether the architecture "
                 "needs another planning pass, and use graph edits if the tree shape should change "
-                "before the final write."
+                "before the final write. If the task is implementation-oriented, route directly to "
+                "the code writer instead of the report writer."
             ),
             metadata={"phase": "checkpoint"},
         )
@@ -226,6 +229,30 @@ def build_graph(core):
                 "Synthesize the branch outputs into a single report. Treat the architecture notes, "
                 "evidence notes, and risk notes as parallel inputs that must be merged cleanly."
             ),
+        )
+    )
+
+    graph.add_node(
+        AgentNode(
+            node_id=22,
+            node_name="code_writer",
+            agent_id="code_writer",
+            next_node_ids=[23],
+            additional_prompt=(
+                "Write a single self-contained Python module that satisfies the implementation brief. "
+                "Output only source code, no markdown, no report prose, and no extra commentary. "
+                "Prefer a minimal but correct implementation with explicit shape checks, deterministic "
+                "demo input, and a runnable __main__ block."
+            ),
+        )
+    )
+
+    graph.add_node(
+        ToolNode(
+            node_id=23,
+            node_name="file_writer_code",
+            tool_name="file_writer",
+            input_mapping={"path": "code/transformer.py"},
         )
     )
 
@@ -261,6 +288,7 @@ def build_graph(core):
     )
 
     graph.add_edge(1, 2, label="frame", priority=10)
+    graph.add_edge(2, 22, label="implement", priority=15)
     graph.add_edge(2, 3, label="plan", priority=10)
     graph.add_edge(2, 4, label="direct_dispatch", priority=5)
     graph.add_edge(3, 4, label="dispatch", priority=10)
@@ -281,10 +309,12 @@ def build_graph(core):
     graph.add_edge(14, 15, label="cleanup_risk_agent", priority=10)
     graph.add_edge(15, 16, label="remove_risk_node", priority=10)
 
-    graph.add_edge(17, 18, label="write", priority=10)
     graph.add_edge(17, 3, label="replan", priority=5)
+    graph.add_edge(17, 18, label="write", priority=10)
+    graph.add_edge(17, 22, label="implement", priority=8)
 
     graph.add_edge(18, 19, label="review", priority=10)
+    graph.add_edge(22, 23, label="write_code", priority=10)
 
     graph.add_edge(19, 20, label="approve", condition="approve", priority=30)
     graph.add_edge(19, 18, label="revise", condition="revise", priority=20)

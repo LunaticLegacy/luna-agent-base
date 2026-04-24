@@ -292,7 +292,7 @@ class ContentStore:
                 if not isinstance(event, dict):
                     continue
                 event_type = str(event.get("event_type") or "")
-                if event_type not in {"node.completed", "node.failed", "run.completed", "run.failed"}:
+                if event_type not in {"node.completed", "node.failed", "node.skipped", "run.completed", "run.failed", "architecture_adjusted"}:
                     continue
                 data = event.get("data") if isinstance(event.get("data"), dict) else {}
                 created = event.get("timestamp")

@@ -8,6 +8,8 @@ import type {
   AgentRoundResponse,
   ApiIndexResponse,
   GraphSnapshot,
+  GraphDiffResponse,
+  GraphStateResponse,
   HealthResponse,
   KnowledgeCatalogItem,
   KnowledgeListResponse,
@@ -16,6 +18,7 @@ import type {
   MemoryCatalogItem,
   MetricsResponse,
   TaskListResponse,
+  TaskGraphResponse,
   ReadyResponse,
   RunSnapshot,
   RunStartResponse,
@@ -28,6 +31,7 @@ import type {
   ToolListResponse,
   UpdateSettingsRequest,
   ThoughtGraphResponse,
+  ExecutionTraceResponse,
 } from './api.types';
 
 export function joinUrl(baseUrl: string, path: string): string {
@@ -132,6 +136,17 @@ export class ApiService {
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<TaskListResponse> {
     return firstValueFrom(this.http.get<TaskListResponse>(joinUrlWithQuery(baseUrl, '/tasks', query)));
+  }
+
+  getTaskGraph(
+    baseUrl: string,
+    swarmName: string
+  ): Promise<TaskGraphResponse> {
+    return firstValueFrom(
+      this.http.get<TaskGraphResponse>(
+        joinUrlWithQuery(baseUrl, '/tasks/graph', { swarm: swarmName })
+      )
+    );
   }
 
   listTools(
@@ -240,9 +255,41 @@ export class ApiService {
     );
   }
 
+  getGraphState(baseUrl: string, swarmName: string, sinceRevision?: number): Promise<GraphStateResponse> {
+    return firstValueFrom(
+      this.http.get<GraphStateResponse>(
+        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/state`, {
+          since_revision: sinceRevision,
+        })
+      )
+    );
+  }
+
+  getGraphDiff(baseUrl: string, swarmName: string, sinceRevision: number): Promise<GraphDiffResponse> {
+    return firstValueFrom(
+      this.http.get<GraphDiffResponse>(
+        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/diff`, {
+          since_revision: sinceRevision,
+        })
+      )
+    );
+  }
+
   getThoughtGraph(baseUrl: string, swarmName: string): Promise<ThoughtGraphResponse> {
     return firstValueFrom(
       this.http.get<ThoughtGraphResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/thought-graph`))
+    );
+  }
+
+  getExecutionTrace(
+    baseUrl: string,
+    swarmName: string,
+    query: Record<string, string | number | boolean | undefined | null> = {}
+  ): Promise<ExecutionTraceResponse> {
+    return firstValueFrom(
+      this.http.get<ExecutionTraceResponse>(
+        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/execution-trace`, query)
+      )
     );
   }
 

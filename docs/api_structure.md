@@ -55,7 +55,7 @@ API 本身不负责：
 行为：
 
 - 如果没有加载任何 swarm，返回 `503`
-- 如果某个 swarm 的执行图不可用，也返回 `503`
+- 如果某个 swarm 的 Agent 图不可用，也返回 `503`
 - 否则返回可用状态
 
 返回示例：
@@ -178,17 +178,26 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 
 ### 3.9 `GET /api/swarms/<swarm_name>/graph`
 
-返回当前 swarm 的执行图快照。
+返回当前 swarm 的 Agent 图快照。
 
 返回内容包括：
 
 - `graph_name`
+- `graph_kind`
 - `entry_node_id`
 - `exit_node_id`
 - `node_count`
 - `edge_count`
 - `nodes`
 - `edges`
+
+### 3.10 `GET /api/swarms/<swarm_name>/execution-graph`
+
+返回当前 swarm 的完整执行图快照。
+
+### 3.11 `GET /api/swarms/<swarm_name>/execution-trace`
+
+返回当前 swarm 最新 run 的执行轨迹。
 
 这个接口用于前端先把“静态图”画出来，再叠加实时运行态。
 

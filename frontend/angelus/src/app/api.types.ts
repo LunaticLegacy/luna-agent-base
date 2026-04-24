@@ -84,14 +84,87 @@ export interface GraphEdgeSnapshot {
   priority: number;
 }
 
+export interface GraphChangeSummary {
+  change_id: string;
+  kind: string;
+  subject: {
+    type: string;
+    id: string | number | null;
+  };
+  summary: string;
+}
+
 export interface GraphSnapshot {
   graph_name: string;
+  graph_kind?: 'agent' | 'execution' | string;
   entry_node_id: number | null;
   exit_node_id: number | null;
   node_count: number;
   edge_count: number;
   nodes: GraphNodeSnapshot[];
   edges: GraphEdgeSnapshot[];
+  revision?: number;
+  hash?: string;
+  updated_at?: string;
+  last_change?: GraphChangeSummary | null;
+}
+
+export interface GraphStateSnapshot {
+  graph_name: string | null;
+  graph_kind?: 'agent' | 'execution' | string;
+  entry_node_id: number | null;
+  exit_node_id: number | null;
+  node_count: number;
+  edge_count: number;
+  nodes: GraphNodeSnapshot[];
+  edges: GraphEdgeSnapshot[];
+  revision: number;
+  hash: string;
+  updated_at: string;
+  last_change: GraphChangeSummary | null;
+}
+
+export interface GraphPatchOp {
+  op: 'upsert_node' | 'remove_node' | 'add_edge' | 'remove_edge' | 'update_graph_meta';
+  node?: GraphNodeSnapshot;
+  node_id?: number;
+  edge?: GraphEdgeSnapshot;
+  from_node_id?: number;
+  to_node_id?: number;
+  label?: string | null;
+  condition?: string | null;
+  priority?: number;
+  entry_node_id?: number | null;
+  exit_node_id?: number | null;
+}
+
+export interface GraphPatch {
+  base_revision: number;
+  current_revision: number;
+  graph_id: string | null;
+  is_gap_free: boolean;
+  operations: GraphPatchOp[];
+  last_change: GraphChangeSummary | null;
+}
+
+export interface GraphStateResponse {
+  success: boolean;
+  swarm: string;
+  graph: GraphStateSnapshot;
+  has_changes_since: boolean;
+}
+
+export interface GraphDiffResponse {
+  success: boolean;
+  swarm: string;
+  patch: GraphPatch;
+}
+
+export interface GraphEventsResponse {
+  success: boolean;
+  swarm: string;
+  graph: GraphStateSnapshot;
+  has_changes_since: boolean;
 }
 
 export interface ThoughtGraphNodeSnapshot {
@@ -143,6 +216,13 @@ export interface ThoughtGraphResponse {
   success: boolean;
   swarm: string;
   thought_graph: ThoughtGraphSnapshot;
+}
+
+export interface ExecutionTraceResponse {
+  success: boolean;
+  swarm: string;
+  run: RunSnapshot | null;
+  events: JsonValue[];
 }
 
 export interface RunSwarmRequest {
@@ -278,6 +358,59 @@ export interface TaskCatalogItem {
   failed_count?: number;
   completed_count?: number;
   executed_count?: number;
+}
+
+export interface TaskGraphTaskSnapshot {
+  task_id: string;
+  name: string;
+  description: string;
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | string;
+  priority: 'low' | 'medium' | 'high' | 'urgent' | string;
+  swarm_name: string;
+  agent_id?: string | null;
+  input: JsonValue;
+  output: JsonValue;
+  dependencies: string[];
+  next_tasks: string[];
+  metadata: JsonValue;
+  created_at: string;
+  updated_at: string;
+  executed_count: number;
+  failed_count: number;
+  completed_count: number;
+}
+
+export interface TaskGraphEdgeSnapshot {
+  from_task_id: string;
+  to_task_id: string;
+}
+
+export interface TaskGraphSummarySnapshot {
+  graph_id: string;
+  task_count: number;
+  edge_count: number;
+  status_counts: {
+    pending: number;
+    running: number;
+    success: number;
+    failed: number;
+    cancelled?: number;
+  };
+  ready_task_ids: string[];
+  blocked_task_ids: string[];
+  terminal_task_ids: string[];
+}
+
+export interface TaskGraphSnapshot {
+  graph_id: string;
+  tasks: TaskGraphTaskSnapshot[];
+  edges: TaskGraphEdgeSnapshot[];
+  summary: TaskGraphSummarySnapshot;
+}
+
+export interface TaskGraphResponse {
+  success: boolean;
+  graph: TaskGraphSnapshot;
 }
 
 export interface TaskCatalogStats {
@@ -433,6 +566,7 @@ export interface LogCatalogItem {
   level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
   service: string;
   message: string;
+  raw?: Record<string, any>;
 }
 
 export interface LogCatalogStats {

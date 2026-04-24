@@ -7,6 +7,7 @@ agent_files = [
   "agents/planner.py",
   "agents/researcher.py",
   "agents/writer.py",
+  "agents/code_writer.py",
   "agents/reviewer.py",
   "agents/publisher.py",
 ]
@@ -16,6 +17,7 @@ skill_files = [
   "skills/planner.prompt.md",
   "skills/researcher.prompt.md",
   "skills/writer.prompt.md",
+  "skills/code_writer.prompt.md",
   "skills/reviewer.prompt.md",
   "skills/publisher.prompt.md",
 ]
@@ -42,4 +44,4 @@ model = "deepseek-reasoner"
 
 [workspace]
 default_mode = "workspace"
-default_root = "../.."
+default_root = "."

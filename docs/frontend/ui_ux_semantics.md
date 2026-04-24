@@ -28,8 +28,8 @@
 
 | 路由 | 页面组件 | 中文标题 | 核心职责 |
 |------|---------|---------|---------|
-| `/` | `OverviewPageComponent` | **概览** | 系统仪表盘：统计卡片、Swarm 列表、拓扑视图、执行控制台、系统信息 |
-| `/swarm` | `SwarmManagementPageComponent` | **Swarm 管理** | 当前 Swarm 详情页，含 9 个 Tab（概览/拓扑/思考图/Agents/任务/活动/知识/记忆/设置） |
+| `/` | `OverviewPageComponent` | **概览** | 系统仪表盘：统计卡片、Swarm 列表、Agent 图、执行控制台、系统信息 |
+| `/swarm` | `SwarmManagementPageComponent` | **Swarm 管理** | 当前 Swarm 详情页，含 9 个 Tab（概览/Agent 图/执行轨迹/思维图谱/Agents/任务/知识/记忆/设置） |
 | `/agents` | `AgentsPageComponent` | **智能体** | Agent 列表管理、多维度筛选、右侧详情抽屉 |
 | `/tasks` | `TasksPageComponent` | **任务** | 任务列表与监控、统计卡片、筛选栏、右侧详情抽屉 |
 | `/knowledge` | `KnowledgePageComponent` | **知识库** | 知识条目 CRUD、知识图谱统计、编辑器弹窗、详情抽屉 |
@@ -228,8 +228,8 @@ Page
 | `app-stat-card` | `title`, `value`, `subtitle`, `trend`, `tone` | 无 | 统计卡片展示 |
 | `app-mini-chart` | `color`, `data` | 无 | 迷你趋势图（SVG `polygon` + `polyline`） |
 | `app-status-badge` | `status`, `label` | 无 | 状态徽章，自动映射颜色 |
-| `app-graph-viewer` | `graph`, `activeNodeId` | 无 | D3.js/SVG 拓扑图可视化，支持拖拽、缩放、高亮 |
-| `app-thought-graph-viewer` | `graph` | 无 | 思考图可视化，按 lane 布局（fact/reasoning/risk） |
+| `app-graph-viewer` | `graph`, `activeNodeId` | 无 | SVG Agent 图可视化，支持拖拽、缩放、高亮 |
+| `app-thought-graph-viewer` | `graph` | 无 | 思维图谱可视化，按 lane 布局（fact/reasoning/risk） |
 | `app-json-viewer` | `label`, `depth`, `value` | 无 | JSON 树形查看器，支持递归折叠/展开 |
 
 > **注意**：当前所有可复用组件均为**纯展示型**，仅有 `@Input`，无 `@Output` 或 `EventEmitter`。页面操作通过直接调用 `StateService` 方法完成。
@@ -314,7 +314,7 @@ export class XxxPageComponent {
 → watchRun(run) 建立 EventSource
 → SSE 事件流入 liveEvents signal
 → derivedEvents / derivedMetrics / activeRunNodeId 自动重算
-→ UI 实时更新（拓扑图高亮当前节点、事件列表追加、统计变化）
+→ UI 实时更新（Agent 图高亮当前节点、执行轨迹追加、统计变化）
 ```
 
 SSE 连接状态机：
@@ -371,7 +371,7 @@ SSE 连接状态机：
 → 并行加载：index / health / ready / listSwarms
 → 自动选中第一个 Swarm
 → 级联加载：events / logs / metrics / knowledge / memory
-→ 概览页展示：统计卡片 + Swarm 列表 + 拓扑视图
+→ 概览页展示：统计卡片 + Swarm 列表 + Agent 图
 ```
 
 ### 8.2 切换 Swarm
@@ -396,7 +396,7 @@ SSE 连接状态机：
 → POST /swarms/{name}/start/background
 → activeRun.set(run) + watchRun(run)
 → SSE 连接建立
-→ 拓扑图通过 activeRunNodeId 高亮当前执行节点
+→ Agent 图通过 activeRunNodeId 高亮当前执行节点
 → 事件页实时追加事件
 → 运行完成后 activeRun 状态更新为 completed/failed
 ```
@@ -454,8 +454,10 @@ SSE 连接状态机：
 | 记忆 | Memory | `memory.json` 条目 |
 | 事件 | Event | `ExecutionEvent`（SSE 推送） |
 | 日志 | Log | `events.jsonl` / `RunRecord.events` |
-| 拓扑视图 | Topology / Graph | `ExecutionGraph` |
-| 思考图 | Thought Graph | `CognitiveGraph` |
+| Agent 图 | Agent Graph | `ExecutionGraph` 派生的纯 Agent 拓扑 |
+| 执行轨迹图 | Execution Trace Graph | `RunRecord` / execution events |
+| 思维图谱 | Thought Graph | `CognitiveGraph` |
+| 任务图谱 | Task Graph | `TaskGraph` |
 | 运行 | Run | `RunRecord`（`run_id`） |
 | 结构 | Structure | `graph.run()` 执行 |
 | 调试 | Round | `agent.round_call()` |

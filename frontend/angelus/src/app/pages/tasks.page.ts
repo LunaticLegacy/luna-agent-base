@@ -1,55 +1,36 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, TaskItem } from '../services/state.service';
+import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComponent, PageHeaderComponent, PanelCardComponent, StatCardGridComponent, StatCardItem } from '../shared';
+import { TaskGraphViewerComponent } from '../task-graph-viewer.component';
 
 @Component({
   selector: 'app-tasks-page',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, PageHeaderComponent, StatCardGridComponent, FilterBarComponent, PanelCardComponent, DataTableComponent, EmptyStateComponent, TaskGraphViewerComponent],
   template: `
     <div class="page">
       <!-- Header -->
-      <div class="section-header">
-        <div>
-          <h1>任务列表</h1>
-          <p class="subtitle">管理、监控与调度所有 Agent 任务</p>
-        </div>
-        <div class="header-actions">
+      <app-page-header title="任务列表" subtitle="管理、监控与调度所有 Agent 任务，并查看依赖关系图">
+        <div actions>
           <button class="btn btn-primary" (click)="refreshTasks()">刷新任务</button>
         </div>
-      </div>
+      </app-page-header>
 
       <!-- Stat Cards -->
-      <div class="stat-cards-row">
-        <div class="stat-card">
-          <div class="stat-label">总任务数</div>
-          <div class="stat-value">{{ state.derivedTasks().length }}</div>
-          <div class="stat-sub">累计创建</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">运行中</div>
-          <div class="stat-value" [class.accent-purple]="runningCount() > 0">{{ runningCount() }}</div>
-          <div class="stat-sub">活跃执行</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">成功率</div>
-          <div class="stat-value" [class.success]="successRate() >= 80">{{ successRate() }}%</div>
-          <div class="stat-sub">近 24 小时</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">超时</div>
-          <div class="stat-value" [class.amber]="timeoutCount() > 0">{{ timeoutCount() }}</div>
-          <div class="stat-sub">请求超时任务</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">待处理</div>
-          <div class="stat-value" [class.amber]="pendingCount() > 0">{{ pendingCount() }}</div>
-          <div class="stat-sub">队列中等待</div>
-        </div>
-      </div>
+      <app-stat-card-grid [cards]="taskStatCards()"></app-stat-card-grid>
+
+      <!-- Task Graph -->
+      <app-panel-card class="graph-panel" title="任务图谱" [badge]="graphBadge()" [noPadding]="true">
+        @if (graphTasks().length) {
+          <app-task-graph-viewer [tasks]="graphTasks()"></app-task-graph-viewer>
+        } @else {
+          <app-empty-state message="当前没有已加载的任务图谱。请先刷新任务列表，系统会从后端任务图谱快照中展开。"></app-empty-state>
+        }
+      </app-panel-card>
 
       <!-- Filter Bar -->
-      <div class="filter-bar">
+      <app-filter-bar>
         <input
           type="text"
           class="filter-input search"
@@ -85,54 +66,20 @@ import { StateService, TaskItem } from '../services/state.service';
           <option value="priorityDesc">优先级高→低</option>
           <option value="priorityAsc">优先级低→高</option>
         </select>
-      </div>
+      </app-filter-bar>
 
       <!-- Task Table -->
-      <div class="panel-card table-panel">
+      <app-panel-card [noPadding]="true">
         <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>任务名称</th>
-                <th>状态</th>
-                <th>优先级</th>
-                <th>执行者</th>
-                <th>耗时</th>
-                <th>创建时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (task of filteredTasks(); track task.id) {
-                <tr (click)="selectTask(task)">
-                  <td>
-                    <div class="task-name">{{ task.name }}</div>
-                    <div class="task-id">{{ task.id }}</div>
-                  </td>
-                  <td>
-                    <span class="badge" [class]="'badge-' + task.status">{{ statusLabel(task.status) }}</span>
-                  </td>
-                  <td>
-                    <span class="badge" [class]="'badge-priority-' + task.priority">{{ priorityLabel(task.priority) }}</span>
-                  </td>
-                  <td>{{ task.executor }}</td>
-                  <td>{{ task.duration }}</td>
-                    <td>{{ task.createdAt }}</td>
-                    <td>
-                      <div class="row-actions">
-                        <button class="icon-btn" title="查看" (click)="selectTask(task); $event.stopPropagation()">👁</button>
-                      </div>
-                    </td>
-                  </tr>
-              } @empty {
-                <tr>
-                  <td colspan="7" class="empty-cell">暂无匹配任务</td>
-                </tr>
-              }
-            </tbody>
-          </table>
+          <app-data-table
+            [columns]="taskTableColumns"
+            [data]="filteredTasks()"
+            trackBy="id"
+            emptyText="暂无匹配任务"
+            (rowClick)="selectTask($event)"
+          ></app-data-table>
         </div>
-      </div>
+      </app-panel-card>
 
       <!-- Right Drawer -->
       @if (selectedTask()) {
@@ -193,7 +140,7 @@ import { StateService, TaskItem } from '../services/state.service';
               @if (selectedTask()!.detail.output) {
                 <pre class="code-block">{{ selectedTask()!.detail.output | json }}</pre>
               } @else {
-                <div class="empty-state">暂无输出</div>
+                <app-empty-state message="暂无输出"></app-empty-state>
               }
             </div>
 
@@ -218,99 +165,10 @@ import { StateService, TaskItem } from '../services/state.service';
     </div>
   `,
   styles: [`
-    .page {
-      padding: 24px;
-      color: #F1F5F9;
-      font-family: 'Noto Sans SC', sans-serif;
-      background: #0B0F19;
-      min-height: 100vh;
+    .graph-panel {
+      margin-bottom: 18px;
     }
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-    .section-header h1 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 600;
-      color: #F1F5F9;
-    }
-    .subtitle {
-      margin: 4px 0 0;
-      color: #94A3B8;
-      font-size: 14px;
-    }
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .btn {
-      padding: 8px 16px;
-      border-radius: 8px;
-      border: 1px solid rgba(148,163,184,0.2);
-      background: #131827;
-      color: #F1F5F9;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: 'Noto Sans SC', sans-serif;
-    }
-    .btn:hover:not(:disabled) {
-      background: #1e293b;
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .btn-primary {
-      background: #8B5CF6;
-      border-color: #8B5CF6;
-      color: #fff;
-    }
-    .btn-primary:hover:not(:disabled) {
-      background: #7c3aed;
-    }
-    .stat-cards-row {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .stat-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      padding: 16px;
-    }
-    .stat-label {
-      font-size: 12px;
-      color: #94A3B8;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #F1F5F9;
-      margin-bottom: 4px;
-    }
-    .stat-value.success { color: #10B981; }
-    .stat-value.accent-purple { color: #8B5CF6; }
-    .stat-value.amber { color: #F59E0B; }
-    .stat-sub {
-      font-size: 12px;
-      color: #64748b;
-    }
-    .filter-bar {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
-    .filter-input, .filter-select {
+                            .filter-input, .filter-select {
       background: #131827;
       border: 1px solid rgba(148,163,184,0.12);
       border-radius: 8px;
@@ -331,59 +189,10 @@ import { StateService, TaskItem } from '../services/state.service';
       min-width: 130px;
       cursor: pointer;
     }
-    .table-panel {
-      overflow: hidden;
-    }
     .table-scroll {
       overflow-x: auto;
     }
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    .data-table thead th {
-      text-align: left;
-      padding: 12px 16px;
-      color: #94A3B8;
-      font-weight: 500;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-      background: #131827;
-      white-space: nowrap;
-    }
-    .data-table tbody tr {
-      border-bottom: 1px solid rgba(148,163,184,0.05);
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .data-table tbody tr:hover {
-      background: rgba(148,163,184,0.04);
-    }
-    .data-table tbody td {
-      padding: 12px 16px;
-      color: #F1F5F9;
-      white-space: nowrap;
-    }
-    .task-name {
-      font-weight: 500;
-      color: #F1F5F9;
-    }
-    .task-id {
-      font-size: 11px;
-      color: #64748b;
-      font-family: 'JetBrains Mono', monospace;
-      margin-top: 2px;
-    }
-    .badge {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-    .badge-pending { background: rgba(245,158,11,0.12); color: #F59E0B; }
+        .badge-pending { background: rgba(245,158,11,0.12); color: #F59E0B; }
     .badge-running { background: rgba(139,92,246,0.12); color: #a78bfa; }
     .badge-success { background: rgba(16,185,129,0.12); color: #10B981; }
     .badge-failed { background: rgba(239,68,68,0.12); color: #EF4444; }
@@ -393,34 +202,7 @@ import { StateService, TaskItem } from '../services/state.service';
     .badge-priority-high { background: rgba(245,158,11,0.12); color: #F59E0B; }
     .badge-priority-medium { background: rgba(139,92,246,0.12); color: #a78bfa; }
     .badge-priority-low { background: rgba(148,163,184,0.12); color: #94A3B8; }
-    .row-actions {
-      display: flex;
-      gap: 6px;
-    }
-    .icon-btn {
-      background: transparent;
-      border: 1px solid rgba(148,163,184,0.15);
-      border-radius: 6px;
-      color: #94A3B8;
-      cursor: pointer;
-      padding: 4px 8px;
-      font-size: 12px;
-      transition: all 0.2s;
-    }
-    .icon-btn:hover {
-      background: rgba(148,163,184,0.08);
-      color: #F1F5F9;
-    }
-    .icon-btn.close {
-      font-size: 14px;
-      padding: 6px 10px;
-    }
-    .empty-cell {
-      text-align: center;
-      color: #64748b;
-      padding: 32px;
-    }
-    .drawer-overlay {
+                .drawer-overlay {
       position: fixed;
       inset: 0;
       background: rgba(0,0,0,0.5);
@@ -515,18 +297,7 @@ import { StateService, TaskItem } from '../services/state.service';
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    .code-block {
-      background: #0B0F19;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 8px;
-      padding: 12px;
-      color: #cbd5e1;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      overflow-x: auto;
-      margin: 0;
-    }
-    .timeline {
+        .timeline {
       display: flex;
       flex-direction: column;
       gap: 0;
@@ -576,20 +347,7 @@ import { StateService, TaskItem } from '../services/state.service';
       font-size: 13px;
       color: #cbd5e1;
     }
-    .empty-state {
-      padding: 20px;
-      text-align: center;
-      color: #64748b;
-      font-size: 13px;
-      background: #0B0F19;
-      border-radius: 8px;
-    }
-    @media (max-width: 1200px) {
-      .stat-cards-row { grid-template-columns: repeat(3, 1fr); }
-    }
     @media (max-width: 768px) {
-      .stat-cards-row { grid-template-columns: repeat(2, 1fr); }
-      .filter-bar { flex-direction: column; }
       .filter-input.search { width: 100%; min-width: unset; }
       .drawer { width: 100vw; max-width: 100vw; }
     }
@@ -610,6 +368,28 @@ export class TasksPageComponent {
   readonly timeoutCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'timeout').length);
   readonly successRate = computed(() => this.state.taskStats().successRate);
   readonly avgDuration = computed(() => this.state.taskStats().avgDuration);
+  readonly graphTasks = computed(() => this.state.resolvedTaskGraphTasks());
+  readonly graphBadge = computed(() => {
+    const graph = this.state.resolvedTaskGraph();
+    return graph?.graph?.summary ? `${graph.graph.summary.task_count} 项` : (this.state.tasksLoaded() ? `${this.state.tasks().length} 项` : '未加载');
+  });
+
+  readonly taskStatCards = computed<StatCardItem[]>(() => [
+    { label: '总任务数', value: this.state.derivedTasks().length, subtitle: '累计创建' },
+    { label: '运行中', value: this.runningCount(), subtitle: '活跃执行', tone: this.runningCount() > 0 ? 'purple' : undefined },
+    { label: '成功率', value: this.successRate() + '%', subtitle: '近 24 小时', tone: this.successRate() >= 80 ? 'good' : undefined },
+    { label: '超时', value: this.timeoutCount(), subtitle: '请求超时任务', tone: this.timeoutCount() > 0 ? 'amber' : undefined },
+    { label: '待处理', value: this.pendingCount(), subtitle: '队列中等待', tone: this.pendingCount() > 0 ? 'amber' : undefined },
+  ]);
+
+  readonly taskTableColumns: DataTableColumn<TaskItem>[] = [
+    { key: 'name', header: '任务名称', cell: t => t.name + ' / ' + t.id },
+    { key: 'status', header: '状态', cell: t => this.statusLabel(t.status) },
+    { key: 'priority', header: '优先级', cell: t => this.priorityLabel(t.priority) },
+    { key: 'executor', header: '执行者' },
+    { key: 'duration', header: '耗时' },
+    { key: 'createdAt', header: '创建时间' },
+  ];
 
   readonly filteredTasks = computed(() => {
     let list = [...this.state.derivedTasks()];
@@ -637,7 +417,7 @@ export class TasksPageComponent {
   }
 
   async refreshTasks(): Promise<void> {
-    await this.state.loadTasks();
+    await Promise.all([this.state.loadTasks(), this.state.loadTaskGraph()]);
   }
 
   statusLabel(status: TaskItem['status']): string {

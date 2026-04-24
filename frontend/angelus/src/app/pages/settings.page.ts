@@ -2,24 +2,21 @@ import { Component, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StateService } from '../services/state.service';
+import { PageHeaderComponent } from '../shared';
 
 @Component({
   selector: 'app-settings-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, PageHeaderComponent],
   template: `
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">系统设置</h1>
-        <p class="page-subtitle">配置 API 端点、系统参数和个性化选项</p>
-      </div>
-      <div class="header-actions">
+    <app-page-header title="系统设置" subtitle="配置 API 端点、系统参数和个性化选项">
+      <div actions>
         <span class="save-hint" *ngIf="state.settingsSaved()">✓ 已保存</span>
         <button class="btn btn-primary" [disabled]="state.settingsSaving()" (click)="saveSettings()">
           {{ state.settingsSaving() ? '保存中...' : '保存更改' }}
         </button>
       </div>
-    </div>
+    </app-page-header>
 
     <div class="error-banner" *ngIf="state.settingsError()">{{ state.settingsError() }}</div>
 
@@ -125,20 +122,13 @@ import { StateService } from '../services/state.service';
   `,
   styles: [`
     :host { display:block; }
-    .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; }
-    .page-title { font-size:1.35rem; font-weight:700; color:#F1F5F9; margin:0; }
-    .page-subtitle { font-size:.82rem; color:#94A3B8; margin:.25rem 0 0; }
-    .header-actions { display:flex; align-items:center; gap:.75rem; }
     .save-hint { font-size:.82rem; color:#10B981; font-weight:600; }
-    .btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1rem; border-radius:8px; border:none; background:linear-gradient(135deg,#7C3AED,#A78BFA); color:#fff; font-size:.82rem; font-weight:600; cursor:pointer; }
-    .btn:disabled { cursor:not-allowed; opacity:.65; }
-    .error-banner { margin-bottom:1rem; padding:.75rem 1rem; border-radius:10px; background:rgba(239,68,68,.12); color:#FCA5A5; border:1px solid rgba(239,68,68,.2); font-size:.85rem; }
+            .error-banner { margin-bottom:1rem; padding:.75rem 1rem; border-radius:10px; background:rgba(239,68,68,.12); color:#FCA5A5; border:1px solid rgba(239,68,68,.2); font-size:.85rem; }
     .settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; }
     .settings-card { background:#131827; border:1px solid rgba(148,163,184,.08); border-radius:12px; padding:1.25rem; }
     .settings-card.wide { grid-column:1/-1; }
     .settings-card h3 { font-size:.95rem; font-weight:600; color:#F1F5F9; margin:0 0 1rem; padding-bottom:.75rem; border-bottom:1px solid rgba(148,163,184,.08); display:flex; align-items:center; gap:.5rem; }
-    .badge { font-size:.65rem; font-weight:600; padding:.15rem .45rem; border-radius:999px; text-transform:uppercase; letter-spacing:.02em; }
-    .badge.connected { background:rgba(16,185,129,.12); color:#10B981; }
+        .badge.connected { background:rgba(16,185,129,.12); color:#10B981; }
     .badge.placeholder { background:rgba(148,163,184,.12); color:#94A3B8; }
     .form-group { margin-bottom:1rem; }
     .form-group:last-child { margin-bottom:0; }

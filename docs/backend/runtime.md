@@ -190,6 +190,14 @@ web_search = ["network_access"]
 - `web_search` 需要 `network_access`
 - `file_writer` 写 `config.toml`、`.env` 等配置/密钥文件时额外需要 `config_write`
 
+`graph_editor` 新增节点时会读取生命周期字段：
+
+- `runtime_transient`
+- `persistence`
+- `lifetime_policy`
+
+其中 `runtime_transient` 仍然兼容旧语义，但现在更推荐显式使用 `persistence = "transient" | "persistent"` 来表达临时/持久节点。
+
 如果 manifest 没有授予对应能力，即使 agent 绑定了工具，工具调用也会被拒绝。`agent_manager` 创建运行时 agent 时还会阻止从 `workspace` 升级到 `full_access`。
 
 ### 全量加载时的额外动作
@@ -241,15 +249,17 @@ web_search = ["network_access"]
 - graph 最后附着到 core
 - 只要其中任一步失败，整个 swarm 就不会进入 registry
 
-## 共享思考图与可调度子图
+## 四图谱分层
 
-运行时现在把“执行图”和“思考图”分开处理：
+运行时现在把 swarm 的图谱语义分成四层：
 
-- execution graph 负责节点调度、分支、join、循环和工具调用
-- shared thought graph 负责事实、证据、假设、猜测、问题、风险和决策
-- agent private workspace 负责 agent 私有草稿和本地思考工件
+- **Agent 图** 负责描述 swarm 的纯 Agent 拓扑，只包含 Agent 节点，不把工具当作图节点
+- **执行轨迹图** 负责记录一次 run 里实际发生的事件、分支、汇合、重试和回退
+- **思维图谱** 负责事实、证据、假设、猜测、问题、风险和决策，不包含执行轨迹节点
+- **任务图谱** 负责 swarm 共享任务 DAG
+- **agent private workspace** 负责 agent 私有草稿和本地思考工件
 
-`core/cognitive.py` 中的思考图节点支持以下核心类型：
+`core/cognitive.py` 中的思维图谱节点支持以下核心类型：
 
 - `fact`
 - `evidence`
@@ -262,6 +272,8 @@ web_search = ["network_access"]
 - `risk`
 - `counterevidence`
 - `tool_result`
+
+`execution_trace` 属于执行轨迹图和运行事件，不作为思维图谱节点类型输出。
 
 关系类型支持：
 
@@ -283,6 +295,14 @@ web_search = ["network_access"]
 - 当前 agent 的私有 workspace 摘要
 
 可调度子图由 `CognitiveSubgraphDescriptor` 描述，包含 root nodes、frontier nodes、purpose、visibility、owner agent、expected next information 和状态字段。它不是新的执行图节点，而是给 LLM 使用的语义任务切片。
+
+Agent 图的公开接口与执行轨迹图分离：
+
+- `GET /api/swarms/<swarm>/graph` 返回 Agent 图快照
+- `GET /api/swarms/<swarm>/execution-graph` 返回完整执行图快照
+- `GET /api/swarms/<swarm>/execution-trace` 返回当前 run 的事件轨迹
+- `GET /api/swarms/<swarm>/thought-graph` 返回思维图谱
+- `GET /api/tasks/graph?swarm=<name>` 返回任务图谱快照
 
 ## 发布链路的内容流与控制流
 

@@ -117,6 +117,8 @@ The demo graph is a "parallel + merge + review + dynamic edit + publish" flow.
 - `route_policy = "all"` enables the parallel branch
 - `join_node_id = 4` merges the branch results back into `reviewer`
 - `graph_editor` lets the swarm edit the live graph during execution
+- transient nodes are marked with `runtime_transient = true`
+- persistent nodes should be marked with `persistence = "persistent"` and retained as long-lived swarm structure
 - `file_writer` writes the final output to `outputs/deepseek_demo_final.txt`
 
 ## 5. Default Tools
@@ -140,6 +142,19 @@ The most important runtime tool in the demo. It can:
 - set the exit node
 
 This means the graph in the file is only the initial graph; runtime execution can keep evolving it.
+
+Newly created nodes now have explicit lifecycle semantics:
+
+- `transient`: use-and-discard runtime nodes
+- `persistent`: long-lived nodes that remain until they are explicitly removed, disabled, or replaced
+
+The runtime also records structured `node_lifecycle` metadata:
+
+- `runtime_transient`
+- `persistence`
+- `lifetime_policy`
+
+By default, newly inserted nodes are transient unless the mutation explicitly marks them as persistent.
 
 ### `file_writer`
 
@@ -181,4 +196,3 @@ Future improvements may include:
 - stricter skill contract validation
 - tool classification and permissions
 - more detailed graph-edit audit logs
-

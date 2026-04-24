@@ -1,53 +1,22 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, AgentRow } from '../services/state.service';
+import { EmptyStateComponent, FilterBarComponent, PaginationComponent, StatCardGridComponent, StatCardItem, TabBarComponent } from '../shared';
 
 @Component({
   selector: 'app-agents-page',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, StatCardGridComponent, TabBarComponent, FilterBarComponent, EmptyStateComponent, PaginationComponent],
   template: `
     <div class="page">
       <!-- Stat Cards -->
-      <div class="stat-cards-row">
-        <div class="stat-card">
-          <div class="stat-label">总 Agents</div>
-          <div class="stat-value">{{ state.totalAgents() ?? 0 }}</div>
-          <div class="stat-sub">已注册</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">活跃 Agents</div>
-          <div class="stat-value success">{{ state.agentStats().active }}</div>
-          <div class="stat-sub">在线运行中</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">总任务执行</div>
-          <div class="stat-value">{{ state.agentStats().totalTasks }}</div>
-          <div class="stat-sub">累计</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">平均响应时间</div>
-          <div class="stat-value">{{ state.agentStats().avgResponseTime }}</div>
-          <div class="stat-sub">毫秒</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">总 Token 消耗</div>
-          <div class="stat-value">{{ state.agentStats().totalTokenUsage | number }}</div>
-          <div class="stat-sub">累计</div>
-        </div>
-      </div>
+      <app-stat-card-grid [cards]="agentStatCards()"></app-stat-card-grid>
 
       <!-- Tabs -->
-      <div class="tab-bar">
-        @for (tab of tabs; track tab) {
-          <div class="tab-item" [class.active]="activeTab() === tab" (click)="activeTab.set(tab)">
-            {{ tab }}
-          </div>
-        }
-      </div>
+      <app-tab-bar [tabs]="tabs" [activeTab]="activeTab()" (tabChange)="activeTab.set($event)"></app-tab-bar>
 
       <!-- Filter Bar -->
-      <div class="filter-bar">
+      <app-filter-bar>
         <div class="filter-search">
           <input
             type="text"
@@ -88,7 +57,7 @@ import { StateService, AgentRow } from '../services/state.service';
           <input type="checkbox" [checked]="onlineOnly()" (change)="onlineOnly.set($any($event).target.checked)" />
           <span>仅看在线</span>
         </label>
-      </div>
+      </app-filter-bar>
 
       <!-- Content Area with Drawer -->
       <div class="content-with-drawer" [class.drawer-open]="selectedAgent()">
@@ -150,7 +119,9 @@ import { StateService, AgentRow } from '../services/state.service';
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="10" class="empty-cell">没有找到匹配的 Agent</td>
+                    <td colspan="10">
+                      <app-empty-state message="没有找到匹配的 Agent" variant="cell"></app-empty-state>
+                    </td>
                   </tr>
                 }
               </tbody>
@@ -158,19 +129,19 @@ import { StateService, AgentRow } from '../services/state.service';
           </div>
 
           <!-- Pagination -->
-          <div class="pagination">
-            <div class="pagination-info">共 {{ filteredAgents().length }} 条</div>
-            <div class="pagination-controls">
-              <button class="btn btn-sm" [disabled]="currentPage() === 1" (click)="currentPage.set(currentPage() - 1)">上一页</button>
-              <span class="page-indicator">{{ currentPage() }} / {{ totalPages() }}</span>
-              <button class="btn btn-sm" [disabled]="currentPage() === totalPages()" (click)="currentPage.set(currentPage() + 1)">下一页</button>
-            </div>
-            <select class="filter-select" [value]="pageSize()" (change)="pageSize.set(+$any($event).target.value); currentPage.set(1)">
+          <app-pagination
+            [currentPage]="currentPage()"
+            [totalItems]="filteredAgents().length"
+            [pageSize]="pageSize()"
+            [loading]="false"
+            (pageChange)="currentPage.set($event)"
+          >
+            <select extra class="filter-select" [value]="pageSize()" (change)="pageSize.set(+$any($event).target.value); currentPage.set(1)">
               <option [value]="10">10 / 页</option>
               <option [value]="20">20 / 页</option>
               <option [value]="50">50 / 页</option>
             </select>
-          </div>
+          </app-pagination>
         </div>
 
         <!-- Right Detail Drawer -->
@@ -205,7 +176,7 @@ import { StateService, AgentRow } from '../services/state.service';
                 <h4>实时指标</h4>
                 <div class="spark-area">
                   <div class="spark-bars">
-                    @for (h of sparkHeights(); track $index) {
+                    @for (h of selectedAgentMetrics().sparkHeights; track $index) {
                       <div class="spark-bar" [style.height.%]="h"></div>
                     }
                   </div>
@@ -220,18 +191,18 @@ import { StateService, AgentRow } from '../services/state.service';
                 <h4>资源使用</h4>
                 <div class="resource-row">
                   <span>CPU</span>
-                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="28"></div></div>
-                  <span class="resource-val">28%</span>
+                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="selectedAgentMetrics().cpu"></div></div>
+                  <span class="resource-val">{{ selectedAgentMetrics().cpu }}%</span>
                 </div>
                 <div class="resource-row">
                   <span>内存</span>
-                  <div class="resource-bar"><div class="resource-fill success" [style.width.%]="45"></div></div>
-                  <span class="resource-val">45%</span>
+                  <div class="resource-bar"><div class="resource-fill success" [style.width.%]="selectedAgentMetrics().memory"></div></div>
+                  <span class="resource-val">{{ selectedAgentMetrics().memory }}%</span>
                 </div>
                 <div class="resource-row">
                   <span>网络</span>
-                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="12"></div></div>
-                  <span class="resource-val">12%</span>
+                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="selectedAgentMetrics().network"></div></div>
+                  <span class="resource-val">{{ selectedAgentMetrics().network }}%</span>
                 </div>
               </div>
 
@@ -254,72 +225,7 @@ import { StateService, AgentRow } from '../services/state.service';
     </div>
   `,
   styles: [`
-    .page {
-      padding: 24px;
-      color: #e2e8f0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    .stat-cards-row {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 16px;
-      margin-bottom: 20px;
-    }
-    .stat-card {
-      background: #131827;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 12px;
-      padding: 16px;
-    }
-    .stat-label {
-      font-size: 12px;
-      color: #94a3b8;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .stat-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #f8fafc;
-      margin-bottom: 4px;
-    }
-    .stat-value.success { color: #10B981; }
-    .stat-sub {
-      font-size: 12px;
-      color: #64748b;
-    }
-    .tab-bar {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 16px;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-      padding-bottom: 1px;
-    }
-    .tab-item {
-      padding: 10px 18px;
-      font-size: 14px;
-      color: #94a3b8;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-      transition: all 0.2s;
-      white-space: nowrap;
-    }
-    .tab-item:hover { color: #e2e8f0; }
-    .tab-item.active {
-      color: #8B5CF6;
-      border-bottom-color: #8B5CF6;
-      font-weight: 600;
-    }
-    .filter-bar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
-    .filter-input, .filter-select {
+        .filter-input, .filter-select {
       background: #131827;
       border: 1px solid rgba(148,163,184,0.12);
       border-radius: 8px;
@@ -357,30 +263,7 @@ import { StateService, AgentRow } from '../services/state.service';
       overflow: hidden;
     }
     .table-wrap { overflow-x: auto; }
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    .data-table th {
-      text-align: left;
-      padding: 12px 16px;
-      color: #94a3b8;
-      font-weight: 500;
-      border-bottom: 1px solid rgba(148,163,184,0.08);
-      white-space: nowrap;
-      background: #0f1525;
-    }
-    .data-table td {
-      padding: 12px 16px;
-      color: #cbd5e1;
-      border-bottom: 1px solid rgba(148,163,184,0.05);
-      white-space: nowrap;
-    }
-    .data-table tr { cursor: pointer; transition: background 0.15s; }
-    .data-table tr:hover { background: rgba(148,163,184,0.04); }
-    .data-table tr.selected { background: rgba(139,92,246,0.08); }
-    .agent-cell { display: flex; align-items: center; gap: 10px; }
+                            .agent-cell { display: flex; align-items: center; gap: 10px; }
     .agent-avatar {
       width: 32px;
       height: 32px;
@@ -402,14 +285,7 @@ import { StateService, AgentRow } from '../services/state.service';
     }
     .agent-name { font-weight: 600; color: #f8fafc; font-size: 13px; }
     .agent-id { font-size: 11px; color: #64748b; font-family: monospace; }
-    .pill {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
+        .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.offline { background: rgba(100,116,139,0.15); color: #94a3b8; }
     .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.error { background: rgba(239,68,68,0.15); color: #ef4444; }
@@ -436,43 +312,7 @@ import { StateService, AgentRow } from '../services/state.service';
       border-radius: 2px;
     }
     .time-cell { color: #64748b; font-size: 12px; }
-    .btn {
-      padding: 6px 12px;
-      border-radius: 6px;
-      border: 1px solid rgba(148,163,184,0.2);
-      background: #1e293b;
-      color: #e2e8f0;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .btn:hover:not(:disabled) { background: #334155; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
-    .btn-icon {
-      width: 32px;
-      height: 32px;
-      padding: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .empty-cell {
-      text-align: center;
-      color: #64748b;
-      padding: 32px;
-    }
-    .pagination {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 16px;
-      border-top: 1px solid rgba(148,163,184,0.08);
-    }
-    .pagination-info { font-size: 12px; color: #64748b; }
-    .pagination-controls { display: flex; gap: 8px; align-items: center; }
-    .page-indicator { font-size: 13px; color: #94a3b8; padding: 0 8px; }
-    .detail-drawer {
+                        .detail-drawer {
       background: #131827;
       border: 1px solid rgba(148,163,184,0.08);
       border-radius: 12px;
@@ -574,23 +414,18 @@ import { StateService, AgentRow } from '../services/state.service';
     }
     .tag.cap { background: rgba(59,130,246,0.12); color: #60a5fa; }
     @media (max-width: 1200px) {
-      .stat-cards-row { grid-template-columns: repeat(3, 1fr); }
       .content-with-drawer.drawer-open { grid-template-columns: 1fr; }
       .detail-drawer { position: static; max-height: none; }
     }
     @media (max-width: 768px) {
-      .stat-cards-row { grid-template-columns: repeat(2, 1fr); }
-      .filter-bar { flex-direction: column; align-items: stretch; }
       .filter-input { width: 100%; }
-      .tab-bar { overflow-x: auto; }
-      .pagination { flex-direction: column; gap: 8px; align-items: stretch; }
-    }
+          }
   `]
 })
 export class AgentsPageComponent {
   readonly state = inject(StateService);
-  readonly activeTab = signal('Agents列表');
-  readonly tabs = ['Agents列表', 'Agent市场', '我的收藏', '已禁用'];
+  readonly activeTab = signal('列表视图');
+  readonly tabs = ['列表视图', '网格视图', '统计视图', '关系图'];
 
   readonly searchQuery = signal('');
   readonly filterStatus = signal('');
@@ -602,10 +437,39 @@ export class AgentsPageComponent {
   readonly pageSize = signal(10);
   readonly selectedAgent = signal<AgentRow | null>(null);
 
-  // Mock agents data based on swarm overview / total agents
+  readonly selectedAgentMetrics = computed(() => {
+    const agent = this.selectedAgent();
+    if (!agent) {
+      return {
+        sparkHeights: [0, 0, 0, 0, 0, 0],
+        cpu: 0,
+        memory: 0,
+        network: 0,
+      };
+    }
 
+    const activityCount = this.state.responseFeed().filter((item) => this.matchesAgentFeed(agent, item.title, item.meta)).length;
+    const statusBoost = agent.status === 'running' ? 18 : agent.status === 'online' ? 8 : agent.status === 'error' ? 6 : 0;
+    const loadScore = agent.tasksExecuted * 5 + activityCount * 7 + statusBoost;
+    const cpu = this.clamp(Math.round(12 + loadScore * 0.6 + agent.successRate * 0.12), 0, 100);
+    const memory = this.clamp(Math.round(18 + agent.tokenUsage / 1800 + agent.tasksExecuted * 2.5 + activityCount * 3), 0, 100);
+    const network = this.clamp(Math.round(8 + this.responseLatencyBucket(agent) + activityCount * 2 + (agent.status === 'running' ? 10 : 0)), 0, 100);
 
-  readonly sparkHeights = computed(() => [35, 55, 42, 70, 48, 60, 38, 65, 50, 72, 45, 58]);
+    return {
+      sparkHeights: this.buildAgentSparkHeights(agent, activityCount),
+      cpu,
+      memory,
+      network,
+    };
+  });
+
+  readonly agentStatCards = computed<StatCardItem[]>(() => [
+    { label: '总 Agents', value: this.state.totalAgents(), subtitle: '已注册' },
+    { label: '活跃 Agents', value: this.state.agentStats().active, subtitle: '在线运行中', tone: 'good' },
+    { label: '总任务执行', value: this.state.agentStats().totalTasks, subtitle: '累计' },
+    { label: '平均响应时间', value: this.state.agentStats().avgResponseTime, subtitle: '毫秒' },
+    { label: '总 Token 消耗', value: this.state.agentStats().totalTokenUsage, subtitle: '累计' },
+  ]);
 
   readonly filteredAgents = computed(() => {
     let list = this.state.derivedAgents();
@@ -632,11 +496,50 @@ export class AgentsPageComponent {
 
   selectAgent(agent: AgentRow): void {
     this.selectedAgent.set(agent);
+    this.state.setSelectedAgentId(agent.id);
   }
 
   async onAction(agent: AgentRow, action: string): Promise<void> {
     if (action !== 'run') return;
     this.state.setSelectedAgentId(agent.id);
     await this.state.runAgentRound();
+  }
+
+  private buildAgentSparkHeights(agent: AgentRow, activityCount: number): number[] {
+    const seed = this.hashAgent(agent);
+    const statusOffset = agent.status === 'running' ? 12 : agent.status === 'online' ? 6 : agent.status === 'error' ? 2 : 0;
+    const base = 20 + agent.successRate * 0.35 + Math.min(18, agent.tasksExecuted * 1.4) + Math.min(12, activityCount * 2);
+    return Array.from({ length: 12 }, (_, idx) => {
+      const wave = Math.sin((seed + idx * 3) / 2.7) * 11;
+      const jitter = ((seed >> (idx % 8)) & 7) - 3;
+      const drift = idx >= 6 ? idx - 5 : 0;
+      return this.clamp(Math.round(base + wave + jitter + drift + statusOffset), 8, 96);
+    });
+  }
+
+  private responseLatencyBucket(agent: AgentRow): number {
+    const parsed = Number.parseFloat(agent.avgResponseTime);
+    if (!Number.isFinite(parsed)) {
+      return 14;
+    }
+    return this.clamp(Math.round(parsed / 18), 6, 42);
+  }
+
+  private hashAgent(agent: AgentRow): number {
+    const source = `${agent.id}|${agent.tasksExecuted}|${agent.successRate}|${agent.tokenUsage}|${agent.status}`;
+    let hash = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      hash = (hash * 31 + source.charCodeAt(i)) % 9973;
+    }
+    return hash;
+  }
+
+  private matchesAgentFeed(agent: AgentRow, title: string, meta?: string): boolean {
+    const needle = agent.id.toLowerCase();
+    return title.toLowerCase().includes(needle) || (meta ? meta.toLowerCase().includes(needle) : false);
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
   }
 }

@@ -21,7 +21,7 @@
 3. 中间主区，左右两栏
    - 左栏是 Swarm 列表
    - 右栏是 Swarm 详情
-   - 详情里包含拓扑视图和实时活动列表
+   - 详情里包含 Agent 图和实时活动列表
 
 4. 执行控制台
    - Swarm 运行
@@ -122,8 +122,8 @@
 ## 现在的实现特点
 
 - 页面标题和大部分卡片标题已经是中文，并且全部基于真实状态字段渲染
-- `Swarm` 选择后，右侧详情、拓扑和统计会联动更新
-- 拓扑图优先使用选中 Swarm 自带的 graph，缺失时再走单独的 graph 接口
+- `Swarm` 选择后，右侧详情、Agent 图和统计会联动更新
+- Agent 图优先使用选中 Swarm 自带的 graph，缺失时再走单独的 graph 接口
 - 指标卡片支持后端指标，也支持本地 fallback 数据
 - 实时运行会通过 `EventSource` 监听 `run.events_url`
 - `StateService` 会为页面构造派生数据，例如 agent、task、tool、event、knowledge、memory 的摘要视图
@@ -139,7 +139,7 @@
 
 - 现在可以做的事：
   - 看到当前系统健康状态、Swarm 数量、图谱状态和实时事件
-  - 选择某个 Swarm 并查看它的拓扑、Agents、统计和活动
+  - 选择某个 Swarm 并查看它的 Agent 图、Agents、统计和活动
   - 直接发起 Swarm 结构启动、后台启动和 Agent 单轮调试
   - 查看最近的接口响应、系统指标和系统信息
 

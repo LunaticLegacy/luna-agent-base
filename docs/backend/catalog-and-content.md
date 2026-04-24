@@ -102,12 +102,12 @@
 
 `GET /api/tasks` 调用 `build_task_catalog(...)`。
 
-任务不是单独的数据库表，而是把每个 swarm execution graph 里的节点转成 task item，再结合 run 事件填充状态和日志。
+任务不是单独的数据库表，而是来自每个 swarm 的任务图谱（Task Graph）快照，再结合 run 事件填充状态和日志。
 
 ### 数据来源
 
 - `registry.swarms.values()` 遍历所有 swarm
-- `loaded_swarm.core.get_execution_graph()` 拿节点
+- `loaded_swarm.core.get_task_graph()` 或任务图谱快照拿节点
 - `registry.runs.list_runs(swarm_name)` 构造活动索引
 - 图文件的 mtime 作为 `reference_time`
 
@@ -594,7 +594,7 @@
 
 如果初始文件为空，`ContentStore` 不会返回空库，而是先从 runtime registry 生成 seed 数据：
 
-- knowledge 会根据每个 swarm 的 execution graph 生成：
+- knowledge 会根据每个 swarm 的 Agent 图或任务图谱生成：
   - 一个 graph overview 文档
   - 若干 node metadata 文档
 - memory 会根据历史 run 生成：

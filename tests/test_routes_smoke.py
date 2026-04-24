@@ -65,12 +65,21 @@ class DummyGraph:
     entry_node_id = 1
     exit_node_id = 2
 
-    def __init__(self) -> None:
-        self.nodes = {
-            1: DummyGraphNode(1, "start", "AgentNode", [2]),
-            2: DummyGraphNode(2, "end", "ToolNode", []),
-        }
-        self.edges = [SimpleNamespace(from_node_id=1, to_node_id=2, label="next", condition=None, priority=0)]
+    def __init__(self, *, agent_only: bool = False) -> None:
+        self.agent_only = agent_only
+        if agent_only:
+            self.nodes = {
+                1: DummyGraphNode(1, "start", "AgentNode", []),
+            }
+            self.entry_node_id = 1
+            self.exit_node_id = 1
+            self.edges = []
+        else:
+            self.nodes = {
+                1: DummyGraphNode(1, "start", "AgentNode", [2]),
+                2: DummyGraphNode(2, "end", "ToolNode", []),
+            }
+            self.edges = [SimpleNamespace(from_node_id=1, to_node_id=2, label="next", condition=None, priority=0)]
 
     async def run(self, core, initial_payload, rounds=0, **kwargs):
         return SimpleNamespace(
@@ -93,6 +102,7 @@ class DummyCore:
     def __init__(self) -> None:
         self.name = "demo-core"
         self._graph = DummyGraph()
+        self._agent_graph = DummyGraph(agent_only=True)
         self.tools = {"tool-a": object()}
         self.reset_calls = 0
 
@@ -104,6 +114,61 @@ class DummyCore:
 
     def get_execution_graph(self):
         return self._graph
+
+    def get_agent_graph(self):
+        return self._agent_graph
+
+    def get_graph_runtime_state(self):
+        return {
+            "graph_name": self._agent_graph.graph_name,
+            "graph_kind": "agent",
+            "entry_node_id": self._agent_graph.entry_node_id,
+            "exit_node_id": self._agent_graph.exit_node_id,
+            "node_count": len(self._agent_graph.nodes),
+            "edge_count": len(self._agent_graph.edges),
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "node_name": node.node_name,
+                    "node_type": node.node_type,
+                    "next_node_ids": node.next_node_ids,
+                    "metadata": node.metadata,
+                }
+                for node in self._agent_graph.nodes.values()
+            ],
+            "edges": [
+                {
+                    "from_node_id": edge.from_node_id,
+                    "to_node_id": edge.to_node_id,
+                    "label": edge.label,
+                    "condition": edge.condition,
+                    "priority": edge.priority,
+                }
+                for edge in self._agent_graph.edges
+            ],
+            "revision": 1,
+            "hash": "sha256:test",
+            "updated_at": "2026-04-24T00:00:00Z",
+            "last_change": {
+                "change_id": "graph-00000001",
+                "kind": "set_agent_graph",
+                "subject": {"type": "graph", "id": "demo-graph"},
+                "summary": "initialized agent graph",
+            },
+        }
+
+    def get_graph_runtime_diff(self, *, since_revision: int):
+        return {
+            "base_revision": since_revision,
+            "current_revision": 1,
+            "graph_id": "demo-graph",
+            "is_gap_free": True,
+            "operations": [],
+            "last_change": None,
+        }
+
+    def get_graph_runtime_events(self, *, since_revision: int = 0):
+        return []
 
     def get_cognitive_graph_snapshot(self):
         return {
@@ -226,12 +291,35 @@ class RouteSmokeTest(unittest.TestCase):
         graph = graph_response.get_json()
         self.assertTrue(graph["success"])
         self.assertEqual(graph["graph"]["graph_name"], "demo-graph")
+        self.assertEqual(graph["graph"]["revision"], 1)
+
+        graph_state_response = self.client.get("/api/swarms/demo/graph/state?since_revision=0")
+        self.assertEqual(graph_state_response.status_code, 200)
+        graph_state = graph_state_response.get_json()
+        self.assertTrue(graph_state["success"])
+        self.assertTrue(graph_state["has_changes_since"])
+        self.assertEqual(graph_state["graph"]["revision"], 1)
+
+        graph_diff_response = self.client.get("/api/swarms/demo/graph/diff?since_revision=0")
+        self.assertEqual(graph_diff_response.status_code, 200)
+        graph_diff = graph_diff_response.get_json()
+        self.assertTrue(graph_diff["success"])
+        self.assertEqual(graph_diff["patch"]["current_revision"], 1)
 
         thought_response = self.client.get("/api/swarms/demo/thought-graph")
         self.assertEqual(thought_response.status_code, 200)
         thought = thought_response.get_json()
         self.assertTrue(thought["success"])
         self.assertEqual(thought["thought_graph"]["graph_id"], "thought-demo")
+        self.assertEqual(thought["thought_graph"]["nodes"][0]["node_type"], "fact")
+        self.assertIn("active_subgraphs", thought["thought_graph"])
+
+        task_graph_response = self.client.get("/api/tasks/graph?swarm=demo")
+        self.assertEqual(task_graph_response.status_code, 200)
+        task_graph = task_graph_response.get_json()
+        self.assertTrue(task_graph["success"])
+        self.assertEqual(task_graph["graph"]["graph_id"], "tasks_demo")
+        self.assertIn("summary", task_graph["graph"])
 
         run_response = self.client.post("/api/swarms/demo/run", json={"input": {"hello": "world"}, "rounds": 2})
         self.assertEqual(run_response.status_code, 200)

@@ -88,6 +88,11 @@ class TaskStore:
                 return True
             return False
 
+    def get_graph_snapshot(self, swarm_name: str) -> Dict[str, Any]:
+        with self._lock:
+            graph = self.get_graph(swarm_name)
+            return graph.snapshot()
+
     # ------------------------------------------------------------------ #
     # Task CRUD
     # ------------------------------------------------------------------ #
@@ -129,6 +134,42 @@ class TaskStore:
             task.updated_at = _utc_now_iso()
             self._persist(swarm_name)
             return deepcopy(task)
+
+    def transition_task(self, swarm_name: str, task_id: str, payload: Dict[str, Any]) -> Task:
+        with self._lock:
+            graph = self.get_graph(swarm_name)
+            task = graph.transition_task(
+                task_id,
+                status=payload.get("status"),
+                agent_id=payload.get("agent_id"),
+                input=payload.get("input"),
+                output=payload.get("output"),
+                metadata=dict(payload.get("metadata", {}) or {}),
+            )
+            task.updated_at = _utc_now_iso()
+            self._persist(swarm_name)
+            return deepcopy(task)
+
+    def claim_ready_tasks(self, swarm_name: str, *, agent_id: Optional[str] = None, limit: Optional[int] = None) -> List[Task]:
+        with self._lock:
+            graph = self.get_graph(swarm_name)
+            ready = graph.ready_tasks()
+            if agent_id is not None:
+                ready = [task for task in ready if task.agent_id in (None, "", agent_id)]
+            if limit is not None:
+                ready = ready[: max(0, int(limit))]
+            claimed: List[Task] = []
+            for task in ready:
+                updated = graph.transition_task(
+                    task.task_id,
+                    status="running",
+                    agent_id=agent_id or task.agent_id,
+                )
+                updated.updated_at = _utc_now_iso()
+                claimed.append(deepcopy(updated))
+            if claimed:
+                self._persist(swarm_name)
+            return claimed
 
     def delete_task(self, swarm_name: str, task_id: str) -> Task:
         with self._lock:

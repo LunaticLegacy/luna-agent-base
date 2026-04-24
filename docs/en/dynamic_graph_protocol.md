@@ -4,16 +4,15 @@ This document summarizes how the current dynamic graph editing mechanism works, 
 
 ## 1. Protocol Goal
 
-The goal of the dynamic graph editing protocol is to let the swarm:
+The goal of the dynamic graph editing protocol is to let the swarm evolve its **Agent graph** at runtime while recording execution separately in an **execution trace graph**:
 
-- create temporary agents
-- insert temporary agents into the live graph
+- create temporary or persistent agent nodes
+- insert new agents into the live graph
 - change next-hop relationships at runtime
-- delete temporary agents
-- remove temporary nodes
+- delete, disable, or archive agent nodes
 - record every mutation into `runtime_info`
 
-In other words, the file-based `graph.py` is only the initial graph; the execution graph may keep evolving during runtime.
+In other words, the file-based `graph.py` is only the initial Agent graph; the Agent graph may keep evolving during runtime. Tools are no longer graph nodes. They are called orthogonally by agents at runtime.
 
 ## 2. Current Execution Mechanism
 
@@ -136,7 +135,28 @@ The runtime currently lacks a mandatory local consistency check after every muta
 
 Dynamic insertions need a clear runtime marker such as `runtime_transient` so the runtime can distinguish a safe transitional state from real graph corruption when a temporary agent has already been deleted but its node has not yet been removed.
 
-### 3.8 Agent lifecycle and node lifecycle are not tightly bound
+### 3.9 Newly inserted nodes should support transient and persistent lifecycles
+
+The current protocol focuses on temporary nodes, but a self-evolving swarm also needs to absorb long-lived capabilities.
+
+Recommended lifecycle classes:
+
+- `transient`: use-and-discard, and should be the default
+- `persistent`: long-lived and retained until explicitly deleted, disabled, replaced, or rolled back
+
+Recommended structured metadata:
+
+- `runtime_transient`
+- `persistence`
+- `lifetime_policy`
+
+Where:
+
+- `runtime_transient = true` means a transient node
+- `persistence = "persistent"` means a long-lived node
+- `lifetime_policy` describes the boundary, e.g. `run`, `session`, `swarm`, `manual`
+
+### 3.10 Agent lifecycle and node lifecycle are not tightly bound
 
 You can end up with:
 
@@ -144,11 +164,11 @@ You can end up with:
 - a node deleted while the agent still exists
 - a node remaining in the graph after the agent is gone
 
-### 3.9 Branch / join semantics can break after mutation
+### 3.11 Branch / join semantics can break after mutation
 
 If a branch target or join target is deleted during runtime, the executor may still try to continue using the old path.
 
-### 3.10 runtime_info is audit data, not scheduling safety
+### 3.12 runtime_info is audit data, not scheduling safety
 
 It tells you what happened, but it does not guarantee the next hop is safe.  
 So it is traceability, not execution protection.
