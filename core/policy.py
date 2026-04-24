@@ -163,7 +163,17 @@ class ExecutionGraph:
 
     def _allows_missing_binding(self, node: Node) -> bool:
         metadata = node.metadata if isinstance(node.metadata, dict) else {}
-        return bool(metadata.get("runtime_transient") or metadata.get("temporary"))
+        return _node_is_transient(metadata)
+
+    def purge_transient_nodes(self) -> List[int]:
+        """Remove transient nodes from the graph and return their ids."""
+        removed: List[int] = []
+        for node_id, node in list(self.nodes.items()):
+            metadata = node.metadata if isinstance(node.metadata, dict) else {}
+            if _node_is_transient(metadata):
+                self.remove_node(node_id)
+                removed.append(node_id)
+        return removed
 
     def validate(self, core: Optional["Core"] = None) -> GraphValidationResult:
         """Validate graph structure and runtime bindings."""
@@ -422,3 +432,31 @@ class ExecutionGraph:
             and edge.condition == condition
             for edge in self.edges
         )
+
+
+def _node_is_transient(metadata: Dict[str, Any]) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+
+    runtime_transient = metadata.get("runtime_transient")
+    if runtime_transient is not None:
+        return bool(runtime_transient)
+
+    node_lifecycle = metadata.get("node_lifecycle")
+    if isinstance(node_lifecycle, dict):
+        persistence = str(node_lifecycle.get("persistence", "")).strip().lower()
+        lifetime_policy = str(node_lifecycle.get("lifetime_policy", "")).strip().lower()
+        if persistence:
+            return persistence in {"transient", "temporary", "ephemeral"}
+        if lifetime_policy:
+            return lifetime_policy in {"run", "session"}
+
+    persistence = str(metadata.get("persistence", "")).strip().lower()
+    if persistence:
+        return persistence in {"transient", "temporary", "ephemeral"}
+
+    lifetime_policy = str(metadata.get("lifetime_policy", "")).strip().lower()
+    if lifetime_policy:
+        return lifetime_policy in {"run", "session"}
+
+    return bool(metadata.get("temporary"))

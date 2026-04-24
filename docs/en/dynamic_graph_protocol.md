@@ -136,7 +136,28 @@ The runtime currently lacks a mandatory local consistency check after every muta
 
 Dynamic insertions need a clear runtime marker such as `runtime_transient` so the runtime can distinguish a safe transitional state from real graph corruption when a temporary agent has already been deleted but its node has not yet been removed.
 
-### 3.8 Agent lifecycle and node lifecycle are not tightly bound
+### 3.9 Newly inserted nodes should support transient and persistent lifecycles
+
+The current protocol focuses on temporary nodes, but a self-evolving swarm also needs to absorb long-lived capabilities.
+
+Recommended lifecycle classes:
+
+- `transient`: use-and-discard, and should be the default
+- `persistent`: long-lived and retained until explicitly deleted, disabled, replaced, or rolled back
+
+Recommended structured metadata:
+
+- `runtime_transient`
+- `persistence`
+- `lifetime_policy`
+
+Where:
+
+- `runtime_transient = true` means a transient node
+- `persistence = "persistent"` means a long-lived node
+- `lifetime_policy` describes the boundary, e.g. `run`, `session`, `swarm`, `manual`
+
+### 3.10 Agent lifecycle and node lifecycle are not tightly bound
 
 You can end up with:
 
@@ -144,11 +165,11 @@ You can end up with:
 - a node deleted while the agent still exists
 - a node remaining in the graph after the agent is gone
 
-### 3.9 Branch / join semantics can break after mutation
+### 3.11 Branch / join semantics can break after mutation
 
 If a branch target or join target is deleted during runtime, the executor may still try to continue using the old path.
 
-### 3.10 runtime_info is audit data, not scheduling safety
+### 3.12 runtime_info is audit data, not scheduling safety
 
 It tells you what happened, but it does not guarantee the next hop is safe.  
 So it is traceability, not execution protection.

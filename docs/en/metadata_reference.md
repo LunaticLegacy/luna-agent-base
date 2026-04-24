@@ -38,6 +38,41 @@ Node metadata may include arbitrary extra keys. The frontend should keep unknown
 - Meaning:
   - marks a node as a runtime temporary node
   - lets the runtime treat a deleted temporary agent as an acceptable transitional state until the node itself is removed
+  - this is a compatibility field; new code should prefer `node_lifecycle`
+
+### `persistence`
+
+- Type: `string`
+- Typical values:
+  - `"transient"`
+  - `"persistent"`
+- Meaning:
+  - `transient` means a use-and-discard node
+  - `persistent` means a long-lived node that stays until it is explicitly deleted, disabled, replaced, or rolled back
+
+### `lifetime_policy`
+
+- Type: `string`
+- Typical values:
+  - `"run"`
+  - `"session"`
+  - `"swarm"`
+  - `"manual"`
+- Meaning:
+  - describes the lifecycle boundary of the node
+  - `run` usually means one-shot lifetime
+  - `manual` usually means long-lived retention
+
+### `node_lifecycle`
+
+- Type: `object`
+- Meaning:
+  - structured lifecycle metadata
+  - recommended fields:
+    - `runtime_transient`
+    - `persistence`
+    - `lifetime_policy`
+  - frontend and debugging tools should prefer this object over the single boolean flag
 
 ## 2. Runtime Metadata
 

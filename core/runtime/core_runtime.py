@@ -8,6 +8,7 @@ from ..fault_tolerance import ArchitectureRegulation, ArchitectureRegulator, Fai
 from ..runtime_info import RuntimeInfoManager
 from ..task_graph import TaskGraph
 from ..cognitive import CognitiveGraph
+from ..policy import ExecutionGraph
 from .cognitive_state import CognitiveRuntimeMixin
 from .graph_state import ExecutionGraphStateMixin
 from .registry import RuntimeRegistryMixin
@@ -174,3 +175,23 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
             },
         )
         return regulation
+
+    def cleanup_transient_execution_nodes(self, *, graph: Optional[ExecutionGraph] = None) -> list[int]:
+        target_graph = graph or self.get_execution_graph()
+        if target_graph is None:
+            return []
+        removed = target_graph.purge_transient_nodes()
+        if removed:
+            self.record_runtime_change(
+                action="graph_remove_node",
+                subject_kind="graph",
+                subject_id=getattr(target_graph, "graph_name", self.agent_name),
+                detail={
+                    "graph_node_ids": list(removed),
+                    "reason": "transient_cleanup",
+                },
+            )
+            persist = getattr(self, "persist_execution_graph", None)
+            if callable(persist):
+                persist()
+        return removed

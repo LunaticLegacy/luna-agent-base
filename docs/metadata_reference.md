@@ -38,6 +38,41 @@
 - 语义：
   - 表示该节点是运行时临时节点
   - 允许 runtime 在临时 agent 已删除、但对应节点尚未移除时，把它视为可接受的过渡态
+  - 这是兼容字段；新实现更推荐使用 `node_lifecycle`
+
+### `persistence`
+
+- 类型：`string`
+- 典型值：
+  - `"transient"`
+  - `"persistent"`
+- 语义：
+  - `transient` 表示临时节点，用完即弃
+  - `persistent` 表示持久节点，直到被显式删除、禁用、替换或回滚
+
+### `lifetime_policy`
+
+- 类型：`string`
+- 典型值：
+  - `"run"`
+  - `"session"`
+  - `"swarm"`
+  - `"manual"`
+- 语义：
+  - 描述节点的生命周期边界
+  - `run` 通常对应一次性节点
+  - `manual` 通常对应长期保留节点
+
+### `node_lifecycle`
+
+- 类型：`object`
+- 语义：
+  - 结构化生命周期字段
+  - 当前推荐包含：
+    - `runtime_transient`
+    - `persistence`
+    - `lifetime_policy`
+  - 前端和调试工具应优先展示该对象，而不是只看单个布尔值
 
 ---
 

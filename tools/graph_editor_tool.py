@@ -52,9 +52,7 @@ class GraphEditorTool(ToolDefinition):
                 runtime_metadata,
                 "additional_prompt",
             )
-            runtime_transient = bool(
-                self._pick_optional_value(control_source, runtime_metadata, "runtime_transient", True)
-            )
+            lifecycle = self._resolve_node_lifecycle(control_source, runtime_metadata, default_transient=True)
             next_node_ids = self._coerce_node_id_list(
                 self._pick_optional_value(control_source, runtime_metadata, "next_node_ids") or []
             )
@@ -71,7 +69,7 @@ class GraphEditorTool(ToolDefinition):
                     agent_id=agent_id,
                     additional_prompt=additional_prompt,
                     next_node_ids=next_node_ids,
-                    metadata={"runtime_transient": runtime_transient},
+                    metadata=lifecycle,
                 )
                 target_graph.add_node(node)
                 for next_node_id in next_node_ids:
@@ -84,7 +82,10 @@ class GraphEditorTool(ToolDefinition):
                     "graph_node_name": node_name,
                     "graph_node_agent_id": agent_id,
                     "graph_node_next_node_ids": list(next_node_ids),
-                    "graph_node_runtime_transient": runtime_transient,
+                    "graph_node_runtime_transient": lifecycle["runtime_transient"],
+                    "graph_node_persistence": lifecycle["persistence"],
+                    "graph_node_lifetime_policy": lifecycle["lifetime_policy"],
+                    "graph_node_lifecycle": dict(lifecycle["node_lifecycle"]),
                     "next_node_id": node_id,
                 }
             )
@@ -100,9 +101,7 @@ class GraphEditorTool(ToolDefinition):
             node_name = str(self._pick_value(control_source, runtime_metadata, "node_name"))
             tool_name = str(self._pick_value(control_source, runtime_metadata, "tool_name"))
             input_mapping = dict(self._pick_optional_value(control_source, runtime_metadata, "input_mapping", {}) or {})
-            runtime_transient = bool(
-                self._pick_optional_value(control_source, runtime_metadata, "runtime_transient", True)
-            )
+            lifecycle = self._resolve_node_lifecycle(control_source, runtime_metadata, default_transient=True)
             next_node_ids = self._coerce_node_id_list(
                 self._pick_optional_value(control_source, runtime_metadata, "next_node_ids") or []
             )
@@ -114,7 +113,7 @@ class GraphEditorTool(ToolDefinition):
                     tool_name=tool_name,
                     input_mapping=input_mapping,
                     next_node_ids=next_node_ids,
-                    metadata={"runtime_transient": runtime_transient},
+                    metadata=lifecycle,
                 )
                 target_graph.add_node(node)
                 for next_node_id in next_node_ids:
@@ -127,7 +126,10 @@ class GraphEditorTool(ToolDefinition):
                     "graph_node_name": node_name,
                     "graph_node_tool_name": tool_name,
                     "graph_node_next_node_ids": list(next_node_ids),
-                    "graph_node_runtime_transient": runtime_transient,
+                    "graph_node_runtime_transient": lifecycle["runtime_transient"],
+                    "graph_node_persistence": lifecycle["persistence"],
+                    "graph_node_lifetime_policy": lifecycle["lifetime_policy"],
+                    "graph_node_lifecycle": dict(lifecycle["node_lifecycle"]),
                 }
             )
             if context.core is not None:
@@ -395,6 +397,9 @@ class GraphEditorTool(ToolDefinition):
             "graph_node_tool_name",
             "graph_node_next_node_ids",
             "graph_node_runtime_transient",
+            "graph_node_persistence",
+            "graph_node_lifetime_policy",
+            "graph_node_lifecycle",
             "graph_from_node_id",
             "graph_to_node_id",
             "graph_to_node_ids",
@@ -413,6 +418,74 @@ class GraphEditorTool(ToolDefinition):
             "control",
         ]
 
+    def _resolve_node_lifecycle(
+        self,
+        control_source: Dict[str, Any],
+        runtime_metadata: Dict[str, Any],
+        *,
+        default_transient: bool,
+    ) -> Dict[str, Any]:
+        lifecycle_source = self._pick_optional_value(control_source, runtime_metadata, "node_lifecycle")
+        if not isinstance(lifecycle_source, dict):
+            lifecycle_source = self._pick_optional_value(control_source, runtime_metadata, "lifecycle")
+        if not isinstance(lifecycle_source, dict):
+            lifecycle_source = {}
+
+        persistence = str(
+            self._pick_optional_value(control_source, runtime_metadata, "persistence")
+            or lifecycle_source.get("persistence")
+            or ("transient" if default_transient else "persistent")
+        ).strip().lower()
+        if persistence not in {"transient", "persistent", "ephemeral", "temporary"}:
+            persistence = "transient" if default_transient else "persistent"
+
+        lifetime_policy = str(
+            self._pick_optional_value(control_source, runtime_metadata, "lifetime_policy")
+            or lifecycle_source.get("lifetime_policy")
+            or ("run" if persistence in {"transient", "ephemeral", "temporary"} else "manual")
+        ).strip().lower()
+        if lifetime_policy not in {"run", "session", "swarm", "manual"}:
+            lifetime_policy = "run" if persistence in {"transient", "ephemeral", "temporary"} else "manual"
+
+        runtime_transient = self._coerce_lifecycle_transient(
+            self._pick_optional_value(control_source, runtime_metadata, "runtime_transient"),
+            persistence=persistence,
+            lifetime_policy=lifetime_policy,
+            default_transient=default_transient,
+        )
+
+        lifecycle = {
+            "runtime_transient": runtime_transient,
+            "persistence": "transient" if runtime_transient else "persistent",
+            "lifetime_policy": lifetime_policy,
+            "node_lifecycle": {
+                "runtime_transient": runtime_transient,
+                "persistence": "transient" if runtime_transient else "persistent",
+                "lifetime_policy": lifetime_policy,
+            },
+        }
+        return lifecycle
+
+    def _coerce_lifecycle_transient(
+        self,
+        raw_runtime_transient: Any,
+        *,
+        persistence: str,
+        lifetime_policy: str,
+        default_transient: bool,
+    ) -> bool:
+        if raw_runtime_transient is not None:
+            return bool(raw_runtime_transient)
+        if persistence in {"transient", "ephemeral", "temporary"}:
+            return True
+        if persistence == "persistent":
+            return False
+        if lifetime_policy in {"run", "session"}:
+            return True
+        if lifetime_policy in {"swarm", "manual"}:
+            return False
+        return default_transient
+
     def _alias_keys(self, key: str) -> List[str]:
         alias_map = {
             "node_id": ["node_id", "graph_node_id", "spawned_agent_node_id", "cleanup_node_id"],
@@ -426,6 +499,10 @@ class GraphEditorTool(ToolDefinition):
             "next_node_id": ["next_node_id", "graph_node_id", "spawned_agent_node_id"],
             "additional_prompt": ["additional_prompt", "spawned_agent_prompt"],
             "replace_existing": ["replace_existing"],
+            "persistence": ["persistence", "graph_node_persistence"],
+            "lifetime_policy": ["lifetime_policy", "graph_node_lifetime_policy"],
+            "node_lifecycle": ["node_lifecycle", "graph_node_lifecycle"],
+            "runtime_transient": ["runtime_transient", "graph_node_runtime_transient"],
         }
         return alias_map.get(key, [key])
 

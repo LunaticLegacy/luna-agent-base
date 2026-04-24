@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from ..policy import ExecutionGraph, ToolNode
+from ..policy import ExecutionGraph, ToolNode, _node_is_transient
 
 
 class RoutingHelperMixin:
@@ -37,7 +37,7 @@ class RoutingHelperMixin:
             return False
         target = graph.nodes.get(next_node_id)
         metadata = getattr(target, "metadata", {}) if target is not None else {}
-        return bool(isinstance(metadata, dict) and metadata.get("runtime_transient"))
+        return bool(isinstance(metadata, dict) and _node_is_transient(metadata))
 
     def _ensure_node_exists(
         self,
@@ -107,4 +107,3 @@ class RoutingHelperMixin:
             if edge.label == branch_label or edge.condition == branch_label
         ]
         return list(dict.fromkeys(matched))
-

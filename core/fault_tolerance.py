@@ -123,7 +123,6 @@ class ArchitectureRegulator:
                 metadata_patch["quarantined"] = True
                 metadata_patch["skip_policy"] = "fallback"
                 node.metadata["fault_tolerance"] = metadata_patch
-                node.metadata["runtime_transient"] = True
             elif normalized_kind in {"tool_error", "timeout", "agent_error"} and retry_budget > 0:
                 action = "retry_node"
                 metadata_patch["quarantined"] = False
@@ -135,7 +134,6 @@ class ArchitectureRegulator:
                 metadata_patch["skip_policy"] = "advance"
                 quarantined_nodes.append(int(node.node_id))
                 node.metadata["fault_tolerance"] = metadata_patch
-                node.metadata["runtime_transient"] = True
 
         if normalized_scope in {"graph", "swarm"} or normalized_kind in {"mutation_error", "invariant_violation"}:
             action = "pause_run" if action == "retry_node" else action
