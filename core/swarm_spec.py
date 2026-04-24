@@ -75,6 +75,22 @@ class WorkspaceConfig:
 
 
 @dataclass
+class GlobalVariablesConfig:
+    """Swarm-level variables that can be injected into selected agents."""
+
+    values: Dict[str, Any] = field(default_factory=dict)
+    visibility: Dict[str, List[str]] = field(default_factory=dict)
+
+    def visible_values_for_agent(self, agent_id: str) -> Dict[str, Any]:
+        visible: Dict[str, Any] = {}
+        for key, value in self.values.items():
+            agents = self.visibility.get(key)
+            if agents is None or agent_id in agents:
+                visible[key] = value
+        return visible
+
+
+@dataclass
 class SwarmManifest:
     """Swarm package manifest parsed from TOML."""
 
@@ -82,12 +98,14 @@ class SwarmManifest:
     graph_file: str
     agent_files: List[str]
     tool_files: List[str] = field(default_factory=list)
+    api_files: List[str] = field(default_factory=list)
     tool_capabilities: Dict[str, List[str]] = field(default_factory=dict)
     skill_files: List[str] = field(default_factory=list)
     default_backend: Optional[str] = None
     default_llm: Optional[LLMBackendConfig] = None
     llm_backends: List[LLMBackendConfig] = field(default_factory=list)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
+    global_variables: GlobalVariablesConfig = field(default_factory=GlobalVariablesConfig)
 
 
 def load_root_config(path: Path) -> SwarmAppConfig:
@@ -231,6 +249,7 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         raise SwarmLoaderError(f"[swarm].agent_files contains no usable entries in {manifest_path}")
 
     tool_files = _normalize_path_list(swarm_section.get("tool_files", []), field_name="[swarm].tool_files")
+    api_files = _normalize_path_list(swarm_section.get("api_files", []), field_name="[swarm].api_files")
     tool_capabilities = _parse_tool_capabilities(raw.get("tool_capabilities", {}), manifest_path)
     skill_files = _normalize_path_list(swarm_section.get("skill_files", []), field_name="[swarm].skill_files")
 
@@ -239,6 +258,7 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         default_backend = str(default_backend).strip() or None
 
     workspace = _parse_workspace_config(raw.get("workspace", {}), manifest_path)
+    global_variables = _parse_global_variables_config(raw.get("globals", {}), manifest_path)
 
     llm_section = raw.get("llm", {})
     if not isinstance(llm_section, dict):
@@ -257,12 +277,14 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         graph_file=graph_file,
         agent_files=agent_files,
         tool_files=tool_files,
+        api_files=api_files,
         tool_capabilities=tool_capabilities,
         skill_files=skill_files,
         default_backend=default_backend,
         default_llm=default_llm,
         llm_backends=llm_backends,
         workspace=workspace,
+        global_variables=global_variables,
     )
 
 
@@ -408,6 +430,35 @@ def _parse_workspace_config(raw: Any, source: Path) -> WorkspaceConfig:
         default_root=default_root,
         agents=agents,
     )
+
+
+def _parse_global_variables_config(raw: Any, source: Path) -> GlobalVariablesConfig:
+    if raw is None:
+        return GlobalVariablesConfig()
+    if not isinstance(raw, dict):
+        raise SwarmLoaderError(f"[globals] must be a TOML table in {source}")
+
+    values: Dict[str, Any] = {}
+    visibility: Dict[str, List[str]] = {}
+
+    for key, value in raw.items():
+        if key == "visibility":
+            continue
+        values[str(key).strip()] = value
+
+    visibility_raw = raw.get("visibility", {})
+    if visibility_raw is None:
+        visibility_raw = {}
+    if not isinstance(visibility_raw, dict):
+        raise SwarmLoaderError(f"[globals].visibility must be a TOML table in {source}")
+
+    for variable_name, agent_list in visibility_raw.items():
+        visibility[str(variable_name).strip()] = _normalize_string_list(
+            agent_list,
+            field_name=f"[globals].visibility.{variable_name}",
+        )
+
+    return GlobalVariablesConfig(values=values, visibility=visibility)
 
 
 def _resolve_env_vars(value: str) -> str:

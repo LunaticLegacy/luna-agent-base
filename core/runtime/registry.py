@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from modules.llm_fetcher import LLMFetcher
 
@@ -119,6 +119,68 @@ class RuntimeRegistryMixin:
         except KeyError as exc:
             raise KeyError(f"Unknown tool_name: {tool_name}") from exc
 
+    def register_api(
+        self,
+        api_name: str,
+        api: Any,
+        *,
+        origin: str = "package",
+        source: Optional[str] = None,
+    ) -> None:
+        normalized_name = str(api_name).strip()
+        if not normalized_name:
+            raise ValueError("api_name must not be empty.")
+        if normalized_name in self.apis:
+            raise ValueError(f"Duplicate api_name: {normalized_name}")
+        normalized_origin = str(origin or "package").strip().lower() or "package"
+        self.apis[normalized_name] = api
+        self.api_sources[normalized_name] = {
+            "origin": normalized_origin,
+            "source": source,
+        }
+        self._record_runtime_change(
+            action="register_api",
+            subject_kind="api",
+            subject_id=normalized_name,
+            detail={
+                "origin": normalized_origin,
+                "source": source,
+                "type": api.__class__.__name__,
+            },
+        )
+
+    def get_api(self, api_name: str) -> Any:
+        try:
+            return self.apis[api_name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown api_name: {api_name}") from exc
+
+    def get_api_metadata(self, api_name: str) -> Dict[str, Any]:
+        if api_name not in self.api_sources:
+            raise KeyError(f"Unknown api_name: {api_name}")
+        return dict(self.api_sources[api_name])
+
+    def list_apis(self, *, origin: Optional[str] = None) -> List[Any]:
+        if origin is None:
+            return list(self.apis.values())
+        normalized_origin = str(origin).strip().lower()
+        return [
+            api
+            for name, api in self.apis.items()
+            if str(self.api_sources.get(name, {}).get("origin", "")).strip().lower() == normalized_origin
+        ]
+
+    def remove_api(self, api_name: str) -> None:
+        removed = self.apis.pop(api_name, None)
+        metadata = self.api_sources.pop(api_name, None)
+        if removed is not None or metadata is not None:
+            self._record_runtime_change(
+                action="remove_api",
+                subject_kind="api",
+                subject_id=api_name,
+                detail=metadata or {},
+            )
+
     def register_skill(self, skill: SkillAsset) -> None:
         canonical = f"{self.agent_name}/{skill.name}"
         if canonical in self.skills:
@@ -145,4 +207,3 @@ class RuntimeRegistryMixin:
 
     def list_skills(self) -> List[SkillAsset]:
         return list(self.skills.values())
-

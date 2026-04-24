@@ -5,7 +5,7 @@ import importlib.util
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from modules.llm_fetcher import LLMBackendConfig, LLMFetcher
 
@@ -85,6 +85,96 @@ def load_swarm_tools(package_path: Path, manifest: SwarmManifest) -> tuple[Dict[
     return tools, requirement_files
 
 
+def collect_api_requirement_files(
+    package_paths: Sequence[Path],
+    manifest_entries: Sequence[Tuple[Path, SwarmManifest]],
+) -> List[Path]:
+    """Collect adjacent API requirement files for every declared package API."""
+    requirement_files: List[Path] = []
+    seen: set[Path] = set()
+
+    for package_path, (_, manifest) in zip(package_paths, manifest_entries):
+        for api_entry in manifest.api_files:
+            if _is_native_api_entry(api_entry):
+                continue
+            module_path = _resolve_api_module_path(api_entry, package_path)
+            if module_path is None:
+                continue
+            requirement_path = module_path.parent / "api_requirements.txt"
+            if requirement_path.exists():
+                resolved = requirement_path.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    requirement_files.append(resolved)
+
+    return requirement_files
+
+
+def install_api_requirements(requirement_files: Sequence[Path]) -> None:
+    """Install all API requirement files before API modules are imported."""
+    for requirement_file in requirement_files:
+        if not requirement_file.exists():
+            continue
+        if requirement_file.stat().st_size == 0:
+            continue
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    str(requirement_file),
+                ],
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise SwarmLoaderError(
+                f"Failed to install API requirements from {requirement_file}: {exc}"
+            ) from exc
+
+
+def load_swarm_apis(package_path: Path, manifest: SwarmManifest) -> tuple[Dict[str, Dict[str, Any]], List[Path]]:
+    """Load API modules declared by a swarm package."""
+    apis: Dict[str, Dict[str, Any]] = {}
+    requirement_files: List[Path] = []
+    seen_requirements: set[Path] = set()
+
+    for api_entry in manifest.api_files:
+        origin, module_entry = _parse_api_entry(api_entry)
+        if origin == "native":
+            module = importlib.import_module(module_entry)
+            api_name = _resolve_api_name(module, module_entry)
+            apis[api_name] = {
+                "api": module,
+                "origin": "native",
+                "source": module_entry,
+            }
+            continue
+
+        module_path = _resolve_api_module_path(module_entry, package_path)
+        if module_path is None:
+            raise SwarmLoaderError(
+                f"API entry '{api_entry}' must be a native import or a package-local Python file."
+            )
+        module = _load_module_from_path(module_path)
+        api_module_requirements = _discover_api_requirement_file(module_path)
+        if api_module_requirements and api_module_requirements not in seen_requirements:
+            seen_requirements.add(api_module_requirements)
+            requirement_files.append(api_module_requirements)
+        api_name = _resolve_api_name(module, module_path.stem)
+        if api_name in apis:
+            raise SwarmLoaderError(f"Duplicate api name: {api_name}")
+        apis[api_name] = {
+            "api": module,
+            "origin": "package",
+            "source": str(module_path),
+        }
+
+    return apis, requirement_files
+
+
 def _load_module_from_entry(entry: str, package_path: Path):
     module_path = _resolve_module_path(entry, package_path)
     if module_path is not None:
@@ -126,6 +216,45 @@ def _resolve_module_path(entry: str, package_path: Path) -> Optional[Path]:
         _ensure_allowed_module_path(resolved, package_path)
         return resolved
     return None
+
+
+def _parse_api_entry(entry: str) -> tuple[str, str]:
+    raw = str(entry or "").strip()
+    if raw.startswith("native:"):
+        return "native", raw.removeprefix("native:").strip()
+    if raw.startswith("package:"):
+        return "package", raw.removeprefix("package:").strip()
+    return "package", raw
+
+
+def _is_native_api_entry(entry: str) -> bool:
+    return str(entry or "").strip().startswith("native:")
+
+
+def _resolve_api_module_path(entry: str, package_path: Path) -> Optional[Path]:
+    if _is_native_api_entry(entry):
+        return None
+    return _resolve_module_path(entry, package_path)
+
+
+def _discover_api_requirement_file(module_path: Optional[Path]) -> Optional[Path]:
+    if module_path is None:
+        return None
+    requirement_file = module_path.parent / "api_requirements.txt"
+    if requirement_file.exists():
+        return requirement_file.resolve()
+    return None
+
+
+def _resolve_api_name(module: Any, fallback: str) -> str:
+    explicit_name = getattr(module, "API_NAME", None)
+    if isinstance(explicit_name, str) and explicit_name.strip():
+        return explicit_name.strip()
+    if isinstance(module, dict):
+        value = module.get("api_name") or module.get("name")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return str(fallback).strip()
 
 
 def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
