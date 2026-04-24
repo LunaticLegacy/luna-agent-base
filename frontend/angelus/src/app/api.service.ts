@@ -25,6 +25,7 @@ import type {
   RunSwarmRequest,
   RunSwarmResponse,
   SettingsResponse,
+  SwarmApisResponse,
   SwarmDetailResponse,
   SwarmListResponse,
   SwarmStatsResponse,
@@ -116,6 +117,12 @@ export class ApiService {
   getSwarm(baseUrl: string, swarmName: string): Promise<SwarmDetailResponse> {
     return firstValueFrom(
       this.http.get<SwarmDetailResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}`))
+    );
+  }
+
+  getSwarmApis(baseUrl: string, swarmName: string): Promise<SwarmApisResponse> {
+    return firstValueFrom(
+      this.http.get<SwarmApisResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/apis`))
     );
   }
 
