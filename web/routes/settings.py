@@ -1,37 +1,30 @@
 from __future__ import annotations
 
-from flask import Blueprint, current_app, jsonify, request
+from fastapi import APIRouter, Request
 
-from web.errors import ApiError
-from web.settings_store import ApiSettings, load_api_settings, save_api_settings, serialize_api_settings
 from core.swarm_spec import load_root_config
+from web.deps import get_runtime_registry, parse_json_body
+from web.settings_store import ApiSettings, load_api_settings, save_api_settings, serialize_api_settings
 
-settings_bp = Blueprint("settings", __name__)
-
-
-def _get_runtime_registry():
-    registry = current_app.extensions.get("angelus_runtime")
-    if registry is None:
-        raise ApiError("Runtime registry is not initialized.")
-    return registry
+router = APIRouter()
 
 
-def _get_config_path():
-    registry = _get_runtime_registry()
+def _get_config_path(request: Request):
+    registry = get_runtime_registry(request)
     return registry.config_path, registry
 
 
-@settings_bp.get("/settings")
-def get_settings():
-    config_path, _registry = _get_config_path()
+@router.get("/settings")
+async def get_settings(request: Request):
+    config_path, _registry = _get_config_path(request)
     api_settings = load_api_settings(config_path)
-    return jsonify({"success": True, "settings": {"api": serialize_api_settings(api_settings)}})
+    return {"success": True, "settings": {"api": serialize_api_settings(api_settings)}}
 
 
-@settings_bp.put("/settings")
-def update_settings():
-    config_path, registry = _get_config_path()
-    request_data = request.get_json(silent=True) or {}
+@router.put("/settings")
+async def update_settings(request: Request):
+    config_path, registry = _get_config_path(request)
+    request_data = await parse_json_body(request)
     api_section = request_data.get("api")
     existing = load_api_settings(config_path)
     api_settings = ApiSettings.from_mapping(api_section, existing=existing)
@@ -43,4 +36,4 @@ def update_settings():
         # The file just saved is the source of truth; keep the runtime usable
         # even if reloading root config fails for an unexpected reason.
         pass
-    return jsonify({"success": True, "settings": {"api": serialize_api_settings(updated.api)}})
+    return {"success": True, "settings": {"api": serialize_api_settings(updated.api)}}
