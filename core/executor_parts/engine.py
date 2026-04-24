@@ -265,14 +265,6 @@ class GraphExecutor(
 
                     self._capture_report_payload(state, node, state.payload)
                     core.merge_agent_cognitive_graph(node.agent_id)
-                    core.swarm_cognitive_graph.add_node(
-                        CognitiveNode(
-                            node_type=CognitiveNodeType.EXECUTION_TRACE,
-                            content=f"Agent '{node.agent_id}' executed node '{node.node_name}' (round {state.rounds})",
-                            source=node.agent_id,
-                            metadata={"execution_node_id": node.node_id, "rounds": state.rounds},
-                        )
-                    )
                 elif isinstance(node, ToolNode):
                     tool = core.get_tool(node.tool_name)
                     get_capabilities = getattr(core, "get_tool_capabilities", None)

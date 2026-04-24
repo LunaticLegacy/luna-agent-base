@@ -221,16 +221,6 @@ class MetaExecutor:
             },
         }
 
-        # Also add an execution-trace node so the graph records this meta-step
-        cg.add_node(
-            CognitiveNode(
-                node_type=CognitiveNodeType.EXECUTION_TRACE,
-                content=f"Meta-iteration {iteration} follow-up scheduled: {len(open_questions)} questions, {len(unsupported)} unsupported, {len(conflicts)} conflicts",
-                source="meta_executor",
-                metadata={"iteration": iteration, "issue_count": len(open_questions) + len(unsupported) + len(conflicts)},
-            )
-        )
-
         return payload
 
     def _emit_meta_event(
