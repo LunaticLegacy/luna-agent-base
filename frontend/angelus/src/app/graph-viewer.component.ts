@@ -6,6 +6,7 @@ interface RenderNode {
   x: number;
   y: number;
   depth: number;
+  labelLines: string[];
 }
 
 interface RenderEdge {
@@ -118,15 +119,17 @@ interface RenderEdge {
 
               <text
                 [attr.x]="renderNode.x"
-                [attr.y]="renderNode.y - 2"
+                [attr.y]="renderNode.y - nodeRadius() - 14"
                 text-anchor="middle"
                 class="graph-node-label"
               >
-                {{ renderNode.node.node_name }}
+                @for (line of renderNode.labelLines; track $index; let lineIndex = $index) {
+                  <tspan [attr.x]="renderNode.x" [attr.dy]="lineIndex === 0 ? 0 : 12">{{ line }}</tspan>
+                }
               </text>
               <text
                 [attr.x]="renderNode.x"
-                [attr.y]="renderNode.y + 10"
+                [attr.y]="renderNode.y + nodeRadius() + 14"
                 text-anchor="middle"
                 class="graph-node-type"
               >
@@ -232,6 +235,68 @@ export class GraphViewerComponent {
     return points.join(' ');
   }
 
+  wrapNodeLabel(label: string, maxChars = 12, maxLines = 2): string[] {
+    const cleaned = String(label || '').trim().replace(/\s+/g, ' ');
+    if (!cleaned) {
+      return [''];
+    }
+
+    const words = cleaned.split(/[_\-\s]+/).filter(Boolean);
+    const tokens = words.length > 0 ? words : [cleaned];
+    const lines: string[] = [];
+    let current = '';
+
+    const pushCurrent = () => {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+    };
+
+    const splitToken = (token: string): string[] => {
+      if (token.length <= maxChars) {
+        return [token];
+      }
+      const parts: string[] = [];
+      for (let i = 0; i < token.length; i += maxChars) {
+        parts.push(token.slice(i, i + maxChars));
+      }
+      return parts;
+    };
+
+    for (const token of tokens.flatMap((item) => splitToken(item))) {
+      if (!current) {
+        current = token;
+        continue;
+      }
+      if (`${current} ${token}`.length <= maxChars) {
+        current = `${current} ${token}`;
+        continue;
+      }
+      pushCurrent();
+      if (lines.length >= maxLines - 1) {
+        current = token;
+        break;
+      }
+      current = token;
+    }
+
+    pushCurrent();
+
+    if (lines.length > maxLines) {
+      lines.length = maxLines;
+    }
+
+    const original = cleaned.replace(/_/g, ' ');
+    const rendered = lines.length > 0 ? lines : [original];
+    const renderedText = rendered.join(' ');
+    if (rendered.length === maxLines && renderedText.length < original.length) {
+      rendered[maxLines - 1] = `${rendered[maxLines - 1].slice(0, Math.max(1, maxChars - 1))}…`;
+    }
+
+    return rendered;
+  }
+
   private recalculateLayout(): void {
     const g = this.graph;
     if (!g || g.nodes.length === 0) {
@@ -312,7 +377,13 @@ export class GraphViewerComponent {
         const node = layerNodes[i];
         const jitter = layerCount <= 1 ? 0 : ((i % 2 === 0 ? -1 : 1) * Math.min(18, this.nodeRadius() * 0.45));
         const y = layerCount <= 1 ? centerY : startY + i * yStep + jitter;
-        result.push({ node, x, y, depth });
+        result.push({
+          node,
+          x,
+          y,
+          depth,
+          labelLines: this.wrapNodeLabel(node.node_name),
+        });
       }
     }
 
@@ -363,9 +434,11 @@ export class GraphViewerComponent {
     let maxY = Number.NEGATIVE_INFINITY;
 
     for (const item of nodes) {
-      minX = Math.min(minX, item.x - nr - 48);
-      minY = Math.min(minY, item.y - nr - 28);
-      maxX = Math.max(maxX, item.x + nr + 48);
+      const labelWidth = Math.max(64, ...item.labelLines.map((line) => line.length * 7.5));
+      const labelHeight = Math.max(12, item.labelLines.length * 12);
+      minX = Math.min(minX, item.x - Math.max(nr + 32, labelWidth / 2 + 16));
+      minY = Math.min(minY, item.y - nr - 24 - labelHeight);
+      maxX = Math.max(maxX, item.x + Math.max(nr + 32, labelWidth / 2 + 16));
       maxY = Math.max(maxY, item.y + nr + 40);
     }
 

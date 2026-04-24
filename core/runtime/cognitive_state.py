@@ -111,7 +111,79 @@ class CognitiveRuntimeMixin:
             for descriptor in self.active_thought_subgraphs.values()
             if descriptor.status == "active"
         ]
+        if not snapshot.get("edges"):
+            snapshot["edges"] = self._synthesize_thought_graph_edges(snapshot)
         return snapshot
+
+    def _synthesize_thought_graph_edges(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
+        nodes = snapshot.get("nodes") or []
+        if len(nodes) < 2:
+            return []
+
+        node_ids = {str(node.get("node_id")) for node in nodes if node.get("node_id")}
+        node_by_id = {str(node.get("node_id")): node for node in nodes if node.get("node_id")}
+        active_subgraphs = snapshot.get("active_subgraphs") or []
+        edges: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def add_edge(source_id: str, target_id: str, relation: str, description: str, strength: float) -> None:
+            if not source_id or not target_id or source_id == target_id:
+                return
+            key = (source_id, target_id, relation)
+            if key in seen:
+                return
+            seen.add(key)
+            edges.append(
+                {
+                    "edge_id": f"synth_{source_id[:8]}_{target_id[:8]}_{relation}",
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "relation": relation,
+                    "strength": strength,
+                    "description": description,
+                    "metadata": {
+                        "synthesized": True,
+                        "source": "runtime-fallback",
+                    },
+                }
+            )
+
+        for subgraph in active_subgraphs:
+            roots = [str(node_id) for node_id in (subgraph.get("root_node_ids") or []) if str(node_id) in node_ids]
+            frontier = [str(node_id) for node_id in (subgraph.get("frontier_node_ids") or []) if str(node_id) in node_ids]
+            if not roots or not frontier:
+                continue
+            purpose = str(subgraph.get("purpose") or subgraph.get("subgraph_id") or "active subgraph")
+            for root_id in roots:
+                for frontier_id in frontier:
+                    add_edge(
+                        root_id,
+                        frontier_id,
+                        "depends_on",
+                        f"{purpose}: root to frontier",
+                        0.65,
+                    )
+
+        if not edges:
+            ordered_nodes = sorted(
+                node_by_id.values(),
+                key=lambda node: (
+                    str(node.get("created_at") or ""),
+                    str(node.get("source") or ""),
+                    int(node.get("version") or 0),
+                    str(node.get("node_id") or ""),
+                ),
+            )
+            for current, nxt in zip(ordered_nodes, ordered_nodes[1:]):
+                add_edge(
+                    str(current.get("node_id") or ""),
+                    str(nxt.get("node_id") or ""),
+                    "leads_to",
+                    "Chronological fallback relation",
+                    0.45,
+                )
+
+        return edges
 
     def reset_runtime_state(self) -> None:
         for agent in self.agents.values():
@@ -123,4 +195,3 @@ class CognitiveRuntimeMixin:
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{self.agent_name}")
         self.active_thought_subgraphs.clear()
         self.current_run_id = None
-

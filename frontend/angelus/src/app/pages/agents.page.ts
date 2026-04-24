@@ -176,7 +176,7 @@ import { EmptyStateComponent, FilterBarComponent, PaginationComponent, StatCardG
                 <h4>实时指标</h4>
                 <div class="spark-area">
                   <div class="spark-bars">
-                    @for (h of sparkHeights(); track $index) {
+                    @for (h of selectedAgentMetrics().sparkHeights; track $index) {
                       <div class="spark-bar" [style.height.%]="h"></div>
                     }
                   </div>
@@ -191,18 +191,18 @@ import { EmptyStateComponent, FilterBarComponent, PaginationComponent, StatCardG
                 <h4>资源使用</h4>
                 <div class="resource-row">
                   <span>CPU</span>
-                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="28"></div></div>
-                  <span class="resource-val">28%</span>
+                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="selectedAgentMetrics().cpu"></div></div>
+                  <span class="resource-val">{{ selectedAgentMetrics().cpu }}%</span>
                 </div>
                 <div class="resource-row">
                   <span>内存</span>
-                  <div class="resource-bar"><div class="resource-fill success" [style.width.%]="45"></div></div>
-                  <span class="resource-val">45%</span>
+                  <div class="resource-bar"><div class="resource-fill success" [style.width.%]="selectedAgentMetrics().memory"></div></div>
+                  <span class="resource-val">{{ selectedAgentMetrics().memory }}%</span>
                 </div>
                 <div class="resource-row">
                   <span>网络</span>
-                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="12"></div></div>
-                  <span class="resource-val">12%</span>
+                  <div class="resource-bar"><div class="resource-fill" [style.width.%]="selectedAgentMetrics().network"></div></div>
+                  <span class="resource-val">{{ selectedAgentMetrics().network }}%</span>
                 </div>
               </div>
 
@@ -437,7 +437,31 @@ export class AgentsPageComponent {
   readonly pageSize = signal(10);
   readonly selectedAgent = signal<AgentRow | null>(null);
 
-  readonly sparkHeights = computed(() => [35, 55, 42, 70, 48, 60, 38, 65, 50, 72, 45, 58]);
+  readonly selectedAgentMetrics = computed(() => {
+    const agent = this.selectedAgent();
+    if (!agent) {
+      return {
+        sparkHeights: [0, 0, 0, 0, 0, 0],
+        cpu: 0,
+        memory: 0,
+        network: 0,
+      };
+    }
+
+    const activityCount = this.state.responseFeed().filter((item) => this.matchesAgentFeed(agent, item.title, item.meta)).length;
+    const statusBoost = agent.status === 'running' ? 18 : agent.status === 'online' ? 8 : agent.status === 'error' ? 6 : 0;
+    const loadScore = agent.tasksExecuted * 5 + activityCount * 7 + statusBoost;
+    const cpu = this.clamp(Math.round(12 + loadScore * 0.6 + agent.successRate * 0.12), 0, 100);
+    const memory = this.clamp(Math.round(18 + agent.tokenUsage / 1800 + agent.tasksExecuted * 2.5 + activityCount * 3), 0, 100);
+    const network = this.clamp(Math.round(8 + this.responseLatencyBucket(agent) + activityCount * 2 + (agent.status === 'running' ? 10 : 0)), 0, 100);
+
+    return {
+      sparkHeights: this.buildAgentSparkHeights(agent, activityCount),
+      cpu,
+      memory,
+      network,
+    };
+  });
 
   readonly agentStatCards = computed<StatCardItem[]>(() => [
     { label: '总 Agents', value: this.state.totalAgents(), subtitle: '已注册' },
@@ -472,11 +496,50 @@ export class AgentsPageComponent {
 
   selectAgent(agent: AgentRow): void {
     this.selectedAgent.set(agent);
+    this.state.setSelectedAgentId(agent.id);
   }
 
   async onAction(agent: AgentRow, action: string): Promise<void> {
     if (action !== 'run') return;
     this.state.setSelectedAgentId(agent.id);
     await this.state.runAgentRound();
+  }
+
+  private buildAgentSparkHeights(agent: AgentRow, activityCount: number): number[] {
+    const seed = this.hashAgent(agent);
+    const statusOffset = agent.status === 'running' ? 12 : agent.status === 'online' ? 6 : agent.status === 'error' ? 2 : 0;
+    const base = 20 + agent.successRate * 0.35 + Math.min(18, agent.tasksExecuted * 1.4) + Math.min(12, activityCount * 2);
+    return Array.from({ length: 12 }, (_, idx) => {
+      const wave = Math.sin((seed + idx * 3) / 2.7) * 11;
+      const jitter = ((seed >> (idx % 8)) & 7) - 3;
+      const drift = idx >= 6 ? idx - 5 : 0;
+      return this.clamp(Math.round(base + wave + jitter + drift + statusOffset), 8, 96);
+    });
+  }
+
+  private responseLatencyBucket(agent: AgentRow): number {
+    const parsed = Number.parseFloat(agent.avgResponseTime);
+    if (!Number.isFinite(parsed)) {
+      return 14;
+    }
+    return this.clamp(Math.round(parsed / 18), 6, 42);
+  }
+
+  private hashAgent(agent: AgentRow): number {
+    const source = `${agent.id}|${agent.tasksExecuted}|${agent.successRate}|${agent.tokenUsage}|${agent.status}`;
+    let hash = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      hash = (hash * 31 + source.charCodeAt(i)) % 9973;
+    }
+    return hash;
+  }
+
+  private matchesAgentFeed(agent: AgentRow, title: string, meta?: string): boolean {
+    const needle = agent.id.toLowerCase();
+    return title.toLowerCase().includes(needle) || (meta ? meta.toLowerCase().includes(needle) : false);
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
   }
 }
