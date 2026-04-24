@@ -2,15 +2,16 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, TaskItem } from '../services/state.service';
 import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComponent, PageHeaderComponent, PanelCardComponent, StatCardGridComponent, StatCardItem } from '../shared';
+import { TaskGraphViewerComponent } from '../task-graph-viewer.component';
 
 @Component({
   selector: 'app-tasks-page',
   standalone: true,
-  imports: [CommonModule, PageHeaderComponent, StatCardGridComponent, FilterBarComponent, PanelCardComponent, DataTableComponent, EmptyStateComponent],
+  imports: [CommonModule, PageHeaderComponent, StatCardGridComponent, FilterBarComponent, PanelCardComponent, DataTableComponent, EmptyStateComponent, TaskGraphViewerComponent],
   template: `
     <div class="page">
       <!-- Header -->
-      <app-page-header title="任务列表" subtitle="管理、监控与调度所有 Agent 任务">
+      <app-page-header title="任务列表" subtitle="管理、监控与调度所有 Agent 任务，并查看依赖关系图">
         <div actions>
           <button class="btn btn-primary" (click)="refreshTasks()">刷新任务</button>
         </div>
@@ -18,6 +19,15 @@ import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComp
 
       <!-- Stat Cards -->
       <app-stat-card-grid [cards]="taskStatCards()"></app-stat-card-grid>
+
+      <!-- Task Graph -->
+      <app-panel-card class="graph-panel" title="任务关系图" [badge]="graphBadge()" [noPadding]="true">
+        @if (graphTasks().length) {
+          <app-task-graph-viewer [tasks]="graphTasks()"></app-task-graph-viewer>
+        } @else {
+          <app-empty-state message="当前没有已加载的任务图。请先刷新任务列表，系统会按依赖关系自动展开图结构。"></app-empty-state>
+        }
+      </app-panel-card>
 
       <!-- Filter Bar -->
       <app-filter-bar>
@@ -155,6 +165,9 @@ import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComp
     </div>
   `,
   styles: [`
+    .graph-panel {
+      margin-bottom: 18px;
+    }
                             .filter-input, .filter-select {
       background: #131827;
       border: 1px solid rgba(148,163,184,0.12);
@@ -355,6 +368,8 @@ export class TasksPageComponent {
   readonly timeoutCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'timeout').length);
   readonly successRate = computed(() => this.state.taskStats().successRate);
   readonly avgDuration = computed(() => this.state.taskStats().avgDuration);
+  readonly graphTasks = computed(() => (this.state.tasksLoaded() ? this.state.tasks() : []));
+  readonly graphBadge = computed(() => (this.state.tasksLoaded() ? `${this.state.tasks().length} 项` : '未加载'));
 
   readonly taskStatCards = computed<StatCardItem[]>(() => [
     { label: '总任务数', value: this.state.derivedTasks().length, subtitle: '累计创建' },
