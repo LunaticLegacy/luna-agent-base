@@ -21,11 +21,11 @@ import { TaskGraphViewerComponent } from '../task-graph-viewer.component';
       <app-stat-card-grid [cards]="taskStatCards()"></app-stat-card-grid>
 
       <!-- Task Graph -->
-      <app-panel-card class="graph-panel" title="任务关系图" [badge]="graphBadge()" [noPadding]="true">
+      <app-panel-card class="graph-panel" title="任务图谱" [badge]="graphBadge()" [noPadding]="true">
         @if (graphTasks().length) {
           <app-task-graph-viewer [tasks]="graphTasks()"></app-task-graph-viewer>
         } @else {
-          <app-empty-state message="当前没有已加载的任务图。请先刷新任务列表，系统会按依赖关系自动展开图结构。"></app-empty-state>
+          <app-empty-state message="当前没有已加载的任务图谱。请先刷新任务列表，系统会从后端任务图谱快照中展开。"></app-empty-state>
         }
       </app-panel-card>
 
@@ -368,8 +368,11 @@ export class TasksPageComponent {
   readonly timeoutCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'timeout').length);
   readonly successRate = computed(() => this.state.taskStats().successRate);
   readonly avgDuration = computed(() => this.state.taskStats().avgDuration);
-  readonly graphTasks = computed(() => (this.state.tasksLoaded() ? this.state.tasks() : []));
-  readonly graphBadge = computed(() => (this.state.tasksLoaded() ? `${this.state.tasks().length} 项` : '未加载'));
+  readonly graphTasks = computed(() => this.state.resolvedTaskGraphTasks());
+  readonly graphBadge = computed(() => {
+    const graph = this.state.resolvedTaskGraph();
+    return graph?.graph?.summary ? `${graph.graph.summary.task_count} 项` : (this.state.tasksLoaded() ? `${this.state.tasks().length} 项` : '未加载');
+  });
 
   readonly taskStatCards = computed<StatCardItem[]>(() => [
     { label: '总任务数', value: this.state.derivedTasks().length, subtitle: '累计创建' },
@@ -414,7 +417,7 @@ export class TasksPageComponent {
   }
 
   async refreshTasks(): Promise<void> {
-    await this.state.loadTasks();
+    await Promise.all([this.state.loadTasks(), this.state.loadTaskGraph()]);
   }
 
   statusLabel(status: TaskItem['status']): string {

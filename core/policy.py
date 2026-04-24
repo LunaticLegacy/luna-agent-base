@@ -66,6 +66,7 @@ class ExecutionGraph:
 
     def __init__(self, graph_name: str) -> None:
         self.graph_name = graph_name
+        self.graph_kind = "execution"
         self.nodes: Dict[int, Node] = {}
         self.edges: List[Edge] = []
         self.entry_node_id: Optional[int] = None
@@ -146,6 +147,74 @@ class ExecutionGraph:
             self.entry_node_id = None
         if self.exit_node_id == node_id:
             self.exit_node_id = None
+
+    def to_agent_graph(self) -> "ExecutionGraph":
+        """Project the execution graph into a pure agent graph."""
+        derived = ExecutionGraph(self.graph_name)
+        derived.graph_kind = "agent"
+
+        agent_ids = [node_id for node_id, node in self.nodes.items() if isinstance(node, AgentNode)]
+        for node_id in agent_ids:
+            node = self.nodes[node_id]
+            derived.add_node(
+                AgentNode(
+                    node_id=node.node_id,
+                    node_name=node.node_name,
+                    next_node_ids=[],
+                    metadata=dict(node.metadata),
+                    agent_id=node.agent_id,
+                    additional_prompt=node.additional_prompt,
+                )
+            )
+
+        def successor_agent_ids(start_node_id: int) -> list[int]:
+            seen: set[int] = set()
+            stack: list[int] = list(self.nodes[start_node_id].next_node_ids)
+            resolved: list[int] = []
+            while stack:
+                current_id = stack.pop()
+                if current_id in seen:
+                    continue
+                seen.add(current_id)
+                current_node = self.nodes.get(current_id)
+                if current_node is None:
+                    continue
+                if isinstance(current_node, AgentNode):
+                    if current_id != start_node_id and current_id not in resolved:
+                        resolved.append(current_id)
+                    continue
+                stack.extend(current_node.next_node_ids)
+            return resolved
+
+        edge_seen: set[tuple[int, int]] = set()
+        for node_id in agent_ids:
+            successors = successor_agent_ids(node_id)
+            derived.nodes[node_id].next_node_ids = list(successors)
+            for successor_id in successors:
+                edge_key = (node_id, successor_id)
+                if edge_key in edge_seen:
+                    continue
+                edge_seen.add(edge_key)
+                derived.edges.append(
+                    Edge(
+                        from_node_id=node_id,
+                        to_node_id=successor_id,
+                        label="agent_route",
+                        condition=None,
+                        priority=0,
+                    )
+                )
+
+        if self.entry_node_id in derived.nodes:
+            derived.entry_node_id = self.entry_node_id
+        else:
+            derived.entry_node_id = next(iter(derived.nodes), None)
+        if self.exit_node_id in derived.nodes:
+            derived.exit_node_id = self.exit_node_id
+        elif derived.nodes:
+            sink_nodes = [node_id for node_id, node in derived.nodes.items() if not node.next_node_ids]
+            derived.exit_node_id = sink_nodes[-1] if sink_nodes else next(reversed(derived.nodes), None)
+        return derived
 
     def set_entry(self, node_id: int) -> None:
         """Set the entry node for the graph."""
@@ -326,6 +395,7 @@ class ExecutionGraph:
     def clone(self) -> "ExecutionGraph":
         """Create a shallow clone of the graph structure."""
         cloned = ExecutionGraph(self.graph_name)
+        cloned.graph_kind = self.graph_kind
         cloned.nodes = {
             node_id: self._clone_node(node)
             for node_id, node in self.nodes.items()

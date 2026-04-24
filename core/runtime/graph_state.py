@@ -58,6 +58,29 @@ class ExecutionGraphStateMixin:
     def get_execution_graph(self) -> Optional["ExecutionGraph"]:
         return self._execution_graph
 
+    def get_agent_graph(self) -> Optional["ExecutionGraph"]:
+        graph = self._execution_graph
+        if graph is None:
+            return None
+        return graph.to_agent_graph()
+
+    def get_agent_graph_snapshot(self) -> dict:
+        graph = self.get_agent_graph()
+        if graph is None:
+            return {
+                "graph_name": None,
+                "graph_kind": "agent",
+                "entry_node_id": None,
+                "exit_node_id": None,
+                "node_count": 0,
+                "edge_count": 0,
+                "nodes": [],
+                "edges": [],
+            }
+        from web.runs import serialize_graph_snapshot
+
+        return serialize_graph_snapshot(graph)
+
     def check_execution_graph_available(self) -> GraphValidationResult:
         if self._execution_graph is None:
             return GraphValidationResult(
@@ -73,4 +96,3 @@ class ExecutionGraphStateMixin:
                 errors=["Execution graph is not attached."],
             )
         return self._execution_graph.validate(self)
-

@@ -14,7 +14,8 @@ def build_swarm_stats(
 ) -> Dict[str, Any]:
     swarm = registry.get_swarm(swarm_name)
     runs = registry.runs.list_runs(swarm_name)
-    graph = swarm.core.get_execution_graph()
+    graph_getter = getattr(swarm.core, "get_agent_graph", None)
+    graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
     agent_stats = build_agent_catalog(swarm, runs)[1]
     task_catalog = build_task_catalog(registry, swarm_name=swarm_name, page=1, limit=5000)
     completed_runs = [record for record in runs if getattr(record, "status", "") == "completed"]

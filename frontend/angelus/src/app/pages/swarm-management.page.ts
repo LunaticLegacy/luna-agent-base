@@ -63,10 +63,10 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       @switch (activeTab()) {
         @case ('概览') {
 
-      <!-- Topology Canvas -->
-        <div class="topology-canvas">
+      <!-- Agent Graph Canvas -->
+      <div class="topology-canvas">
         <div class="panel-header">
-          <h3>Swarm 拓扑</h3>
+          <h3>Agent 图</h3>
           <div class="panel-actions">
             <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
           </div>
@@ -75,7 +75,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
           @if (state.resolvedGraph()) {
             <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
           } @else {
-            <app-empty-state message="暂无拓扑数据"></app-empty-state>
+            <app-empty-state message="暂无 Agent 图数据"></app-empty-state>
           }
         </div>
       </div>
@@ -83,7 +83,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       <!-- Main Content Grid -->
       <div class="main-grid">
         <!-- Left: Node Type Legend -->
-        <app-panel-card title="节点图例" [noPadding]="true">
+        <app-panel-card title="Agent 图例" [noPadding]="true">
           <div class="legend-list">
             @for (item of state.topologyLegendItems(); track item.label) {
               <div class="legend-item">
@@ -103,7 +103,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
 
         <!-- Right: Info + Charts -->
         <div class="right-stack">
-          <app-panel-card title="Swarm 信息" [noPadding]="true">
+        <app-panel-card title="Swarm 信息" [noPadding]="true">
             <div class="info-body">
               <div class="info-row">
                 <span class="info-key">名称</span>
@@ -206,12 +206,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
 
       </div>
         }
-        @case ('拓扑视图') {
+        @case ('Agent 图') {
           <div class="topology-shell topology-fullscreen">
             <div class="panel-header topology-header">
               <div>
-                <h3>Swarm 拓扑</h3>
-                <p class="panel-subtitle">展示执行节点实例、流转关系和当前活跃路径。</p>
+                <h3>Agent 图</h3>
+                <p class="panel-subtitle">展示当前 swarm 的 Agent 节点、路由关系和活跃路径。</p>
               </div>
               <div class="panel-actions">
                 <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
@@ -223,12 +223,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                   @if (state.resolvedGraph()) {
                     <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
                   } @else {
-                    <app-empty-state message="暂无拓扑数据"></app-empty-state>
+                    <app-empty-state message="暂无 Agent 图数据"></app-empty-state>
                   }
                 </div>
                 <div class="topology-summary-strip">
                   <div class="summary-item">
-                    <span class="summary-label">节点实例</span>
+                    <span class="summary-label">Agent 节点</span>
                     <span class="summary-value">{{ state.resolvedGraph()?.nodes?.length ?? 0 }}</span>
                   </div>
                   <div class="summary-item">
@@ -265,7 +265,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     }
                   </div>
                 </app-panel-card>
-                <app-panel-card title="节点实例" [badge]="state.resolvedGraph()?.nodes?.length ?? 0" [noPadding]="true">
+                <app-panel-card title="Agent 节点" [badge]="state.resolvedGraph()?.nodes?.length ?? 0" [noPadding]="true">
                   <div class="topology-instance-list">
                     @for (node of state.resolvedGraph()?.nodes ?? []; track node.node_id) {
                       <div class="topology-instance-item">
@@ -277,7 +277,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                         <div class="topology-instance-detail">next: {{ node.next_node_ids.length ? node.next_node_ids.join(', ') : 'none' }}</div>
                       </div>
                     } @empty {
-                      <app-empty-state message="暂无节点实例"></app-empty-state>
+                      <app-empty-state message="暂无 Agent 节点"></app-empty-state>
                     }
                   </div>
                 </app-panel-card>
@@ -285,11 +285,55 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
             </div>
           </div>
         }
-        @case ('思考图') {
+        @case ('执行轨迹') {
+          <div class="trace-shell trace-fullscreen">
+            <div class="panel-header trace-header">
+              <div>
+                <h3>执行轨迹图</h3>
+                <p class="panel-subtitle">展示运行中的 run、事件序列和分支执行信息。</p>
+              </div>
+              <div class="panel-actions">
+                <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
+              </div>
+            </div>
+            <div class="trace-layout">
+              <app-panel-card title="当前 Run" [noPadding]="true">
+                @if (state.selectedExecutionTrace()?.run; as run) {
+                  <div class="info-body">
+                    <div class="info-row"><span class="info-key">Run ID</span><span class="info-val mono">{{ run.run_id }}</span></div>
+                    <div class="info-row"><span class="info-key">状态</span><span class="info-val">{{ run.status }}</span></div>
+                    <div class="info-row"><span class="info-key">Swarm</span><span class="info-val">{{ run.swarm }}</span></div>
+                    <div class="info-row"><span class="info-key">轮次</span><span class="info-val">{{ run.rounds }}</span></div>
+                    <div class="info-row"><span class="info-key">当前节点</span><span class="info-val">{{ run.current_node_name || '—' }}</span></div>
+                    <div class="info-row"><span class="info-key">事件数</span><span class="info-val">{{ run.event_count }}</span></div>
+                  </div>
+                } @else {
+                  <app-empty-state message="当前没有可展示的运行轨迹。"></app-empty-state>
+                }
+              </app-panel-card>
+              <app-panel-card title="事件列表" [badge]="state.selectedExecutionTrace()?.events?.length ?? 0" [noPadding]="true">
+                <div class="trace-event-list">
+                  @for (event of state.selectedExecutionTrace()?.events ?? []; track $index) {
+                    <div class="trace-event-item">
+                      <div class="trace-event-head">
+                        <span class="trace-event-index mono">#{{ $index + 1 }}</span>
+                        <span class="trace-event-title">{{ traceEventLabel(event) }}</span>
+                      </div>
+                      <pre class="trace-event-body">{{ event | json }}</pre>
+                    </div>
+                  } @empty {
+                    <app-empty-state message="当前没有事件可展示。"></app-empty-state>
+                  }
+                </div>
+              </app-panel-card>
+            </div>
+          </div>
+        }
+        @case ('思维图谱') {
           <div class="thought-shell thought-fullscreen">
             <div class="panel-header thought-header">
               <div>
-                <h3>Swarm 思考图</h3>
+                <h3>思维图谱</h3>
                 <p class="panel-subtitle">展示认知节点、关系边和活跃子图。</p>
               </div>
               <div class="panel-actions">
@@ -302,7 +346,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                   @if (state.resolvedThoughtGraph()) {
                     <app-thought-graph-viewer [graph]="state.resolvedThoughtGraph()"></app-thought-graph-viewer>
                   } @else {
-                    <app-empty-state message="暂无思考图数据"></app-empty-state>
+                    <app-empty-state message="暂无思维图谱数据"></app-empty-state>
                   }
                 </div>
                 <div class="thought-summary-strip">
@@ -942,6 +986,72 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
     .thought-subgraph-meta {
       margin-bottom: 2px;
     }
+    .trace-fullscreen {
+      min-height: 480px;
+    }
+    .trace-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      height: calc(100vh - 220px);
+      min-height: 560px;
+      margin-bottom: 18px;
+      padding: 14px;
+      background:
+        radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.10), transparent 24%),
+        linear-gradient(180deg, #0c1220, #090d17);
+      border: 1px solid rgba(148,163,184,0.1);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .trace-header {
+      padding: 0 4px;
+      border-bottom: none;
+    }
+    .trace-layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+      gap: 14px;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .trace-event-list {
+      max-height: 100%;
+      overflow: auto;
+      padding: 12px 14px 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .trace-event-item {
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.64);
+      padding: 10px 12px;
+    }
+    .trace-event-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .trace-event-index {
+      color: #94a3b8;
+      font-size: 11px;
+    }
+    .trace-event-title {
+      color: #f8fafc;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .trace-event-body {
+      margin: 0;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
@@ -989,7 +1099,8 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       .right-stack app-panel-card { flex: 1; min-width: 240px; }
       .legend-grid-nodes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .topology-layout,
-      .thought-layout { grid-template-columns: 1fr; }
+      .thought-layout,
+      .trace-layout { grid-template-columns: 1fr; }
       .topology-rail,
       .thought-rail { flex-direction: row; flex-wrap: wrap; }
       .topology-rail app-panel-card,
@@ -1012,7 +1123,7 @@ export class SwarmManagementPageComponent {
   readonly state = inject(StateService);
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
-  readonly tabs = ['概览', '拓扑视图', '思考图', 'Agents', '任务', '知识', '记忆', '设置'];
+  readonly tabs = ['概览', 'Agent 图', '执行轨迹', '思维图谱', 'Agents', '任务', '知识', '记忆', '设置'];
   readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
   readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
 
@@ -1031,6 +1142,17 @@ export class SwarmManagementPageComponent {
     if (!swarmName) return;
     if (!window.confirm(`确认卸载 Swarm "${swarmName}" 吗？`)) return;
     await this.state.unloadCurrentSwarm();
+  }
+
+  traceEventLabel(event: unknown): string {
+    if (event && typeof event === 'object') {
+      const record = event as Record<string, unknown>;
+      const label = record['type'] ?? record['event'] ?? record['kind'];
+      if (typeof label === 'string' && label.trim()) {
+        return label;
+      }
+    }
+    return 'event';
   }
 
 }

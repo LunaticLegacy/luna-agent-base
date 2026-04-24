@@ -191,10 +191,17 @@ class RuntimeInfoManager:
         }
 
     def _build_graph_state(self, *, core: Any = None) -> Dict[str, Any]:
-        graph = core.get_execution_graph() if core is not None else None
+        graph = None
+        if core is not None:
+            get_agent_graph = getattr(core, "get_agent_graph", None)
+            if callable(get_agent_graph):
+                graph = get_agent_graph()
+            if graph is None:
+                graph = core.get_execution_graph()
         if graph is None:
             return {
                 "graph_name": None,
+                "graph_kind": "agent",
                 "entry_node_id": None,
                 "exit_node_id": None,
                 "node_count": 0,
@@ -312,6 +319,7 @@ class RuntimeInfoManager:
     def _serialize_graph(self, graph: ExecutionGraph) -> Dict[str, Any]:
         return {
             "graph_name": graph.graph_name,
+            "graph_kind": getattr(graph, "graph_kind", "execution"),
             "entry_node_id": graph.entry_node_id,
             "exit_node_id": graph.exit_node_id,
             "node_count": len(graph.nodes),

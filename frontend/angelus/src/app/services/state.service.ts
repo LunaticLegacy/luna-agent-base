@@ -5,6 +5,7 @@ import type {
   AgentCatalogItem,
   ApiIndexResponse,
   ApiSettings,
+  ExecutionTraceResponse,
   GraphDiffResponse,
   GraphSnapshot,
   GraphStateSnapshot,
@@ -15,6 +16,8 @@ import type {
   LogListResponse,
   MemoryCatalogItem,
   TaskCatalogItem,
+  TaskGraphResponse,
+  TaskGraphTaskSnapshot,
   MetricsResponse,
   ReadyResponse,
   RunSnapshot,
@@ -267,6 +270,8 @@ export class StateService {
   readonly selectedGraph = signal<GraphSnapshot | null>(null);
   readonly selectedGraphState = signal<GraphStateSnapshot | null>(null);
   readonly selectedThoughtGraph = signal<ThoughtGraphSnapshot | null>(null);
+  readonly selectedExecutionTrace = signal<ExecutionTraceResponse | null>(null);
+  readonly selectedTaskGraph = signal<TaskGraphResponse | null>(null);
   readonly swarmExecutionTemplate = signal<SwarmExecutionTemplate>('summary');
   readonly swarmExecutionPrompt = signal<string>(SWARM_EXECUTION_PRESETS.summary.prompt);
   readonly swarmExecutionContext = signal<string>(SWARM_EXECUTION_PRESETS.summary.context);
@@ -331,6 +336,14 @@ export class StateService {
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
   readonly resolvedGraph = computed<GraphSnapshot | null>(() => this.selectedGraph() ?? this.selectedSwarm()?.graph ?? null);
   readonly resolvedThoughtGraph = computed<ThoughtGraphSnapshot | null>(() => this.selectedThoughtGraph());
+  readonly resolvedTaskGraph = computed<TaskGraphResponse | null>(() => this.selectedTaskGraph());
+  readonly resolvedTaskGraphTasks = computed<TaskItem[]>(() => {
+    const graph = this.resolvedTaskGraph();
+    if (!graph?.graph?.tasks?.length) {
+      return this.derivedTasks();
+    }
+    return graph.graph.tasks.map((task) => this.mapTaskGraphSnapshot(task));
+  });
   readonly activeRunNodeId = computed(() => {
     const run = this.activeRun();
     return run?.status === 'running' ? run.current_node_id ?? null : null;
@@ -921,6 +934,37 @@ export class StateService {
     };
   }
 
+  private mapTaskGraphSnapshot(item: TaskGraphTaskSnapshot): TaskItem {
+    const metadata = item.metadata && typeof item.metadata === 'object' ? (item.metadata as Record<string, unknown>) : {};
+    const durationMs = typeof metadata['duration_ms'] === 'number' ? metadata['duration_ms'] as number : 0;
+    const logs = Array.isArray(metadata['logs'])
+      ? (metadata['logs'] as Array<{ time?: string; level?: 'info' | 'warn' | 'error' | 'success'; message?: string }>)
+          .map((entry) => ({
+            time: entry.time ?? '-',
+            level: (entry.level ?? 'info') as 'info' | 'warn' | 'error' | 'success',
+            message: entry.message ?? '',
+          }))
+      : [];
+    return {
+      id: item.task_id,
+      name: item.name,
+      status: item.status as TaskItem['status'],
+      priority: item.priority as TaskItem['priority'],
+      executor: item.agent_id || 'system',
+      duration: durationMs > 0 ? this.fmtDurationMs(durationMs) : '-',
+      createdAt: item.created_at,
+      dependencies: [...(item.dependencies ?? [])],
+      nextTasks: [...(item.next_tasks ?? [])],
+      detail: {
+        description: item.description,
+        input: item.input,
+        output: item.output,
+        logs,
+        failureReason: item.status === 'failed' && item.failed_count > 0 ? `failed_count=${item.failed_count}` : undefined,
+      },
+    };
+  }
+
   private mapToolCatalogItem(item: ToolCatalogItem): ToolItem {
     return {
       id: item.id,
@@ -1235,6 +1279,7 @@ export class StateService {
   refreshGraph(): void {
     void this.syncSelectedGraph({ forceFull: true });
     void this.loadSelectedThoughtGraph();
+    void this.loadSelectedExecutionTrace();
   }
 
   async loadOverview(options: { gracefulOffline?: boolean } = {}): Promise<void> {
@@ -1332,6 +1377,8 @@ this.loadLogs(),
         this.selectedSwarm.set(null);
         this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
+        this.selectedExecutionTrace.set(null);
+        this.selectedTaskGraph.set(null);
         this.agents.set([]);
         this.agentsLoaded.set(true);
         this.tasks.set([]);
@@ -1365,6 +1412,8 @@ this.loadLogs(),
       this.selectedSwarm.set(null);
       this.selectedGraph.set(null);
       this.selectedThoughtGraph.set(null);
+      this.selectedExecutionTrace.set(null);
+      this.selectedTaskGraph.set(null);
       this.agents.set([]);
       this.agentsLoaded.set(true);
       this.tasks.set([]);
@@ -1386,6 +1435,8 @@ this.loadLogs(),
       await Promise.all([
         this.loadSelectedGraph(),
         this.loadSelectedThoughtGraph(),
+        this.loadSelectedExecutionTrace(),
+        this.loadTaskGraph(),
         this.loadAgents(),
         this.loadTasks(),
         this.loadTools(),
@@ -1411,10 +1462,14 @@ this.loadLogs(),
           last_change: fallback.graph.last_change ?? null,
         } : null);
         this.ensureAgentSelection(fallback);
+        this.selectedExecutionTrace.set(null);
+        this.selectedTaskGraph.set(null);
       } else {
         this.selectedSwarm.set(null);
         this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
+        this.selectedExecutionTrace.set(null);
+        this.selectedTaskGraph.set(null);
       }
       if (options.gracefulOffline ?? this.refreshGraceful) {
         if (this.isOfflineLikeError(error)) {
@@ -1708,6 +1763,26 @@ this.loadLogs(),
     }
   }
 
+  async loadSelectedExecutionTrace(): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.selectedExecutionTrace.set(null);
+      return;
+    }
+    try {
+      const baseUrl = this.baseUrl();
+      const runId = this.activeRun()?.run_id;
+      const response = await this.apiService.getExecutionTrace(baseUrl, swarmName, runId ? { run_id: runId } : {});
+      this.selectedExecutionTrace.set(response);
+      this.pushFeed(`执行轨迹 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/execution-trace`, 'info', response);
+    } catch (error) {
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.error.set(formatErrorDetail(error));
+      }
+      this.selectedExecutionTrace.set(null);
+    }
+  }
+
   async loadAgents(): Promise<void> {
     const swarmName = this.selectedSwarmName();
     if (!swarmName) {
@@ -1755,6 +1830,25 @@ this.loadLogs(),
           'error',
           { error: errorSummary(error) }
         );
+      }
+    }
+  }
+
+  async loadTaskGraph(): Promise<void> {
+    const swarmName = this.selectedSwarmName();
+    if (!swarmName) {
+      this.selectedTaskGraph.set(null);
+      return;
+    }
+    try {
+      const response = await this.apiService.getTaskGraph(this.baseUrl(), swarmName);
+      this.selectedTaskGraph.set(response);
+      this.pushFeed(`任务图谱 · ${swarmName}`, 'GET', `${this.baseUrl()}/tasks/graph?swarm=${swarmName}`, 'info', response);
+    } catch (error) {
+      if (!this.shouldSuppressOfflineError(error)) {
+        this.selectedTaskGraph.set(null);
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`任务图谱失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/tasks/graph?swarm=${swarmName}`, 'error', { error: errorSummary(error) });
       }
     }
   }

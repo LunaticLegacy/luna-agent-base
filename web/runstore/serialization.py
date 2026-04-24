@@ -54,6 +54,7 @@ def serialize_edge(edge: Edge) -> Dict[str, Any]:
 def serialize_graph_snapshot(graph: ExecutionGraph) -> Dict[str, Any]:
     return {
         "graph_name": graph.graph_name,
+        "graph_kind": getattr(graph, "graph_kind", "execution"),
         "entry_node_id": graph.entry_node_id,
         "exit_node_id": graph.exit_node_id,
         "node_count": len(graph.nodes),
@@ -86,9 +87,7 @@ def serialize_swarm_summary(swarm) -> Dict[str, Any]:
 def serialize_swarm_detail(swarm) -> Dict[str, Any]:
     payload = serialize_swarm_summary(swarm)
     payload["agent_files"] = list(swarm.manifest.agent_files)
-    payload["graph"] = (
-        serialize_graph_snapshot(swarm.core.get_execution_graph())
-        if swarm.core.get_execution_graph() is not None
-        else None
-    )
+    graph_getter = getattr(swarm.core, "get_agent_graph", None)
+    graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
+    payload["graph"] = serialize_graph_snapshot(graph) if graph is not None else None
     return payload

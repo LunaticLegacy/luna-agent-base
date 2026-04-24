@@ -211,7 +211,7 @@
   - 请求体不是 JSON 对象时抛 `ApiError("Request body must be a JSON object.")`
 - `web/routes/swarms.py`
   - runtime registry 不存在时抛 `ApiError`
-  - swarm 没有 execution graph 时抛 `ApiError`
+  - swarm 没有 agent graph 时抛 `ApiError`
   - 找不到 run 时抛 `NotFoundError`
   - 运行操作里缺少必要字段时抛 `ApiError`
 

@@ -64,12 +64,12 @@ import { EmptyStateComponent, PageHeaderComponent, PanelCardComponent, StatCardG
             </div>
 
             <div class="topology-section">
-              <h4>拓扑视图</h4>
+              <h4>Agent 图</h4>
               <div class="graph-container">
                 @if (state.resolvedGraph()) {
                   <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
                 } @else {
-                  <app-empty-state message="加载 Graph 中..." variant="cell"></app-empty-state>
+                  <app-empty-state message="加载 Agent 图中..." variant="cell"></app-empty-state>
                 }
               </div>
             </div>

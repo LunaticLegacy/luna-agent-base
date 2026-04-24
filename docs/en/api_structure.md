@@ -55,7 +55,7 @@ Checks whether the runtime is ready.
 Behavior:
 
 - returns `503` if no swarm is loaded
-- returns `503` if any execution graph is invalid
+- returns `503` if any Agent graph is invalid
 - otherwise returns ready
 
 Example:
@@ -165,9 +165,17 @@ Returns:
 
 ### `GET /api/swarms/<swarm_name>/graph`
 
-Returns the current execution graph snapshot.
+Returns the current Agent graph snapshot.
 
-Used by the frontend to draw the static graph before overlaying runtime state.
+Used by the frontend to draw the static Agent graph before overlaying runtime state.
+
+### `GET /api/swarms/<swarm_name>/execution-graph`
+
+Returns the full execution graph snapshot, including tool-routing nodes and runtime-only structure.
+
+### `GET /api/swarms/<swarm_name>/execution-trace`
+
+Returns the latest run events as an execution trace.
 
 ### `POST /api/swarms/<swarm_name>/runs`
 

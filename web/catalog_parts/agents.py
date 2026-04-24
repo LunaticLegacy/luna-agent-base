@@ -15,7 +15,8 @@ from .shared import (
 
 
 def build_agent_catalog(swarm, runs: Iterable[Any]) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    graph = swarm.core.get_execution_graph()
+    graph_getter = getattr(swarm.core, "get_agent_graph", None)
+    graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
     activity = _build_activity_index(runs)
     graph_mtime = _file_mtime_iso(Path(swarm.package_path) / swarm.manifest.graph_file)
     agents: List[Dict[str, Any]] = []

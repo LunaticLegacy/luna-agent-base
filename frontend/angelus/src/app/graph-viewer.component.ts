@@ -13,6 +13,7 @@ interface RenderEdge {
   edge: GraphEdgeSnapshot;
   from: RenderNode | undefined;
   to: RenderNode | undefined;
+  path: string;
 }
 
 @Component({
@@ -29,7 +30,7 @@ interface RenderEdge {
         </div>
         <div class="graph-status">
           <div class="graph-status-main">
-            {{ graph?.nodes?.length ?? 0 }} 节点 · {{ graph?.edges?.length ?? 0 }} 边 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
+            {{ graphKindLabel() }} · {{ graph?.nodes?.length ?? 0 }} 节点 · {{ graph?.edges?.length ?? 0 }} 边 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
           </div>
           <div class="graph-status-meta">
             版本 {{ graphRevisionLabel() }} · {{ graphChangeLabel() }}
@@ -70,13 +71,10 @@ interface RenderEdge {
 
         <g [attr.transform]="contentTransform()">
           <!-- Edges -->
-          @for (renderEdge of renderEdges(); track renderEdge.edge.from_node_id + '-' + renderEdge.edge.to_node_id) {
+          @for (renderEdge of renderEdges(); track renderEdge.edge.from_node_id + '-' + renderEdge.edge.to_node_id + '-' + (renderEdge.edge.label ?? '') + '-' + (renderEdge.edge.condition ?? '')) {
             @if (renderEdge.from && renderEdge.to) {
-              <line
-                [attr.x1]="renderEdge.from.x"
-                [attr.y1]="renderEdge.from.y"
-                [attr.x2]="renderEdge.to.x"
-                [attr.y2]="renderEdge.to.y"
+              <path
+                [attr.d]="renderEdge.path"
                 class="graph-edge"
                 [class.active]="isEdgeActive(renderEdge.edge)"
                 marker-end="url(#arrowhead)"
@@ -208,8 +206,12 @@ export class GraphViewerComponent {
 
   get ariaLabel(): string {
     const g = this.graph;
-    if (!g) return 'Graph visualization';
-    return `Graph ${g.graph_name} with ${g.node_count} nodes and ${g.edge_count} edges`;
+    if (!g) return 'Agent 图可视化';
+    return `${this.graphKindLabel()} ${g.graph_name} with ${g.node_count} nodes and ${g.edge_count} edges`;
+  }
+
+  graphKindLabel(): string {
+    return this.graph?.graph_kind === 'execution' ? '执行图' : 'Agent 图';
   }
 
   isCenterNode(node: GraphNodeSnapshot): boolean {
@@ -409,11 +411,16 @@ export class GraphViewerComponent {
     this.renderNodes.set(result);
 
     this.renderEdges.set(
-      g.edges.map((edge) => ({
-        edge,
-        from: result.find((n) => n.node.node_id === edge.from_node_id),
-        to: result.find((n) => n.node.node_id === edge.to_node_id),
-      }))
+      g.edges.map((edge) => {
+        const from = result.find((n) => n.node.node_id === edge.from_node_id);
+        const to = result.find((n) => n.node.node_id === edge.to_node_id);
+        return {
+          edge,
+          from,
+          to,
+          path: this.edgePath(from, to),
+        };
+      })
     );
 
     if (this.needsFit) {
@@ -429,6 +436,55 @@ export class GraphViewerComponent {
 
   isEdgeActive(edge: GraphEdgeSnapshot): boolean {
     return edge.from_node_id === this.activeNodeId || edge.to_node_id === this.activeNodeId;
+  }
+
+  private nodeFootprint(renderNode: RenderNode): { rx: number; ry: number } {
+    const nr = this.nodeRadius();
+    if (this.isCenterNode(renderNode.node)) {
+      return { rx: nr + 4, ry: nr + 4 };
+    }
+    return { rx: nr + 2, ry: nr * 0.62 };
+  }
+
+  private edgeAnchors(from: RenderNode, to: RenderNode): {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  } {
+    const fromBox = this.nodeFootprint(from);
+    const toBox = this.nodeFootprint(to);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const absDx = Math.max(1, Math.abs(dx));
+    const absDy = Math.max(1, Math.abs(dy));
+    const fromScale = Math.max(absDx / fromBox.rx, absDy / fromBox.ry, 1);
+    const toScale = Math.max(absDx / toBox.rx, absDy / toBox.ry, 1);
+    return {
+      startX: from.x + dx / fromScale,
+      startY: from.y + dy / fromScale,
+      endX: to.x - dx / toScale,
+      endY: to.y - dy / toScale,
+    };
+  }
+
+  private edgePath(from: RenderNode | undefined, to: RenderNode | undefined): string {
+    if (!from || !to) {
+      return '';
+    }
+
+    const { startX, startY, endX, endY } = this.edgeAnchors(from, to);
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const direction = dx >= 0 ? 1 : -1;
+    const curveBias = Math.max(42, Math.min(170, Math.abs(dx) * 0.36));
+    const verticalBias = Math.max(18, Math.min(70, Math.abs(dy) * 0.28));
+    const lift = dy === 0 ? -verticalBias : Math.sign(dy) * verticalBias * 0.35;
+    const c1x = startX + direction * curveBias;
+    const c1y = startY + lift;
+    const c2x = endX - direction * curveBias;
+    const c2y = endY - lift;
+    return `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
   }
 
   contentTransform(): string {

@@ -96,6 +96,7 @@ export interface GraphChangeSummary {
 
 export interface GraphSnapshot {
   graph_name: string;
+  graph_kind?: 'agent' | 'execution' | string;
   entry_node_id: number | null;
   exit_node_id: number | null;
   node_count: number;
@@ -110,6 +111,7 @@ export interface GraphSnapshot {
 
 export interface GraphStateSnapshot {
   graph_name: string | null;
+  graph_kind?: 'agent' | 'execution' | string;
   entry_node_id: number | null;
   exit_node_id: number | null;
   node_count: number;
@@ -214,6 +216,13 @@ export interface ThoughtGraphResponse {
   success: boolean;
   swarm: string;
   thought_graph: ThoughtGraphSnapshot;
+}
+
+export interface ExecutionTraceResponse {
+  success: boolean;
+  swarm: string;
+  run: RunSnapshot | null;
+  events: JsonValue[];
 }
 
 export interface RunSwarmRequest {
@@ -349,6 +358,59 @@ export interface TaskCatalogItem {
   failed_count?: number;
   completed_count?: number;
   executed_count?: number;
+}
+
+export interface TaskGraphTaskSnapshot {
+  task_id: string;
+  name: string;
+  description: string;
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | string;
+  priority: 'low' | 'medium' | 'high' | 'urgent' | string;
+  swarm_name: string;
+  agent_id?: string | null;
+  input: JsonValue;
+  output: JsonValue;
+  dependencies: string[];
+  next_tasks: string[];
+  metadata: JsonValue;
+  created_at: string;
+  updated_at: string;
+  executed_count: number;
+  failed_count: number;
+  completed_count: number;
+}
+
+export interface TaskGraphEdgeSnapshot {
+  from_task_id: string;
+  to_task_id: string;
+}
+
+export interface TaskGraphSummarySnapshot {
+  graph_id: string;
+  task_count: number;
+  edge_count: number;
+  status_counts: {
+    pending: number;
+    running: number;
+    success: number;
+    failed: number;
+    cancelled?: number;
+  };
+  ready_task_ids: string[];
+  blocked_task_ids: string[];
+  terminal_task_ids: string[];
+}
+
+export interface TaskGraphSnapshot {
+  graph_id: string;
+  tasks: TaskGraphTaskSnapshot[];
+  edges: TaskGraphEdgeSnapshot[];
+  summary: TaskGraphSummarySnapshot;
+}
+
+export interface TaskGraphResponse {
+  success: boolean;
+  graph: TaskGraphSnapshot;
 }
 
 export interface TaskCatalogStats {
