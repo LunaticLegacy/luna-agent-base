@@ -23,7 +23,7 @@
   left: 12px
   top: 12px
   z-index: 2
-  padding: 6px 10px
+  padding: 8px 12px
   border-radius: 999px
   background: rgba(10, 14, 26, 0.72)
   border: 1px solid rgba(148, 163, 184, 0.12)
@@ -31,6 +31,21 @@
   font-size: 12px
   backdrop-filter: blur(10px)
   pointer-events: none
+  display: flex
+  flex-direction: column
+  gap: 2px
+
+.graph-status-main
+  color: #e2e8f0
+  font-weight: 600
+
+.graph-status-meta
+  color: rgba(203, 213, 225, 0.82)
+  font-size: 11px
+  max-width: min(42vw, 360px)
+  overflow: hidden
+  white-space: nowrap
+  text-overflow: ellipsis
 
 .graph-toolbar
   position: absolute

@@ -22,14 +22,19 @@ interface RenderEdge {
     class: 'graph-viewer-host',
   },
   template: `
-    <div class="graph-viewer" #container>
-      <div class="graph-toolbar">
-        <button type="button" class="graph-toolbar-btn" (click)="fitToGraph()">适配</button>
-        <button type="button" class="graph-toolbar-btn" (click)="resetView()">重置</button>
-      </div>
-      <div class="graph-status">
-        {{ graph?.nodes?.length ?? 0 }} 节点 · {{ graph?.edges?.length ?? 0 }} 边 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
-      </div>
+      <div class="graph-viewer" #container>
+        <div class="graph-toolbar">
+          <button type="button" class="graph-toolbar-btn" (click)="fitToGraph()">适配</button>
+          <button type="button" class="graph-toolbar-btn" (click)="resetView()">重置</button>
+        </div>
+        <div class="graph-status">
+          <div class="graph-status-main">
+            {{ graph?.nodes?.length ?? 0 }} 节点 · {{ graph?.edges?.length ?? 0 }} 边 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
+          </div>
+          <div class="graph-status-meta">
+            版本 {{ graphRevisionLabel() }} · {{ graphChangeLabel() }}
+          </div>
+        </div>
       <svg
         #viewport
         [attr.viewBox]="viewBox()"
@@ -209,6 +214,20 @@ export class GraphViewerComponent {
 
   isCenterNode(node: GraphNodeSnapshot): boolean {
     return node.node_id === this.graph?.entry_node_id;
+  }
+
+  graphRevisionLabel(): string {
+    const revision = this.graph?.revision;
+    return typeof revision === 'number' && Number.isFinite(revision) ? `#${revision}` : '—';
+  }
+
+  graphChangeLabel(): string {
+    const summary = this.graph?.last_change?.summary?.trim();
+    if (summary) {
+      return summary;
+    }
+    const updatedAt = this.graph?.updated_at?.trim();
+    return updatedAt ? `更新于 ${updatedAt}` : '暂无变更记录';
   }
 
   nodeRole(node: GraphNodeSnapshot): 'entry' | 'agent' | 'tool' | 'exit' {

@@ -338,6 +338,33 @@ def _load_runtime_info_events(package_path: Path) -> List[Dict[str, Any]]:
     return records
 
 
+def _load_runtime_run_events(package_path: Path) -> List[Dict[str, Any]]:
+    runs_root = package_path / "runtime_info" / "runs"
+    if not runs_root.exists():
+        return []
+
+    records: List[Dict[str, Any]] = []
+    try:
+        for events_path in sorted(runs_root.glob("*/events.jsonl")):
+            run_id = events_path.parent.name
+            for line_number, line in enumerate(events_path.read_text(encoding="utf-8").splitlines(), start=1):
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(payload, dict):
+                    payload["_runtime_file_line"] = line_number
+                    payload["_run_id"] = run_id
+                    payload["_run_file_path"] = str(events_path)
+                    records.append(payload)
+    except Exception:
+        return []
+    return records
+
+
 def _runtime_event_to_observability_item(
     event: Dict[str, Any],
     *,
@@ -369,6 +396,7 @@ def _runtime_event_to_observability_item(
         "kind": "runtime",
         "file": str(swarm_package_path / "runtime_info" / "events.jsonl"),
         "line": event.get("_runtime_file_line"),
+        "raw_event": event,
     }
 
 
@@ -397,8 +425,9 @@ def _run_event_to_observability_item(
         "data": event.get("data") if isinstance(event.get("data"), dict) else {},
         "swarm": swarm_name,
         "kind": "run",
-        "file": "",
-        "line": None,
+        "file": str(event.get("_run_file_path") or ""),
+        "line": event.get("_runtime_file_line"),
+        "raw_event": event,
     }
 
 
@@ -414,7 +443,17 @@ def _collect_observability_items(registry) -> List[Dict[str, Any]]:
                     swarm_package_path=package_path,
                 )
             )
+        persisted_run_event_paths = {
+            str(Path(event.get("_run_file_path") or "").resolve())
+            for event in _load_runtime_run_events(package_path)
+            if event.get("_run_file_path")
+        }
+        for run_event in _load_runtime_run_events(package_path):
+            items.append(_run_event_to_observability_item(run_event, swarm_name=swarm.manifest.swarm_name))
         for record in registry.runs.list_runs(swarm.manifest.swarm_name):
+            events_path = getattr(record, "events_path", None)
+            if events_path is not None and str(events_path.resolve()) in persisted_run_event_paths:
+                continue
             for event in getattr(record, "events", []) or []:
                 if isinstance(event, dict):
                     items.append(_run_event_to_observability_item(event, swarm_name=swarm.manifest.swarm_name))

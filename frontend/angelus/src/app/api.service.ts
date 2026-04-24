@@ -8,6 +8,8 @@ import type {
   AgentRoundResponse,
   ApiIndexResponse,
   GraphSnapshot,
+  GraphDiffResponse,
+  GraphStateResponse,
   HealthResponse,
   KnowledgeCatalogItem,
   KnowledgeListResponse,
@@ -236,6 +238,26 @@ export class ApiService {
     return firstValueFrom(
       this.http.get<{ success: boolean; swarm: string; graph: GraphSnapshot }>(
         joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph`)
+      )
+    );
+  }
+
+  getGraphState(baseUrl: string, swarmName: string, sinceRevision?: number): Promise<GraphStateResponse> {
+    return firstValueFrom(
+      this.http.get<GraphStateResponse>(
+        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/state`, {
+          since_revision: sinceRevision,
+        })
+      )
+    );
+  }
+
+  getGraphDiff(baseUrl: string, swarmName: string, sinceRevision: number): Promise<GraphDiffResponse> {
+    return firstValueFrom(
+      this.http.get<GraphDiffResponse>(
+        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/diff`, {
+          since_revision: sinceRevision,
+        })
       )
     );
   }

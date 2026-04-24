@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import time
+
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 from web.errors import ApiError, ConflictError, NotFoundError
@@ -36,6 +39,22 @@ def _serialize_swarm_with_runtime(swarm) -> dict:
     registry = _get_runtime_registry()
     payload["active_run_count"] = registry.runs.active_run_count(swarm.manifest.swarm_name)
     payload["active_run_ids"] = registry.runs.active_run_ids(swarm.manifest.swarm_name)
+    return payload
+
+
+def _parse_int(raw, default: int = 0) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _serialize_graph_with_state(swarm) -> dict:
+    graph = swarm.core.get_execution_graph()
+    if graph is None:
+        raise ApiError(f"Swarm '{swarm.manifest.swarm_name}' has no execution graph attached.")
+    payload = serialize_graph_snapshot(graph)
+    payload.update(swarm.core.get_graph_runtime_state())
     return payload
 
 
@@ -139,10 +158,69 @@ def get_swarm(swarm_name: str):
 @swarms_bp.get("/<string:swarm_name>/graph")
 def get_swarm_graph(swarm_name: str):
     swarm = _get_swarm_or_404(swarm_name)
-    graph = swarm.core.get_execution_graph()
-    if graph is None:
+    return jsonify({"success": True, "swarm": swarm_name, "graph": _serialize_graph_with_state(swarm)})
+
+
+@swarms_bp.get("/<string:swarm_name>/graph/state")
+def get_swarm_graph_state(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    if swarm.core.get_execution_graph() is None:
         raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
-    return jsonify({"success": True, "swarm": swarm_name, "graph": serialize_graph_snapshot(graph)})
+    state = swarm.core.get_graph_runtime_state()
+    since_revision = _parse_int(request.args.get("since_revision"), 0)
+    return jsonify(
+        {
+            "success": True,
+            "swarm": swarm_name,
+            "graph": state,
+            "has_changes_since": int(state.get("revision") or 0) > since_revision,
+        }
+    )
+
+
+@swarms_bp.get("/<string:swarm_name>/graph/diff")
+def get_swarm_graph_diff(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    if swarm.core.get_execution_graph() is None:
+        raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
+    since_revision = _parse_int(request.args.get("since_revision"), 0)
+    diff = swarm.core.get_graph_runtime_diff(since_revision=since_revision)
+    return jsonify({"success": True, "swarm": swarm_name, "patch": diff})
+
+
+@swarms_bp.get("/<string:swarm_name>/graph/events")
+def stream_swarm_graph_events(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    if swarm.core.get_execution_graph() is None:
+        raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
+    since_revision = _parse_int(request.args.get("since_revision"), 0)
+
+    def _stream():
+        last_revision = since_revision
+        yield "retry: 3000\n\n"
+        while True:
+            events = swarm.core.get_graph_runtime_events(since_revision=last_revision)
+            if events:
+                for event in events:
+                    last_revision = max(last_revision, int(event.get("revision") or last_revision))
+                    payload = {
+                        "swarm": swarm_name,
+                        "graph_id": event.get("snapshot", {}).get("graph_name"),
+                        "revision": event.get("revision"),
+                        "change": event.get("change"),
+                        "action": event.get("action"),
+                        "subject_kind": event.get("subject_kind"),
+                        "subject_id": event.get("subject_id"),
+                    }
+                    yield f"event: graph.changed\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            else:
+                yield ": keepalive\n\n"
+            time.sleep(1.5)
+
+    response = Response(stream_with_context(_stream()), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 
 
 @swarms_bp.get("/<string:swarm_name>/thought-graph")
