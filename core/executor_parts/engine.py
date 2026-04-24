@@ -4,6 +4,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ..cognitive import CognitiveEdge, CognitiveNode, CognitiveNodeType, CognitiveRelationType
+from ..fault_tolerance import FailureEvent
 from ..policy import AgentNode, ExecutionGraph, ExecutionStep, ToolNode
 from ..results import ExecutionEvent, ExecutionState
 from ..toodefl import ToolContext
@@ -73,6 +74,22 @@ class GraphExecutor(
                 event_sink=event_sink,
             )
         except Exception as exc:
+            failure = FailureEvent(
+                run_id=effective_run_id,
+                swarm_name=swarm_name or "",
+                graph_revision=self._graph_revision(core),
+                failure_scope="run",
+                failure_kind=self._classify_failure_kind(exc),
+                message=str(exc),
+                state_snapshot=state.snapshot(),
+            )
+            regulate_failure = getattr(core, "regulate_failure", None)
+            regulation = None
+            if callable(regulate_failure):
+                try:
+                    regulation = regulate_failure(failure, graph=graph)
+                except Exception:
+                    regulation = None
             self._emit(
                 event_sink,
                 ExecutionEvent(
@@ -84,6 +101,8 @@ class GraphExecutor(
                     data={
                         "error": str(exc),
                         "state_snapshot": state.snapshot(),
+                        "failure": failure.to_dict(),
+                        "regulation": regulation.to_dict() if regulation is not None else None,
                     },
                 ),
             )
@@ -117,6 +136,35 @@ class GraphExecutor(
     ) -> ExecutionState:
         while current_node_id is not None:
             node = graph.nodes[current_node_id]
+            skip_target, skip_reason = self._node_skip_target(graph, node)
+            if skip_reason is not None:
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=run_id or "",
+                        swarm_name=swarm_name,
+                        event_type="node.skipped",
+                        node_id=node.node_id,
+                        node_name=node.node_name,
+                        node_type=node.__class__.__name__,
+                        rounds=state.rounds,
+                        status="skipped",
+                        data={
+                            "reason": skip_reason,
+                            "fallback_node_id": skip_target,
+                            "state_snapshot": state.snapshot(),
+                        },
+                    ),
+                )
+                if skip_target is not None:
+                    current_node_id = skip_target
+                    continue
+                next_targets = list(node.next_node_ids)
+                if next_targets:
+                    current_node_id = next_targets[0]
+                    continue
+                return state
+
             input_payload = state.payload
             output_payload = input_payload
             routing_payload = input_payload
@@ -264,6 +312,25 @@ class GraphExecutor(
                     ).__dict__
                 )
             except Exception as exc:
+                failure = FailureEvent(
+                    run_id=run_id or "",
+                    swarm_name=swarm_name or "",
+                    graph_revision=self._graph_revision(core),
+                    failure_scope="node",
+                    failure_kind=self._classify_failure_kind(exc),
+                    node_id=node.node_id,
+                    node_name=node.node_name,
+                    node_type=node.__class__.__name__,
+                    message=str(exc),
+                    state_snapshot=state.snapshot(),
+                )
+                regulate_failure = getattr(core, "regulate_failure", None)
+                regulation = None
+                if callable(regulate_failure):
+                    try:
+                        regulation = regulate_failure(failure, graph=graph)
+                    except Exception:
+                        regulation = None
                 state.trace.append(
                     ExecutionStep(
                         node_id=node.node_id,
@@ -290,6 +357,8 @@ class GraphExecutor(
                             "input_payload": input_payload,
                             "error": str(exc),
                             "state_snapshot": state.snapshot(),
+                            "failure": failure.to_dict(),
+                            "regulation": regulation.to_dict() if regulation is not None else None,
                         },
                     ),
                 )
@@ -378,6 +447,26 @@ class GraphExecutor(
                             event_sink=event_sink,
                         )
                     except Exception as exc:
+                        failure = FailureEvent(
+                            run_id=run_id or "",
+                            swarm_name=swarm_name or "",
+                            graph_revision=self._graph_revision(core),
+                            failure_scope="branch",
+                            failure_kind=self._classify_failure_kind(exc),
+                            node_id=branch_node_id,
+                            node_name=graph.nodes[branch_node_id].node_name,
+                            node_type=graph.nodes[branch_node_id].__class__.__name__,
+                            message=str(exc),
+                            state_snapshot=branch_state.snapshot(),
+                            branch=str(branch_index),
+                        )
+                        regulate_failure = getattr(core, "regulate_failure", None)
+                        regulation = None
+                        if callable(regulate_failure):
+                            try:
+                                regulation = regulate_failure(failure, graph=graph)
+                            except Exception:
+                                regulation = None
                         self._emit(
                             event_sink,
                             ExecutionEvent(
@@ -395,6 +484,8 @@ class GraphExecutor(
                                     "branch_index": branch_index,
                                     "error": str(exc),
                                     "state_snapshot": branch_state.snapshot(),
+                                    "failure": failure.to_dict(),
+                                    "regulation": regulation.to_dict() if regulation is not None else None,
                                 },
                             ),
                         )
@@ -516,3 +607,50 @@ class GraphExecutor(
 
         return state
 
+    def _node_skip_target(self, graph: ExecutionGraph, node: Any) -> tuple[Optional[int], Optional[str]]:
+        metadata = node.metadata if isinstance(getattr(node, "metadata", None), dict) else {}
+        fault_state = metadata.get("fault_tolerance") if isinstance(metadata.get("fault_tolerance"), dict) else {}
+        if not fault_state.get("quarantined"):
+            return None, None
+        fallback = fault_state.get("fallback_node_id")
+        if fallback is not None:
+            try:
+                fallback_id = int(fallback)
+                if fallback_id in graph.nodes and fallback_id != getattr(node, "node_id", None):
+                    return fallback_id, str(fault_state.get("last_failure_message") or "quarantined")
+            except Exception:
+                pass
+        next_nodes = list(getattr(node, "next_node_ids", []) or [])
+        if next_nodes:
+            next_target = int(next_nodes[0])
+            if next_target != getattr(node, "node_id", None):
+                return next_target, str(fault_state.get("last_failure_message") or "quarantined")
+        return None, str(fault_state.get("last_failure_message") or "quarantined")
+
+    @staticmethod
+    def _graph_revision(core: Any) -> int:
+        state_getter = getattr(core, "get_graph_runtime_state", None)
+        if callable(state_getter):
+            try:
+                state = state_getter()
+                return int(state.get("revision") or 0)
+            except Exception:
+                return 0
+        return 0
+
+    @staticmethod
+    def _classify_failure_kind(exc: Exception) -> str:
+        text = f"{exc.__class__.__name__}: {exc}".lower()
+        if "timeout" in text:
+            return "timeout"
+        if "route" in text:
+            return "routing_error"
+        if "mutation" in text:
+            return "mutation_error"
+        if "invariant" in text or "assert" in text:
+            return "invariant_violation"
+        if "tool" in text:
+            return "tool_error"
+        if "agent" in text:
+            return "agent_error"
+        return "unknown"

@@ -248,6 +248,16 @@ def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str
                         "message": str(data.get("error") or event.get("error") or f"Failed on run {record.run_id}"),
                     }
                 )
+            elif event_type == "node.skipped":
+                entry["last_seen"] = timestamp or entry["last_seen"]
+                entry["last_status"] = "skipped"
+                entry["logs"].append(
+                    {
+                        "time": timestamp,
+                        "level": "warn",
+                        "message": str(data.get("reason") or f"Skipped on run {record.run_id}"),
+                    }
+                )
 
     for entry in index.values():
         entry["logs"] = entry["logs"][-8:]

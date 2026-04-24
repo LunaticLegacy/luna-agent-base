@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..config import AgentConfig
+from ..fault_tolerance import ArchitectureRegulation, ArchitectureRegulator, FailureEvent
 from ..runtime_info import RuntimeInfoManager
 from ..task_graph import TaskGraph
 from ..cognitive import CognitiveGraph
@@ -34,6 +35,7 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self._execution_graph_backup_path = None
         self._runtime_info: Optional[RuntimeInfoManager] = None
         self._runtime_info_dir: Optional[Path] = None
+        self.architecture_regulator = ArchitectureRegulator()
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
         self.active_thought_subgraphs = {}
         self.current_run_id: Optional[str] = None
@@ -145,3 +147,30 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
                 "last_change": None,
             }
         return self._runtime_info.get_graph_diff(since_revision=since_revision, core=self)
+
+    def register_architecture_regulator(self, regulator: ArchitectureRegulator) -> None:
+        self.architecture_regulator = regulator
+
+    def regulate_failure(
+        self,
+        failure: FailureEvent,
+        *,
+        graph: Optional[Any] = None,
+    ) -> ArchitectureRegulation:
+        regulator = getattr(self, "architecture_regulator", None)
+        if regulator is None:
+            regulator = ArchitectureRegulator()
+            self.architecture_regulator = regulator
+        regulation = regulator.regulate(failure, graph=graph or self.get_execution_graph())
+        subject_kind = "graph" if failure.failure_scope in {"node", "branch", "graph", "swarm"} else "runtime"
+        subject_id = str(failure.node_id) if failure.node_id is not None else failure.run_id or self.agent_name
+        self.record_runtime_change(
+            action="architecture_adjusted",
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            detail={
+                "failure": failure.to_dict(),
+                "regulation": regulation.to_dict(),
+            },
+        )
+        return regulation
