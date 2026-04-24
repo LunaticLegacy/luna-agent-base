@@ -102,7 +102,7 @@ Notes:
 Common fields:
 
 - `default_mode`: default workspace mode, either `workspace` or `full_access`
-- `default_root`: default workspace root, usually a path relative to the repository root
+- `default_root`: default workspace root, resolved relative to the current swarm's `workspace/` directory
 - `agents.<agent_id>.mode`: per-agent mode override
 - `agents.<agent_id>.root`: per-agent root override
 

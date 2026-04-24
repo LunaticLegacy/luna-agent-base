@@ -102,7 +102,7 @@ model = "deepseek-reasoner"
 常见字段如下：
 
 - `default_mode`：默认工作空间模式，支持 `workspace` 和 `full_access`
-- `default_root`：默认工作空间根目录，通常写成相对仓库根目录的路径
+- `default_root`：默认工作空间根目录，相对当前 swarm 的 `workspace/` 目录解析
 - `agents.<agent_id>.mode`：某个 agent 的单独模式覆盖
 - `agents.<agent_id>.root`：某个 agent 的单独根目录覆盖
 

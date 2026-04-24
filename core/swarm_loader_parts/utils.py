@@ -275,7 +275,7 @@ def _build_llm_handler(
 def _resolve_workspace_defaults(package_path: Path, manifest: SwarmManifest) -> tuple[str, Path]:
     workspace = manifest.workspace
     root_value = workspace.default_root if workspace.default_root is not None else "."
-    return workspace.default_mode, _resolve_workspace_path(package_path, root_value)
+    return workspace.default_mode, _resolve_workspace_path(_workspace_base_path(package_path), root_value)
 
 
 def _resolve_workspace_for_agent(
@@ -302,11 +302,15 @@ def _resolve_workspace_for_agent(
     if root_value is None:
         root_value = workspace.default_root if workspace.default_root is not None else "."
 
-    return mode, _resolve_workspace_path(package_path, root_value)
+    return mode, _resolve_workspace_path(_workspace_base_path(package_path), root_value)
 
 
-def _resolve_workspace_path(package_path: Path, value: str | Path) -> Path:
+def _workspace_base_path(package_path: Path) -> Path:
+    return (package_path / "workspace").resolve()
+
+
+def _resolve_workspace_path(base_path: Path, value: str | Path) -> Path:
     path = Path(value)
     if path.is_absolute():
         return path.resolve()
-    return (package_path / path).resolve()
+    return (base_path / path).resolve()
