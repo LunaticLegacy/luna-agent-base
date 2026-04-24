@@ -109,6 +109,8 @@ export interface TaskItem {
   executor: string;
   duration: string;
   createdAt: string;
+  dependencies: string[];
+  nextTasks: string[];
   detail: {
     description: string;
     input: unknown;
@@ -393,6 +395,8 @@ export class StateService {
         executor: run.swarm,
         duration: run.finished_at && run.started_at ? this.fmtDuration(run.started_at, run.finished_at) : '-',
         createdAt: run.created_at,
+        dependencies: [],
+        nextTasks: [],
         detail: { description: `Swarm ${run.swarm} 执行`, input: run.state, output: run.final_state, logs: [], failureReason: isTimeout ? 'timeout' : run.error ? 'error' : undefined },
       });
     }
@@ -406,6 +410,8 @@ export class StateService {
         executor: item.meta || 'System',
         duration: '-',
         createdAt: item.timestamp,
+        dependencies: [],
+        nextTasks: [],
         detail: { description: item.title, input: item.payload, output: null, logs: [], failureReason: isTimeout ? 'timeout' : item.tone === 'error' ? 'error' : undefined },
       });
     });
@@ -900,6 +906,8 @@ export class StateService {
       executor: item.executor,
       duration: this.fmtDurationMs(item.duration_ms ?? 0),
       createdAt: item.created_at,
+      dependencies: [...(item.dependencies ?? [])],
+      nextTasks: [...(item.next_tasks ?? [])],
       detail: {
         description: item.description,
         input: item.input,
