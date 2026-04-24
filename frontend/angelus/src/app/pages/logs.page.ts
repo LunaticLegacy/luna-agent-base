@@ -1,12 +1,12 @@
 import { Component, ElementRef, ViewChild, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService, LogItem } from '../services/state.service';
-import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, PaginationComponent, EmptyStateComponent } from '../shared';
+import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, PaginationComponent, EmptyStateComponent, ModalComponent } from '../shared';
 
 @Component({
   selector: 'app-logs-page',
   standalone: true,
-  imports: [CommonModule, PageHeaderComponent, StatCardGridComponent, PanelCardComponent, PaginationComponent, EmptyStateComponent],
+  imports: [CommonModule, PageHeaderComponent, StatCardGridComponent, PanelCardComponent, PaginationComponent, EmptyStateComponent, ModalComponent],
   template: `
     <app-page-header title="系统日志" subtitle="结构化日志查询与分析">
       <div actions>
@@ -54,7 +54,7 @@ import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, Paginat
 
       <div class="log-container" #logContainer>
         @for (log of filteredLogs(); track log.id) {
-          <div class="log-line" [class]="'log-'+log.level.toLowerCase()">
+          <div class="log-line" [class]="'log-'+log.level.toLowerCase()" (click)="selectedLog.set(log)">
             <span class="log-time">{{ log.time }}</span>
             <span class="log-level">{{ log.level }}</span>
             <span class="log-service">{{ log.service }}</span>
@@ -93,6 +93,7 @@ import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, Paginat
     .input.search { width:240px; }
     .log-container { max-height:600px; overflow-y:auto; padding:.75rem 0; font-family:'JetBrains Mono',monospace; font-size:.78rem; line-height:1.7; }
     .log-line { display:grid; grid-template-columns:100px 60px 100px 1fr; gap:.75rem; padding:.2rem 1.25rem; color:#E2E8F0; }
+    .log-line { cursor:pointer; }
     .log-line:hover { background:rgba(255,255,255,.02); }
     .log-time { color:#64748B; }
     .log-level { font-weight:600; }
@@ -102,6 +103,17 @@ import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, Paginat
     .log-debug .log-level { color:#94A3B8; }
     .log-service { color:#A78BFA; }
     .log-msg { color:#E2E8F0; }
+    .log-detail { display:flex; flex-direction:column; gap:.75rem; }
+    .detail-row { display:flex; align-items:center; gap:1rem; }
+    .detail-label { font-size:.78rem; color:#94A3B8; min-width:3rem; }
+    .detail-value { font-size:.85rem; color:#F1F5F9; }
+    .detail-value.mono { font-family:'JetBrains Mono',monospace; }
+    .level-badge { display:inline-flex; align-items:center; padding:.15rem .5rem; border-radius:4px; font-size:.72rem; font-weight:600; font-family:'JetBrains Mono',monospace; }
+    .level-error { background:rgba(239,68,68,.12); color:#FCA5A5; }
+    .level-warn { background:rgba(245,158,11,.12); color:#FCD34D; }
+    .level-info { background:rgba(59,130,246,.12); color:#93C5FD; }
+    .level-debug { background:rgba(107,114,128,.12); color:#CBD5E1; }
+    .detail-message { background:#0B0F19; border:1px solid rgba(148,163,184,.08); border-radius:8px; padding:.75rem; font-family:'JetBrains Mono',monospace; font-size:.78rem; color:#E2E8F0; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:300px; overflow-y:auto; }
   `]
 })
 export class LogsPage {
@@ -115,6 +127,7 @@ export class LogsPage {
   loading = signal(false);
   autoScroll = signal(true);
   @ViewChild('logContainer') logContainer?: ElementRef<HTMLDivElement>;
+  selectedLog = signal<LogItem | null>(null);
 
   constructor() {
     void this.reloadLogs(1);
