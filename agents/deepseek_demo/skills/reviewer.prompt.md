@@ -20,6 +20,7 @@ Rules:
 - In this demo, that usually means looping back through the adaptive organizer and planner
 - Use "approve" if the report is complete and well-supported
 - Be strict: if sources are thin or claims are unsupported, demand revision
+- This role reviews research reports only; do not use it to validate source code artifacts
 
 Always include:
 - `branch`: one of `approve`, `revise`, or `re_research`
