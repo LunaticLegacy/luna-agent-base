@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
-from web.errors import ApiError, NotFoundError
+from web.errors import ApiError, ConflictError, NotFoundError
 from web.runs import (
     RunRegistry,
     serialize_graph_snapshot,
@@ -10,12 +10,13 @@ from web.runs import (
     serialize_swarm_summary,
     stream_run_events,
 )
+from web.runtime import RuntimeRegistry
 from web.utils import to_jsonable
 
-swarms_bp = Blueprint("swarms", __name__, url_prefix="/swarms")
+swarms_bp = Blueprint("swarms", __name__)
 
 
-def _get_runtime_registry():
+def _get_runtime_registry() -> RuntimeRegistry:
     registry = current_app.extensions.get("angelus_runtime")
     if registry is None:
         raise ApiError("Runtime registry is not initialized.")
@@ -23,56 +24,81 @@ def _get_runtime_registry():
 
 
 def _get_swarm_or_404(swarm_name: str):
-    registry = _get_runtime_registry()
-    swarms = registry.get("swarms", {})
-    swarm = swarms.get(swarm_name)
-    if swarm is None:
-        raise NotFoundError(f"Unknown swarm: {swarm_name}")
-    return swarm
+    return _get_runtime_registry().get_swarm(swarm_name)
 
 
 def _get_runs_registry() -> RunRegistry:
+    return _get_runtime_registry().runs
+
+
+def _serialize_swarm_with_runtime(swarm) -> dict:
+    payload = serialize_swarm_detail(swarm)
     registry = _get_runtime_registry()
-    runs = registry.get("runs")
-    if runs is None:
-        raise ApiError("Run registry is not initialized.")
-    return runs
+    payload["active_run_count"] = registry.runs.active_run_count(swarm.manifest.swarm_name)
+    payload["active_run_ids"] = registry.runs.active_run_ids(swarm.manifest.swarm_name)
+    return payload
 
 
-@swarms_bp.get("/")
-def list_swarms():
-    registry = _get_runtime_registry()
-    swarms = registry.get("swarms", {})
-    payload = [serialize_swarm_summary(swarm) for swarm in swarms.values()]
-    return jsonify({"success": True, "swarms": payload})
+def _parse_bool(raw, default: bool = False) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "y", "on", "True"}:
+        return True
+    if value in {"0", "false", "no", "n", "off", "False"}:
+        return False
+    return default
 
 
-@swarms_bp.get("/<string:swarm_name>")
-def get_swarm(swarm_name: str):
-    swarm = _get_swarm_or_404(swarm_name)
-    return jsonify({"success": True, "swarm": serialize_swarm_detail(swarm)})
-
-
-@swarms_bp.get("/<string:swarm_name>/graph")
-def get_swarm_graph(swarm_name: str):
-    swarm = _get_swarm_or_404(swarm_name)
-    graph = swarm.core.get_execution_graph()
+async def _execute_swarm_run(swarm_name: str, *, use_background: bool = False):
+    swarm = _get_swarm_or_404(swarm_name)   # get a swarm
+    graph = swarm.core.get_execution_graph()    # get the execution graph
     if graph is None:
         raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
-    return jsonify({"success": True, "swarm": swarm_name, "graph": serialize_graph_snapshot(graph)})
-
-
-@swarms_bp.post("/<string:swarm_name>/run")
-async def run_swarm(swarm_name: str):
-    swarm = _get_swarm_or_404(swarm_name)
-    graph = swarm.core.get_execution_graph()
-    if graph is None:
-        raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
-
+        
     request_data = request.get_json(silent=True) or {}
     payload = request_data.get("input")
     rounds = int(request_data.get("rounds", 0))
-    state = await graph.run(swarm.core, payload, rounds=rounds)
+    meta_mode = bool(request_data.get("meta_mode", False))
+    runs_registry = _get_runs_registry()
+
+    if runs_registry.active_run_count(swarm_name) > 0:
+        raise ConflictError(
+            f"Swarm '{swarm_name}' already has an active run. Wait for it to finish before starting another."
+        )
+
+    swarm.core.reset_runtime_state()
+
+    if use_background:
+        record = runs_registry.launch_run(
+            swarm_name=swarm_name,
+            core=swarm.core,
+            graph=graph,
+            initial_payload=payload,
+            rounds=rounds,
+            meta_mode=meta_mode,
+        )
+        return jsonify(
+            {
+                "success": True,
+                "status": "started",
+                "swarm": swarm_name,
+                "run": record.snapshot(),
+            }
+        ), 202
+
+    if meta_mode:
+        from core.meta_executor import MetaExecutor
+
+        meta = MetaExecutor(max_iterations=5)
+        state = await meta.run(graph, swarm.core, payload, rounds=rounds)
+    else:
+        state = await graph.run(swarm.core, payload, rounds=rounds)
+
     return jsonify(
         {
             "success": True,
@@ -85,31 +111,65 @@ async def run_swarm(swarm_name: str):
     )
 
 
-@swarms_bp.post("/<string:swarm_name>/runs")
-def start_swarm_run(swarm_name: str):
+@swarms_bp.post("/load")
+def load_swarm():
+    registry = _get_runtime_registry()
+    request_data = request.get_json(silent=True) or {}
+    source = request_data.get("package_path") or request_data.get("source") or request_data.get("swarm_name")
+    if not source:
+        raise ApiError("Request body must include 'package_path', 'source', or 'swarm_name'.")
+
+    replace = _parse_bool(request_data.get("replace", False))
+    loaded = registry.load_swarm(source, replace=replace)
+    return jsonify(
+        {
+            "success": True,
+            "action": "load",
+            "swarm": _serialize_swarm_with_runtime(loaded),
+        }
+    ), 201
+
+
+@swarms_bp.get("/<string:swarm_name>")
+def get_swarm(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    return jsonify({"success": True, "swarm": _serialize_swarm_with_runtime(swarm)})
+
+
+@swarms_bp.get("/<string:swarm_name>/graph")
+def get_swarm_graph(swarm_name: str):
     swarm = _get_swarm_or_404(swarm_name)
     graph = swarm.core.get_execution_graph()
     if graph is None:
         raise ApiError(f"Swarm '{swarm_name}' has no execution graph attached.")
+    return jsonify({"success": True, "swarm": swarm_name, "graph": serialize_graph_snapshot(graph)})
 
-    request_data = request.get_json(silent=True) or {}
-    payload = request_data.get("input")
-    rounds = int(request_data.get("rounds", 0))
-    record = _get_runs_registry().launch_run(
-        swarm_name=swarm_name,
-        core=swarm.core,
-        graph=graph,
-        initial_payload=payload,
-        rounds=rounds,
-    )
-    return jsonify(
-        {
-            "success": True,
-            "status": "started",
-            "swarm": swarm_name,
-            "run": record.snapshot(),
-        }
-    ), 202
+
+@swarms_bp.get("/<string:swarm_name>/thought-graph")
+def get_swarm_thought_graph(swarm_name: str):
+    swarm = _get_swarm_or_404(swarm_name)
+    snapshot = swarm.core.get_cognitive_graph_snapshot()
+    return jsonify({"success": True, "swarm": swarm_name, "thought_graph": to_jsonable(snapshot)})
+
+
+@swarms_bp.post("/<string:swarm_name>/run")
+async def run_swarm(swarm_name: str):
+    return await _execute_swarm_run(swarm_name)
+
+
+@swarms_bp.post("/<string:swarm_name>/start")
+async def start_swarm(swarm_name: str):
+    return await _execute_swarm_run(swarm_name)
+
+
+@swarms_bp.post("/<string:swarm_name>/runs")
+async def start_swarm_run(swarm_name: str):
+    return await _execute_swarm_run(swarm_name, use_background=True)
+
+
+@swarms_bp.post("/<string:swarm_name>/start/background")
+async def start_swarm_background(swarm_name: str):
+    return await _execute_swarm_run(swarm_name, use_background=True)
 
 
 @swarms_bp.get("/runs/<string:run_id>")
@@ -133,6 +193,39 @@ def stream_run(run_id: str):
     response.headers["Cache-Control"] = "no-cache"
     response.headers["X-Accel-Buffering"] = "no"
     return response
+
+
+@swarms_bp.delete("/<string:swarm_name>")
+def unload_swarm(swarm_name: str):
+    registry = _get_runtime_registry()
+    force = _parse_bool(request.args.get("force", False))
+    unloaded = registry.unload_swarm(swarm_name, force=force)
+    return jsonify(
+        {
+            "success": True,
+            "action": "unload",
+            "swarm": {
+                "swarm_name": unloaded.manifest.swarm_name,
+                "package_path": str(unloaded.package_path),
+            },
+        }
+    )
+
+
+@swarms_bp.post("/<string:swarm_name>/reload")
+def reload_swarm(swarm_name: str):
+    registry = _get_runtime_registry()
+    request_data = request.get_json(silent=True) or {}
+    force = _parse_bool(request_data.get("force", request.args.get("force", False)))
+    source = request_data.get("package_path") or request_data.get("source")
+    reloaded = registry.reload_swarm(swarm_name, force=force, source=source)
+    return jsonify(
+        {
+            "success": True,
+            "action": "reload",
+            "swarm": _serialize_swarm_with_runtime(reloaded),
+        }
+    )
 
 
 @swarms_bp.post("/<string:swarm_name>/agents/<string:agent_id>/round")

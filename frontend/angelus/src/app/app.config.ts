@@ -1,13 +1,14 @@
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { timeoutInterceptor } from './timeout.interceptor';
 import { provideRouter } from '@angular/router';
-import { provideHttpClient } from '@angular/common/http';
 
 import { routes } from './app.routes';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideHttpClient(),
+    provideHttpClient(withInterceptors([timeoutInterceptor])),
     provideRouter(routes)
   ]
 };

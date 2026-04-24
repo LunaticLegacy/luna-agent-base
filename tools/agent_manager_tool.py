@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from core.toodefl import ToolContext, ToolDefinition
+from core.toodefl import ToolContext, ToolDefinition, require_tool_capability
 
 
 class AgentManagerTool(ToolDefinition):
@@ -21,6 +21,7 @@ class AgentManagerTool(ToolDefinition):
         *,
         context: Optional[ToolContext] = None,
     ) -> Any:
+        require_tool_capability(context, "agent_lifecycle", self.tool_name)
         if context is None or context.core is None:
             raise ValueError("agent_manager requires a runtime core context.")
 
@@ -47,9 +48,19 @@ class AgentManagerTool(ToolDefinition):
             name = self._pick_optional_value(control_source, runtime_metadata, "name", agent_id)
             skill_name = self._pick_optional_value(control_source, runtime_metadata, "skill_name")
             character_prompt = self._pick_optional_value(control_source, runtime_metadata, "character_prompt")
+            workspace_mode = str(
+                self._pick_optional_value(control_source, runtime_metadata, "workspace_mode", "workspace")
+            ).strip() or "workspace"
+            if context.workspace_mode != "full_access" and workspace_mode == "full_access":
+                raise PermissionError("agent_manager cannot escalate spawned agents to full_access.")
+            workspace_root_value = self._pick_optional_value(control_source, runtime_metadata, "workspace_root")
+            workspace_root = str(workspace_root_value).strip() if workspace_root_value is not None else None
+            if workspace_root == "":
+                workspace_root = None
             prompt_text = self._compose_prompt(
                 context,
                 skill_name=skill_name,
+                context_content=content_passthrough,
                 character_prompt=character_prompt,
                 extra_prompt=self._pick_optional_value(control_source, runtime_metadata, "additional_prompt"),
             )
@@ -63,6 +74,8 @@ class AgentManagerTool(ToolDefinition):
                 agent_id=agent_id,
                 character_prompt=prompt_text,
                 name=str(name) if name is not None else None,
+                workspace_mode=workspace_mode,
+                workspace_root=workspace_root,
             )
 
             node_id = self._pick_optional_value(control_source, runtime_metadata, "node_id")
@@ -230,6 +243,7 @@ class AgentManagerTool(ToolDefinition):
         context: ToolContext,
         *,
         skill_name: Any = None,
+        context_content: Any = None,
         character_prompt: Any = None,
         extra_prompt: Any = None,
     ) -> str:
@@ -238,6 +252,8 @@ class AgentManagerTool(ToolDefinition):
         if skill_name:
             skill = context.core.get_skill(str(skill_name))
             prompt_parts.append(skill.content)
+        if context_content:
+            prompt_parts.append(f"Current mission context:\n{str(context_content).strip()}")
         if character_prompt:
             prompt_parts.append(str(character_prompt).strip())
         if extra_prompt:
@@ -254,6 +270,8 @@ class AgentManagerTool(ToolDefinition):
             "skill_name": ["skill_name", "spawned_agent_skill"],
             "character_prompt": ["character_prompt", "spawned_agent_prompt"],
             "additional_prompt": ["additional_prompt"],
+            "workspace_mode": ["workspace_mode"],
+            "workspace_root": ["workspace_root"],
             "node_id": ["node_id", "spawned_agent_node_id", "cleanup_node_id"],
             "next_node_ids": ["next_node_ids", "spawned_agent_next_node_ids"],
             "replace_existing": ["replace_existing"],

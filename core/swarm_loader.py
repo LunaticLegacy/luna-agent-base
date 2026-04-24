@@ -42,6 +42,8 @@ class LoadedSwarm:
 
 def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) -> ExecutionGraph:
     """Load the single execution graph file for a swarm package."""
+    graph_path = _resolve_package_local_path(package_path, manifest.graph_file)
+    backup_path = graph_path.with_name("graph_init.py")
     print(
         f"[angelus] loading graph: swarm={manifest.swarm_name} file={manifest.graph_file}",
         flush=True,
@@ -60,6 +62,9 @@ def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) ->
         raise SwarmLoaderError(
             f"Graph file '{manifest.graph_file}' must return an ExecutionGraph instance."
         )
+
+    core.set_execution_graph_artifacts(source_path=graph_path, backup_path=backup_path)
+    core.ensure_execution_graph_backup()
 
     validation = graph.validate(core)
     if validation.is_valid:
@@ -113,6 +118,7 @@ def build_core_from_package(
     )
 
     default_config = manifest.default_llm or _backend_to_agent_config(manifest.llm_backends[0])
+    default_workspace_mode, default_workspace_root = _resolve_workspace_defaults(package_path, manifest)
     core = Core(
         agent_name=manifest.swarm_name,
         agent_config=AgentConfig(
@@ -121,7 +127,9 @@ def build_core_from_package(
             model=default_config.model,
             provider=default_config.provider,
         ),
+        workspace_root=default_workspace_root,
     )
+    core.workspace_mode = default_workspace_mode
     core.set_runtime_info_dir(package_path / "runtime_info")
 
     for skill in skills:
@@ -139,6 +147,16 @@ def build_core_from_package(
             f"Manifest default_backend '{manifest.default_backend}' does not match any declared LLM backend."
         )
 
+    # Register tools BEFORE creating agents so that agent blueprints can reference them
+    tools, tool_requirement_files = load_swarm_tools(package_path, manifest)
+    for tool in tools.values():
+        core.register_tool(tool)
+        core.set_tool_capabilities(tool.tool_name, manifest.tool_capabilities.get(tool.tool_name, []))
+        print(
+            f"[angelus] registered tool: swarm={manifest.swarm_name} tool={tool.tool_name}",
+            flush=True,
+        )
+
     for blueprint in blueprints:
         prompt = _resolve_agent_prompt(
             blueprint,
@@ -147,23 +165,31 @@ def build_core_from_package(
             skill_by_path=skill_by_path,
         )
         llm_handler = _build_llm_handler(blueprint, package_backends, manifest.default_backend)
+        workspace_mode, workspace_root = _resolve_workspace_for_agent(package_path, manifest, blueprint)
+
+        # Resolve blueprint tools to actual ToolDefinition instances
+        agent_tools = []
+        for tool_name in blueprint.tools:
+            if tool_name in core.tools:
+                agent_tools.append(core.tools[tool_name])
+            else:
+                print(
+                    f"[angelus] warning: agent '{blueprint.agent_id}' references unknown tool '{tool_name}'",
+                    flush=True,
+                )
+
         core.create_agent(
             agent_id=blueprint.agent_id,
             character_prompt=prompt,
             name=blueprint.name,
             llm_handler=llm_handler,
+            tools=agent_tools if agent_tools else None,
+            workspace_mode=workspace_mode,
+            workspace_root=workspace_root,
         )
         print(
             f"[angelus] loaded agent: swarm={manifest.swarm_name} agent={blueprint.agent_id}"
             + (f" backend={blueprint.backend_name}" if blueprint.backend_name else ""),
-            flush=True,
-        )
-
-    tools, tool_requirement_files = load_swarm_tools(package_path, manifest)
-    for tool in tools.values():
-        core.register_tool(tool)
-        print(
-            f"[angelus] registered tool: swarm={manifest.swarm_name} tool={tool.tool_name}",
             flush=True,
         )
 
@@ -185,7 +211,7 @@ def build_core_from_package(
     )
 
 
-def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = True) -> List[LoadedSwarm]:
+def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -> List[LoadedSwarm]:
     """Discover and load every swarm package in the given root."""
     package_paths = discover_swarm_packages(root)
     print(
@@ -318,13 +344,41 @@ def _resolve_module_path(entry: str, package_path: Path) -> Optional[Path]:
     entry_path = Path(entry)
     if entry_path.suffix == ".py" or entry_path.exists():
         if entry_path.is_absolute():
-            return entry_path
-        return (package_path / entry_path).resolve()
+            resolved = entry_path.resolve()
+        else:
+            resolved = (package_path / entry_path).resolve()
+        _ensure_allowed_module_path(resolved, package_path)
+        return resolved
 
     spec = importlib.util.find_spec(entry)
     if spec and spec.origin and spec.origin not in {"built-in", "frozen"}:
-        return Path(spec.origin).resolve()
+        resolved = Path(spec.origin).resolve()
+        _ensure_allowed_module_path(resolved, package_path)
+        return resolved
     return None
+
+
+def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
+    path = Path(value)
+    resolved = path.resolve() if path.is_absolute() else (package_path / path).resolve()
+    try:
+        resolved.relative_to(package_path.resolve())
+    except ValueError as exc:
+        raise SwarmLoaderError(f"Path '{value}' escapes swarm package '{package_path}'.") from exc
+    return resolved
+
+
+def _ensure_allowed_module_path(module_path: Path, package_path: Path) -> None:
+    allowed_roots = [package_path.resolve(), (Path.cwd() / "tools").resolve()]
+    for root in allowed_roots:
+        try:
+            module_path.relative_to(root)
+            return
+        except ValueError:
+            continue
+    raise SwarmLoaderError(
+        f"Module path '{module_path}' is outside the swarm package and allowed tool roots."
+    )
 
 
 def _discover_module_requirement_file(module_path: Optional[Path]) -> Optional[Path]:
@@ -402,7 +456,7 @@ def _resolve_agent_prompt(
         return skill.content
 
     if blueprint.prompt_file:
-        prompt_path = (package_path / blueprint.prompt_file).resolve()
+        prompt_path = _resolve_package_local_path(package_path, blueprint.prompt_file)
         skill = skill_by_path.get(prompt_path)
         if skill is not None:
             return skill.content
@@ -446,3 +500,43 @@ def _build_llm_handler(
         return LLMFetcher(backends=backends, default_backend=default_backend_name)
 
     return LLMFetcher(backends=backends)
+
+
+def _resolve_workspace_defaults(package_path: Path, manifest: SwarmManifest) -> tuple[str, Path]:
+    workspace = manifest.workspace
+    root_value = workspace.default_root if workspace.default_root is not None else "."
+    return workspace.default_mode, _resolve_workspace_path(package_path, root_value)
+
+
+def _resolve_workspace_for_agent(
+    package_path: Path,
+    manifest: SwarmManifest,
+    blueprint: AgentBlueprint,
+) -> tuple[str, Path]:
+    workspace = manifest.workspace
+    agent_override = workspace.agents.get(blueprint.agent_id)
+
+    mode = (
+        agent_override.workspace_mode
+        if agent_override and agent_override.workspace_mode is not None
+        else getattr(blueprint, "workspace_mode", None)
+    )
+    if mode is None:
+        mode = workspace.default_mode
+
+    root_value = (
+        agent_override.workspace_root
+        if agent_override and agent_override.workspace_root is not None
+        else getattr(blueprint, "workspace_root", None)
+    )
+    if root_value is None:
+        root_value = workspace.default_root if workspace.default_root is not None else "."
+
+    return mode, _resolve_workspace_path(package_path, root_value)
+
+
+def _resolve_workspace_path(package_path: Path, value: str | Path) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path.resolve()
+    return (package_path / path).resolve()

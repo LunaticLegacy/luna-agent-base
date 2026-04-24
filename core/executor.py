@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
+from .cognitive import CognitiveEdge, CognitiveNode, CognitiveNodeType, CognitiveRelationType
 from .policy import AgentNode, ExecutionGraph, ExecutionStep, ToolNode
 from .results import ExecutionEvent, ExecutionState
 from .toodefl import ToolContext
@@ -31,11 +33,16 @@ class GraphExecutor:
         if graph.entry_node_id is None:
             raise ValueError("Graph entry node is not set.")
 
+        effective_run_id = run_id or uuid.uuid4().hex
+        set_current_run_id = getattr(core, "set_current_run_id", None)
+        if callable(set_current_run_id):
+            set_current_run_id(effective_run_id)
+
         state = ExecutionState(payload=initial_payload, rounds=rounds)
         self._emit(
             event_sink,
             ExecutionEvent(
-                run_id=run_id or "",
+                run_id=effective_run_id,
                 swarm_name=swarm_name,
                 event_type="run.started",
                 rounds=state.rounds,
@@ -53,7 +60,7 @@ class GraphExecutor:
                 core,
                 state,
                 graph.entry_node_id,
-                run_id=run_id,
+                run_id=effective_run_id,
                 swarm_name=swarm_name,
                 event_sink=event_sink,
             )
@@ -61,7 +68,7 @@ class GraphExecutor:
             self._emit(
                 event_sink,
                 ExecutionEvent(
-                    run_id=run_id or "",
+                    run_id=effective_run_id,
                     swarm_name=swarm_name,
                     event_type="run.failed",
                     rounds=state.rounds,
@@ -77,7 +84,7 @@ class GraphExecutor:
         self._emit(
             event_sink,
             ExecutionEvent(
-                run_id=run_id or "",
+                run_id=effective_run_id,
                 swarm_name=swarm_name,
                 event_type="run.completed",
                 rounds=result.rounds,
@@ -104,6 +111,7 @@ class GraphExecutor:
             node = graph.nodes[current_node_id]
             input_payload = state.payload
             output_payload = input_payload
+            routing_payload = input_payload
             next_node_override: Optional[int] = None
 
             self._emit(
@@ -129,10 +137,17 @@ class GraphExecutor:
                     agent = core.get_agent(node.agent_id)
                     state.rounds += 1
                     agent_input = self._format_agent_input(state.payload, node)
+                    cognitive_prompt = self._inject_cognitive_context(core, node)
+                    combined_prompt = node.additional_prompt
+                    if cognitive_prompt:
+                        if combined_prompt:
+                            combined_prompt = f"{combined_prompt}\n\n{cognitive_prompt}"
+                        else:
+                            combined_prompt = cognitive_prompt
                     result = await agent.round_call(
                         rounds=state.rounds,
                         user_message=agent_input,
-                        additional_prompt=node.additional_prompt,
+                        additional_prompt=combined_prompt,
                     )
                     output_payload = result
                     parsed_agent_output = self._parse_structured_agent_output(result.assistant_message)
@@ -144,11 +159,17 @@ class GraphExecutor:
                         state.payload = result
                     if parsed_agent_output is not None:
                         output_payload = parsed_agent_output
+                        routing_payload = parsed_agent_output
                         if isinstance(parsed_agent_output, dict):
                             self._apply_metadata_updates(state.metadata, parsed_agent_output)
                             for key, value in parsed_agent_output.items():
                                 if key in {
                                     "content",
+                                    "final_answer",
+                                    "final_report",
+                                    "approved_report",
+                                    "draft_report",
+                                    "report_text",
                                     "metadata_patch",
                                     "metadata_clear",
                                     "next_node_id",
@@ -160,29 +181,62 @@ class GraphExecutor:
                                 }:
                                     continue
                                 state.metadata[key] = value
-                            if "content" in parsed_agent_output:
+                            self._preserve_report_fields(state, parsed_agent_output, input_payload=input_payload)
+                            final_payload = self._extract_final_report_payload(parsed_agent_output)
+                            if self._has_content(final_payload):
+                                state.payload = final_payload
+                            elif "content" in parsed_agent_output and self._has_content(parsed_agent_output["content"]):
                                 state.payload = parsed_agent_output["content"]
-                            else:
+                            elif self._is_review_control_payload(parsed_agent_output):
+                                state.payload = self._latest_report_payload(state, input_payload)
+                            elif "content" not in parsed_agent_output:
                                 state.payload = parsed_agent_output
                             next_node_override = self._extract_next_node_id(parsed_agent_output)
                         elif isinstance(parsed_agent_output, str):
                             state.payload = parsed_agent_output
+                            routing_payload = parsed_agent_output
                     else:
                         next_node_override = self._extract_next_node_id(state.payload)
+                        routing_payload = state.payload
+
+                    self._capture_report_payload(state, node, state.payload)
+
+                    # Merge agent's private cognitive graph into swarm shared graph
+                    core.merge_agent_cognitive_graph(node.agent_id)
+
+                    # Record execution trace in cognitive graph
+                    core.swarm_cognitive_graph.add_node(
+                        CognitiveNode(
+                            node_type=CognitiveNodeType.EXECUTION_TRACE,
+                            content=f"Agent '{node.agent_id}' executed node '{node.node_name}' (round {state.rounds})",
+                            source=node.agent_id,
+                            metadata={"execution_node_id": node.node_id, "rounds": state.rounds},
+                        )
+                    )
                 elif isinstance(node, ToolNode):
                     tool = core.get_tool(node.tool_name)
+                    get_capabilities = getattr(core, "get_tool_capabilities", None)
+                    capabilities = get_capabilities(node.tool_name) if callable(get_capabilities) else set()
                     tool_context = ToolContext(
                         node_id=node.node_id,
                         rounds=state.rounds,
+                        workspace_mode=getattr(core, "workspace_mode", "workspace"),
+                        workspace_root=getattr(core, "workspace_root", None),
                         metadata=dict(state.metadata),
                         core=core,
                         graph=graph,
+                        capabilities=capabilities,
                     )
                     arguments = self._build_tool_arguments(node, state.payload, state.metadata)
                     output_payload = await tool.execute(arguments, context=tool_context)
+                    routing_payload = output_payload
                     if isinstance(output_payload, dict):
                         self._apply_metadata_updates(state.metadata, output_payload)
-                        if "content" in output_payload:
+                        self._preserve_report_fields(state, output_payload, input_payload=input_payload)
+                        final_payload = self._extract_final_report_payload(output_payload)
+                        if self._has_content(final_payload):
+                            state.payload = final_payload
+                        elif "content" in output_payload:
                             state.payload = output_payload["content"]
                         else:
                             state.payload = output_payload
@@ -191,9 +245,10 @@ class GraphExecutor:
                     next_node_override = self._extract_next_node_id(output_payload)
                 else:
                     output_payload = state.payload
+                    routing_payload = state.payload
 
-                next_targets = self._resolve_next_targets(graph, node, state.payload, next_node_override)
-                self._validate_next_targets(graph, node.node_id, next_targets)
+                next_targets = self._resolve_next_targets(graph, node, routing_payload, next_node_override)
+                self._validate_next_targets(graph, node, next_targets)
 
                 state.trace.append(
                     ExecutionStep(
@@ -236,7 +291,7 @@ class GraphExecutor:
                 )
                 raise
 
-            next_targets = self._resolve_next_targets(graph, node, state.payload, next_node_override)
+            next_targets = self._resolve_next_targets(graph, node, routing_payload, next_node_override)
             if not next_targets:
                 self._emit(
                     event_sink,
@@ -485,6 +540,71 @@ class GraphExecutor:
             return [str(item) for item in raw if item is not None]
         return [str(raw)]
 
+    def _has_content(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, dict)):
+            return bool(value)
+        return True
+
+    def _is_review_control_payload(self, payload: Dict[str, Any]) -> bool:
+        verdict = str(payload.get("verdict", "") or payload.get("branch", "")).strip().lower()
+        has_routing = any(key in payload for key in ("next_node_id", "next_node_ids", "branch", "branches"))
+        return verdict in {"approve", "approved", "revise", "re_research", "reject"} or has_routing
+
+    def _latest_report_payload(self, state: ExecutionState, input_payload: Any) -> Any:
+        for key in ("approved_report", "final_report", "final_answer", "draft_report", "latest_report", "report_text"):
+            value = state.metadata.get(key)
+            if self._has_content(value):
+                return value
+        return input_payload
+
+    def _preserve_report_fields(
+        self,
+        state: ExecutionState,
+        payload: Dict[str, Any],
+        *,
+        input_payload: Any,
+    ) -> None:
+        for key in ("report_text", "draft_report", "approved_report", "final_report", "final_answer"):
+            value = payload.get(key)
+            if self._has_content(value):
+                state.metadata["final_report" if key == "final_answer" else key] = value
+                state.metadata["latest_report"] = value
+
+        verdict = str(payload.get("verdict", "") or payload.get("branch", "")).strip().lower()
+        if verdict in {"approve", "approved"}:
+            approved = (
+                payload.get("approved_report")
+                or payload.get("final_report")
+                or payload.get("final_answer")
+                or self._latest_report_payload(state, input_payload)
+            )
+            if self._has_content(approved):
+                state.metadata["approved_report"] = approved
+                state.metadata["latest_report"] = approved
+
+    def _extract_final_report_payload(self, payload: Dict[str, Any]) -> Any:
+        for key in ("final_report", "final_answer", "approved_report"):
+            value = payload.get(key)
+            if self._has_content(value):
+                return value
+        return None
+
+    def _capture_report_payload(self, state: ExecutionState, node: AgentNode, payload: Any) -> None:
+        if not self._has_content(payload) or not isinstance(payload, str):
+            return
+        node_name = node.node_name.lower()
+        agent_id = node.agent_id.lower()
+        if "writer" in node_name or "writer" in agent_id:
+            state.metadata["draft_report"] = payload
+            state.metadata["latest_report"] = payload
+        elif "publisher" in node_name or "publisher" in agent_id:
+            state.metadata["final_report"] = payload
+            state.metadata["latest_report"] = payload
+
     def _build_tool_arguments(self, node: ToolNode, payload: Any, runtime_metadata: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(payload, dict):
             base_arguments = dict(payload)
@@ -505,16 +625,33 @@ class GraphExecutor:
     def _validate_next_targets(
         self,
         graph: ExecutionGraph,
-        current_node_id: int,
+        current_node: Any,
         next_targets: List[int],
     ) -> None:
+        allowed_targets = {edge.to_node_id for edge in graph.outgoing_edges(current_node.node_id)}
+        allowed_targets.update(current_node.next_node_ids)
         for next_node_id in next_targets:
             self._ensure_node_exists(
                 graph,
                 next_node_id,
-                current_node_id=current_node_id,
+                current_node_id=current_node.node_id,
                 label="next_node_id",
             )
+            if next_node_id in allowed_targets:
+                continue
+            if self._allows_dynamic_next_target(graph, current_node, next_node_id):
+                continue
+            raise ValueError(
+                f"Node {current_node.node_id} resolved next_node_id {next_node_id}, "
+                "but that target is not an allowed outgoing edge."
+            )
+
+    def _allows_dynamic_next_target(self, graph: ExecutionGraph, current_node: Any, next_node_id: int) -> bool:
+        if not isinstance(current_node, ToolNode) or current_node.tool_name != "graph_editor":
+            return False
+        target = graph.nodes.get(next_node_id)
+        metadata = getattr(target, "metadata", {}) if target is not None else {}
+        return bool(isinstance(metadata, dict) and metadata.get("runtime_transient"))
 
     def _ensure_node_exists(
         self,
@@ -561,7 +698,11 @@ class GraphExecutor:
         next_node_override: Optional[int],
     ) -> List[int]:
         if next_node_override is not None:
-            return [next_node_override]
+            # Ignore self-references; they are typically agent hallucinations.
+            if next_node_override == node.node_id:
+                next_node_override = None
+            else:
+                return [next_node_override]
 
         if isinstance(payload, dict):
             next_node_ids = payload.get("next_node_ids")
@@ -614,3 +755,22 @@ class GraphExecutor:
         if node.additional_prompt:
             return f"{payload}\n\n{node.additional_prompt}"
         return str(payload)
+
+    def _inject_cognitive_context(self, core: "Core", node: AgentNode) -> Optional[str]:
+        """Build an additional_prompt snippet that feeds thought graph context into the agent."""
+        try:
+            build_context = getattr(core, "build_thought_context_export", None)
+            if callable(build_context):
+                cg_export = build_context(
+                    agent_id=node.agent_id,
+                    query=f"{node.node_name} {node.additional_prompt or ''}",
+                    purpose=f"Support execution node {node.node_name}",
+                    max_nodes=12,
+                )
+            else:
+                cg_export = core.get_cognitive_graph_export(max_nodes=12)
+        except Exception:
+            return None
+        if not cg_export or cg_export.endswith("nodes=0, edges=0):"):
+            return None
+        return cg_export

@@ -1,0 +1,14 @@
+[skill]
+name = "backend_verifier_prompt"
+version = "1.0"
+capability = "backend_docs_verification"
+description = "Compare backend documentation with actual backend code and report discrepancies."
+content_file = "backend_verifier.prompt.md"
+input_schema = { type = "object", properties = { docs_backend = { type = "object" }, code_backend = { type = "object" }, plan = { type = "object" } }, required = ["docs_backend", "code_backend"] }
+output_schema = { type = "object", properties = { branch = { type = "string" }, findings = { type = "array" }, summary = { type = "object" } }, required = ["branch", "findings", "summary"] }
+requires_tools = []
+requires_skills = ["orchestrator_prompt"]
+preconditions = ["Backend docs and code summaries are available in payload."]
+postconditions = ["A list of backend discrepancies is produced."]
+failure_policy = "retry"
+parallelizable = true

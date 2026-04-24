@@ -5,6 +5,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Optional
 import importlib.util
+import os
+import re
 import tomllib
 
 from modules.llm_fetcher import LLMBackendConfig
@@ -16,10 +18,25 @@ class SwarmLoaderError(ValueError):
 
 
 @dataclass
+class ApiConfig:
+    """Mutable API/runtime settings persisted in config.toml."""
+
+    base_url: str = "/api"
+    timeout_seconds: int = 30
+    sse_reconnect_interval_seconds: int = 5
+    auto_reconnect: bool = True
+    require_auth: bool = False
+    api_token: Optional[str] = None
+    api_token_env: str = "ANGELUS_API_TOKEN"
+    cors_allowed_origins: List[str] = field(default_factory=list)
+
+
+@dataclass
 class SwarmAppConfig:
     """Root application config for discovering swarm packages."""
 
     swarm_root: Path = Path("agents")
+    api: ApiConfig = field(default_factory=ApiConfig)
 
 
 @dataclass
@@ -37,6 +54,24 @@ class AgentBlueprint:
     skill_name: Optional[str] = None
     prompt_file: Optional[str] = None
     prompt_text: Optional[str] = None
+    tools: List[str] = field(default_factory=list)
+
+
+@dataclass
+class WorkspaceAgentConfig:
+    """Workspace override for one agent, declared in swarm.toml."""
+
+    workspace_mode: Optional[str] = None
+    workspace_root: Optional[str] = None
+
+
+@dataclass
+class WorkspaceConfig:
+    """Swarm-level workspace settings parsed from swarm.toml."""
+
+    default_mode: str = "workspace"
+    default_root: Optional[str] = None
+    agents: Dict[str, WorkspaceAgentConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -47,10 +82,12 @@ class SwarmManifest:
     graph_file: str
     agent_files: List[str]
     tool_files: List[str] = field(default_factory=list)
+    tool_capabilities: Dict[str, List[str]] = field(default_factory=dict)
     skill_files: List[str] = field(default_factory=list)
     default_backend: Optional[str] = None
     default_llm: Optional[LLMBackendConfig] = None
     llm_backends: List[LLMBackendConfig] = field(default_factory=list)
+    workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
 
 
 def load_root_config(path: Path) -> SwarmAppConfig:
@@ -65,8 +102,88 @@ def load_root_config(path: Path) -> SwarmAppConfig:
     if not isinstance(app_section, dict):
         raise SwarmLoaderError("[app] must be a TOML table.")
 
+    api_section = raw.get("api", {})
+    if not isinstance(api_section, dict):
+        raise SwarmLoaderError("[api] must be a TOML table.")
+
     swarm_root = str(app_section.get("swarm_root", "agents")).strip() or "agents"
-    return SwarmAppConfig(swarm_root=Path(swarm_root))
+    base_url = str(api_section.get("base_url", "/api")).strip() or "/api"
+    timeout_seconds = _coerce_positive_int(api_section.get("timeout_seconds", 30), fallback=30)
+    sse_reconnect_interval_seconds = _coerce_positive_int(
+        api_section.get("sse_reconnect_interval_seconds", 5),
+        fallback=5,
+    )
+    auto_reconnect = _coerce_bool(api_section.get("auto_reconnect", True), fallback=True)
+    require_auth = _coerce_bool(api_section.get("require_auth", False), fallback=False)
+    api_token = _resolve_env_vars(str(api_section.get("api_token", "")).strip()) or None
+    api_token_env = str(api_section.get("api_token_env", "ANGELUS_API_TOKEN")).strip() or "ANGELUS_API_TOKEN"
+    cors_allowed_origins = _normalize_string_list(
+        api_section.get("cors_allowed_origins", []),
+        field_name="[api].cors_allowed_origins",
+    )
+
+    return SwarmAppConfig(
+        swarm_root=Path(swarm_root),
+        api=ApiConfig(
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            sse_reconnect_interval_seconds=sse_reconnect_interval_seconds,
+            auto_reconnect=auto_reconnect,
+            require_auth=require_auth,
+            api_token=api_token,
+            api_token_env=api_token_env,
+            cors_allowed_origins=cors_allowed_origins,
+        ),
+    )
+
+
+def _coerce_positive_int(raw: Any, *, fallback: int) -> int:
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _coerce_bool(raw: Any, *, fallback: bool) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if raw is None:
+        return fallback
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    return fallback
+
+
+def _normalize_string_list(raw: Any, *, field_name: str) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        raise SwarmLoaderError(f"{field_name} must be a string array.")
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
+def _parse_tool_capabilities(raw: Any, source: Path) -> Dict[str, List[str]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise SwarmLoaderError(f"[tool_capabilities] must be a TOML table in {source}")
+    capabilities: Dict[str, List[str]] = {}
+    for tool_name, raw_values in raw.items():
+        capabilities[str(tool_name).strip()] = _normalize_string_list(
+            raw_values,
+            field_name=f"[tool_capabilities].{tool_name}",
+        )
+    return capabilities
 
 
 def discover_swarm_packages(root: Path) -> List[Path]:
@@ -114,11 +231,14 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         raise SwarmLoaderError(f"[swarm].agent_files contains no usable entries in {manifest_path}")
 
     tool_files = _normalize_path_list(swarm_section.get("tool_files", []), field_name="[swarm].tool_files")
+    tool_capabilities = _parse_tool_capabilities(raw.get("tool_capabilities", {}), manifest_path)
     skill_files = _normalize_path_list(swarm_section.get("skill_files", []), field_name="[swarm].skill_files")
 
     default_backend = swarm_section.get("default_backend")
     if default_backend is not None:
         default_backend = str(default_backend).strip() or None
+
+    workspace = _parse_workspace_config(raw.get("workspace", {}), manifest_path)
 
     llm_section = raw.get("llm", {})
     if not isinstance(llm_section, dict):
@@ -137,10 +257,12 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
         graph_file=graph_file,
         agent_files=agent_files,
         tool_files=tool_files,
+        tool_capabilities=tool_capabilities,
         skill_files=skill_files,
         default_backend=default_backend,
         default_llm=default_llm,
         llm_backends=llm_backends,
+        workspace=workspace,
     )
 
 
@@ -149,16 +271,27 @@ def load_agent_blueprints(package_path: Path, manifest: SwarmManifest) -> List[A
     blueprints: List[AgentBlueprint] = []
 
     for file_name in manifest.agent_files:
-        module = _load_module_from_path(package_path / file_name)
+        agent_path = _resolve_package_local_path(package_path, file_name)
+        module = _load_module_from_path(agent_path)
         raw_specs = _extract_agent_specs(module)
         if not raw_specs:
             raise SwarmLoaderError(
                 f"Agent file '{file_name}' in {package_path} must define AGENT, AGENT_SPEC, or AGENTS."
             )
         for raw_spec in raw_specs:
-            blueprints.append(_coerce_agent_blueprint(raw_spec, package_path / file_name))
+            blueprints.append(_coerce_agent_blueprint(raw_spec, agent_path))
 
     return blueprints
+
+
+def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
+    path = Path(value)
+    resolved = path.resolve() if path.is_absolute() else (package_path / path).resolve()
+    try:
+        resolved.relative_to(package_path.resolve())
+    except ValueError as exc:
+        raise SwarmLoaderError(f"Path '{value}' escapes swarm package '{package_path}'.") from exc
+    return resolved
 
 
 def _load_module_from_path(path: Path) -> ModuleType:
@@ -202,6 +335,13 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
     if not agent_id:
         raise SwarmLoaderError(f"{source} is missing agent_id.")
 
+    tools_raw = raw.get("tools", [])
+    tools: List[str] = []
+    if isinstance(tools_raw, list):
+        tools = [str(item).strip() for item in tools_raw if str(item).strip()]
+    elif isinstance(tools_raw, str):
+        tools = [tools_raw.strip()]
+
     return AgentBlueprint(
         agent_id=agent_id,
         character_prompt=str(raw.get("character_prompt", "")).strip() or None,
@@ -214,7 +354,77 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
         skill_name=raw.get("skill_name"),
         prompt_file=raw.get("prompt_file"),
         prompt_text=raw.get("prompt_text"),
+        tools=tools,
     )
+
+
+def _parse_workspace_config(raw: Any, source: Path) -> WorkspaceConfig:
+    if raw is None:
+        return WorkspaceConfig()
+    if not isinstance(raw, dict):
+        raise SwarmLoaderError(f"[workspace] must be a TOML table in {source}")
+
+    default_mode = str(raw.get("default_mode", "workspace")).strip() or "workspace"
+    if default_mode not in {"workspace", "full_access"}:
+        raise SwarmLoaderError(
+            f"[workspace] default_mode '{default_mode}' in {source} is invalid. "
+            "Expected 'workspace' or 'full_access'."
+        )
+    default_root_value = raw.get("default_root")
+    default_root = str(default_root_value).strip() if default_root_value is not None else None
+    if default_root == "":
+        default_root = None
+
+    agents_raw = raw.get("agents", {})
+    if agents_raw is None:
+        agents_raw = {}
+    if not isinstance(agents_raw, dict):
+        raise SwarmLoaderError(f"[workspace].agents must be a TOML table in {source}")
+
+    agents: Dict[str, WorkspaceAgentConfig] = {}
+    for agent_id, agent_raw in agents_raw.items():
+        if not isinstance(agent_raw, dict):
+            raise SwarmLoaderError(f"[workspace].agents.{agent_id} must be a TOML table in {source}")
+        mode_value = agent_raw.get("mode")
+        root_value = agent_raw.get("root")
+        workspace_mode = str(mode_value).strip() if mode_value is not None else None
+        if workspace_mode == "":
+            workspace_mode = None
+        if workspace_mode is not None and workspace_mode not in {"workspace", "full_access"}:
+            raise SwarmLoaderError(
+                f"[workspace].agents.{agent_id}.mode '{workspace_mode}' in {source} is invalid. "
+                "Expected 'workspace' or 'full_access'."
+            )
+        workspace_root = str(root_value).strip() if root_value is not None else None
+        if workspace_root == "":
+            workspace_root = None
+        agents[str(agent_id)] = WorkspaceAgentConfig(
+            workspace_mode=workspace_mode,
+            workspace_root=workspace_root,
+        )
+
+    return WorkspaceConfig(
+        default_mode=default_mode,
+        default_root=default_root,
+        agents=agents,
+    )
+
+
+def _resolve_env_vars(value: str) -> str:
+    """Replace ${VAR_NAME} or $VAR_NAME with environment variable values."""
+    pattern = re.compile(r"\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+    def replacer(match: re.Match[str]) -> str:
+        var_name = match.group(1) or match.group(2)
+        env_value = os.getenv(var_name, "")
+        if env_value == "":
+            raise SwarmLoaderError(
+                f"Environment variable '{var_name}' is required but not set. "
+                f"Please export it before starting the runtime."
+            )
+        return env_value
+
+    return pattern.sub(replacer, value)
 
 
 def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendConfig]:
@@ -228,8 +438,10 @@ def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendCo
     backend_name = str(raw.get("name", fallback_name)).strip() or fallback_name
     provider = str(raw.get("provider", "openai")).strip() or "openai"
     model = str(raw.get("model", "")).strip()
-    api_key = str(raw.get("api_key", "")).strip()
+    api_key = _resolve_env_vars(str(raw.get("api_key", "")).strip())
     api_url = raw.get("api_url")
+    if api_url is not None:
+        api_url = _resolve_env_vars(str(api_url).strip()) or None
     timeout = float(raw.get("timeout", 60.0))
     max_retries = int(raw.get("max_retries", 0))
     extra = raw.get("extra", {})
@@ -248,7 +460,7 @@ def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendCo
         provider=provider,
         model=model,
         api_key=api_key,
-        api_url=str(api_url) if api_url is not None else None,
+        api_url=api_url,
         timeout=timeout,
         max_retries=max_retries,
         extra=dict(extra),
@@ -285,6 +497,6 @@ def load_skill_assets(package_path: Path, manifest: SwarmManifest) -> List[Skill
     """Load all skill assets referenced by the manifest."""
     skills: List[SkillAsset] = []
     for file_name in manifest.skill_files:
-        skill_path = package_path / file_name
+        skill_path = _resolve_package_local_path(package_path, file_name)
         skills.append(load_skill_asset(skill_path))
     return skills

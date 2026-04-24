@@ -41,8 +41,18 @@
 
 - `metadata_patch` 会合并进 `state.metadata`
 - `metadata_clear` 会从 `state.metadata` 删除指定键
-- `content` 会作为后续 payload
+- 非空 `content` 会作为后续 payload
+- reviewer 这类纯控制输出如果返回空 `content`，不会清空已有正文
 - `next_node_id` 可能会被提取成下一跳
+
+为了避免发布链路丢正文，执行器会把报告正文保存在专用 metadata 字段里：
+
+- `draft_report`
+- `approved_report`
+- `final_report`
+- `latest_report`
+
+`next_node_id`、`next_node_ids`、`branch` 和 `branches` 仍然只负责调度，不再隐式代表正文内容。
 
 ### 2.3 ToolNode 接收 ToolContext
 
@@ -102,6 +112,8 @@
 
 `content` 是内容流，`spawn` / `graph_edit` / `cleanup` 是控制流。  
 但它们现在都在同一轮 state 中传播，后续工具容易拿到前一步残留的控制信息。
+
+发布链路已经先做了最小隔离：writer/reviewer/publisher 会通过 `draft_report`、`approved_report`、`final_report` 和 `latest_report` 保留正文，避免 reviewer 的空控制 payload 覆盖正文。动态图编辑相关的控制信息仍需要继续收敛协议边界。
 
 ### 3.3 删除动作没有清理旧控制信息
 

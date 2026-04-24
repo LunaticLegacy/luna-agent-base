@@ -182,6 +182,8 @@ class RunRecord:
     def snapshot(self) -> Dict[str, Any]:
         """Return a JSON-ready view of the run."""
         with self._condition:
+            events_url = f"/api/swarms/runs/{self.run_id}/events"
+            status_url = f"/api/swarms/runs/{self.run_id}"
             return {
                 "success": self.status == "completed",
                 "run_id": self.run_id,
@@ -198,8 +200,8 @@ class RunRecord:
                 "final_state": to_jsonable(self.final_state),
                 "error": self.error,
                 "event_count": len(self.events),
-                "events_url": f"/api/runs/{self.run_id}/events",
-                "status_url": f"/api/runs/{self.run_id}",
+                "events_url": events_url,
+                "status_url": status_url,
             }
 
     def stream_events(self, *, after: int = 0, heartbeat_seconds: float = 15.0) -> Iterator[str]:
@@ -244,6 +246,7 @@ class RunRegistry:
         graph: ExecutionGraph,
         initial_payload: Any,
         rounds: int = 0,
+        meta_mode: bool = False,
     ) -> RunRecord:
         """Create a run record and execute the graph in a daemon thread."""
         run_id = uuid.uuid4().hex
@@ -260,6 +263,7 @@ class RunRegistry:
                 "graph": graph,
                 "initial_payload": initial_payload,
                 "rounds": rounds,
+                "meta_mode": meta_mode,
             },
             daemon=True,
             name=f"angelus-run-{run_id[:8]}",
@@ -272,12 +276,38 @@ class RunRegistry:
         with self._lock:
             return self._runs.get(run_id)
 
+    def list_runs(self, swarm_name: Optional[str] = None) -> List[RunRecord]:
+        """Return run records in insertion order, optionally filtered by swarm."""
+        with self._lock:
+            runs = list(self._runs.values())
+        if swarm_name is None:
+            return runs
+        return [record for record in runs if record.swarm_name == swarm_name]
+
     def snapshot(self, run_id: str) -> Optional[Dict[str, Any]]:
         """Return the JSON-ready snapshot for one run."""
         record = self.get_run(run_id)
         if record is None:
             return None
         return record.snapshot()
+
+    def active_run_count(self, swarm_name: Optional[str] = None) -> int:
+        """Return the number of active runs, optionally filtered by swarm."""
+        with self._lock:
+            return sum(
+                1
+                for record in self._runs.values()
+                if not record._done and (swarm_name is None or record.swarm_name == swarm_name)
+            )
+
+    def active_run_ids(self, swarm_name: Optional[str] = None) -> List[str]:
+        """Return active run ids, optionally filtered by swarm."""
+        with self._lock:
+            return [
+                record.run_id
+                for record in self._runs.values()
+                if not record._done and (swarm_name is None or record.swarm_name == swarm_name)
+            ]
 
     def _worker(
         self,
@@ -288,16 +318,30 @@ class RunRegistry:
         graph: ExecutionGraph,
         initial_payload: Any,
         rounds: int,
+        meta_mode: bool = False,
     ) -> None:
         async def _execute() -> None:
-            await graph.run(
-                core,
-                initial_payload,
-                rounds=rounds,
-                run_id=record.run_id,
-                swarm_name=swarm_name,
-                event_sink=record.append_event,
-            )
+            if meta_mode:
+                from core.meta_executor import MetaExecutor
+                meta = MetaExecutor(max_iterations=5)
+                await meta.run(
+                    graph,
+                    core,
+                    initial_payload,
+                    rounds=rounds,
+                    run_id=record.run_id,
+                    swarm_name=swarm_name,
+                    event_sink=record.append_event,
+                )
+            else:
+                await graph.run(
+                    core,
+                    initial_payload,
+                    rounds=rounds,
+                    run_id=record.run_id,
+                    swarm_name=swarm_name,
+                    event_sink=record.append_event,
+                )
 
         try:
             asyncio.run(_execute())

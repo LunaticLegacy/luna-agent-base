@@ -52,11 +52,20 @@ pip install -r requirements.txt
 
 ### 配置
 
-根配置文件是 `config.toml`，它只负责告诉 runtime 去哪里找 swarm 包：
+根配置文件是 `config.toml`，它负责两件事：
+
+- 告诉 runtime 去哪里找 swarm 包
+- 持久化 API 配置，并通过 `/api/settings` 对外读写
 
 ```toml
 [app]
 swarm_root = "agents"
+
+[api]
+base_url = "/api"
+timeout_seconds = 30
+sse_reconnect_interval_seconds = 5
+auto_reconnect = true
 ```
 
 ### 启动后端
@@ -88,6 +97,8 @@ python app.py
 ### 🔄 动态图编排
 
 - 支持运行时改图
+- 运行时改图会回写到 `agents/<swarm_name>/graph.py`
+- 初始图会自动备份为 `agents/<swarm_name>/graph_init.py`
 - 支持添加边、删边、改 entry / exit
 - 支持把临时 agent 插进当前执行图
 - 支持把临时 agent 从图里删除
@@ -107,11 +118,17 @@ python app.py
 
 - 健康检查
 - swarm 列表和详情
+- swarm 热插拔控制：load / unload / reload
+- `load`：按目录或 swarm 名称装载新 swarm，成功后立即进入运行时 registry
+- `unload`：从运行时 registry 摘除 swarm；默认会拒绝正在运行的 swarm
+- `reload`：基于当前路径或显式路径原子重载同名 swarm；默认同样会拒绝正在运行的 swarm
 - graph 快照
 - 同步执行
 - 异步 run session
 - SSE 事件流
 - 单 agent round 调用
+- 知识库 CRUD
+- 记忆库 CRUD
 
 ### 🖥️ Angular 控制台
 
@@ -236,10 +253,10 @@ angelus/
 ## 📚 文档入口
 
 - [文档索引](docs/index.md)
-- [英文总览](docs/README.en.md)
+- [英文总览](docs/en/README.md)
 - [API 结构](docs/api_structure.md)
-- [后端参考](docs/backend_reference.md)
-- [前端参考](docs/frontend_reference.md)
+- [后端文档](docs/backend/README.md)
+- [前端文档](docs/frontend/README.md)
 - [metadata 约定](docs/metadata_reference.md)
 - [agent 目录结构](docs/agent_structure.md)
 

@@ -1,9 +1,49 @@
-html, body
+html,
+body
   margin: 0
   min-height: 100%
+  background: #060B14
+  color: #E0E6F1
 
 body
   overflow-x: hidden
+  font-family: 'Noto Sans SC', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif
+  font-weight: 400
+  line-height: 1.6
+  -webkit-font-smoothing: antialiased
+  -moz-osx-font-smoothing: grayscale
 
 *, *::before, *::after
   box-sizing: border-box
+
+button,
+input,
+select,
+textarea
+  font: inherit
+
+::selection
+  background-color: rgba(139, 123, 255, 0.25)
+  color: #E0E6F1
+
+::-webkit-scrollbar
+  width: 5px
+  height: 5px
+
+::-webkit-scrollbar-track
+  background: transparent
+
+::-webkit-scrollbar-thumb
+  background: rgba(91, 107, 141, 0.35)
+  border-radius: 3px
+
+::-webkit-scrollbar-thumb:hover
+  background: rgba(91, 107, 141, 0.55)
+
+@media (prefers-reduced-motion: reduce)
+  *,
+  *::before,
+  *::after
+    animation-duration: 0.01ms !important
+    animation-iteration-count: 1 !important
+    transition-duration: 0.01ms !important

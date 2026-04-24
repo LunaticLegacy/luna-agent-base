@@ -1,0 +1,50 @@
+{
+  "graph_id": "agent_researcher",
+  "nodes": [
+    {
+      "node_id": "23fb2402-0059-4ff0-932c-4f3b1ed9cf0e",
+      "node_type": "tool_result",
+      "content": "Tool 'record_tool' called with: needle",
+      "summary": "",
+      "confidence": 1.0,
+      "evidence": [],
+      "tags": [],
+      "source": "researcher",
+      "metadata": {
+        "tool_name": "record_tool",
+        "arguments": {
+          "input": "needle"
+        }
+      },
+      "created_at": "2026-04-23T13:49:56.882034+00:00",
+      "version": 1
+    },
+    {
+      "node_id": "9b821ff1-68f3-4715-9af2-58b86963680c",
+      "node_type": "evidence",
+      "content": "Result from record_tool: {\"tool_result\": \"seen needle\"}",
+      "summary": "",
+      "confidence": 1.0,
+      "evidence": [],
+      "tags": [],
+      "source": "researcher",
+      "metadata": {
+        "tool_name": "record_tool",
+        "result_truncated": false
+      },
+      "created_at": "2026-04-23T13:49:56.882053+00:00",
+      "version": 1
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "d937b2d9-4d1a-4043-b813-3e33b4a52434",
+      "source_id": "23fb2402-0059-4ff0-932c-4f3b1ed9cf0e",
+      "target_id": "9b821ff1-68f3-4715-9af2-58b86963680c",
+      "relation": "leads_to",
+      "strength": 1.0,
+      "description": "Output of record_tool",
+      "metadata": {}
+    }
+  ]
+}

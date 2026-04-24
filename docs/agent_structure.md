@@ -74,56 +74,86 @@ agents/deepseek_demo/
 
 ## 3. 当前 Demo 的 Agent 职责
 
-### 3.1 `planner`
+当前 `agents/deepseek_demo/` 包含 7 个 agent：
 
-- 负责读取用户请求
-- 产出结构化计划
-- 识别哪些工作可以并行
-- 作为 swarm 的分流起点
+### 3.1 `orchestrator`
 
-### 3.2 `researcher`
+- 负责分析用户研究请求
+- 输出 JSON 格式的研究计划（topic/angles/depth/estimated_researchers）
+- 作为 swarm 的入口和全局框架设定者
+
+### 3.2 `organizer`
+
+- 负责自适应架构控制
+- 在 preflight 阶段判断分支树应该保持宽松还是被收窄
+- 在 dispatch 阶段分发并行研究分支
+- 在 checkpoint 阶段读取合并后的分支结果，决定是否需要重新规划
+- 可选使用 `graph_editor` 和 `agent_manager` 工具调整运行时图
+
+### 3.3 `planner`
+
+- 负责将 orchestrator 的框架转化为紧凑的任务简报
+- 定义研究角度（structure/evidence/risk）
+- 输出 JSON 格式的控制计划（content/plan/organization_hint）
+
+### 3.4 `researcher`
 
 - 负责补充证据、假设和风险
+- 使用 `web_search` 工具收集信息
+- 输出结构化研究笔记（Key Findings / Supporting Evidence / Sources / Gaps / Uncertainties）
 - 为 writer 和 reviewer 提供支持信息
-- 更偏“信息采集”和“证据整理”
 
-### 3.3 `writer`
+### 3.5 `writer`
 
 - 负责把 planner 和 researcher 的结果整理成可发布草稿
+- 使用 Markdown 格式，结构为 Executive Summary → Background → Analysis → Conclusion → References
 - 更偏“内容生成”
 
-### 3.4 `reviewer`
+### 3.6 `reviewer`
 
 - 负责审查草稿和分支结果
-- 决定是否继续研究、重写或进入发布
-- 输出图编辑指令，由 `graph_editor` 工具应用到运行时图
+- 输出 JSON 格式的 verdict（approve/revise/re_research）
+- 通过 `next_node_ids` 指示执行器下一步跳转到哪个节点
+- 不直接输出图编辑指令
 
-### 3.5 `publisher`
+### 3.7 `publisher`
 
 - 负责输出最终用户可读结果
 - 不暴露内部 routing 或 graph edit 细节
 
 ## 4. 当前工作图
 
-当前 demo 的图是一个“并行 + 汇聚 + 审查 + 动态改图 + 发布”的流程。
+当前 demo 的图是一个“编排 + 自适应分发 + 并行研究 + 汇聚 + 审查 + 发布”的流程。
 
 ### 主流程
 
-1. `planner`
-2. 并行触发：
-   - `researcher`
-   - `writer`
-3. 汇聚到 `reviewer`
-4. `reviewer` 通过 `graph_editor` 修改图
-5. `publisher`
-6. `file_writer`
+1. `orchestrator` — 分析请求并生成研究框架
+2. `organizer_preflight` — 判断分支树宽度
+3. `planner` — 生成任务简报
+4. `research_dispatcher`（organizer）— 并行分发三条研究分支：
+   - `architecture_researcher_runtime`（结构/拓扑研究）
+   - `evidence_researcher_runtime`（实现证据研究）
+   - `risk_researcher_runtime`（风险/失效模式研究）
+   - 每条分支通过 `agent_manager` 创建临时 agent，通过 `graph_editor` 插入节点，执行后销毁
+5. `organizer_checkpoint` — 汇聚分支结果，决定是否需要重新规划
+6. `writer` — 综合所有研究笔记撰写报告
+7. `reviewer` — 审查并输出 verdict（approve → publisher, revise → writer, re_research → organizer_preflight）
+8. `publisher` — 输出最终用户可读结果
+9. `file_writer` — 将最终输出保存到 `outputs/deepseek_demo_final.txt`
 
 ### 图的关键点
 
-- `planner` 节点使用 `route_policy = "all"`，表示允许并行分支。
-- `join_node_id = 4` 表示分支结果汇合到 `reviewer`。
-- `graph_editor` 是 runtime 图编辑点，允许 swarm 在执行期间改写后续路径。
-- `file_writer` 负责将最终输出保存到 `outputs/deepseek_demo_final.txt`。
+- `orchestrator` 是入口节点（entry_node_id = 1）。
+- `organizer_preflight` 和 `research_dispatcher` 使用 `organizer` agent，通过 `additional_prompt` 区分阶段（preflight / dispatch / checkpoint）。
+- `research_dispatcher` 使用 `route_policy = "all"` 和 `join_node_id = 17` 实现三条研究分支的并行执行和汇聚。
+- 每条研究分支包含 4 个 ToolNode：
+  - `agent_manager` 创建临时 researcher
+  - `graph_editor` 插入临时节点
+  - `agent_manager` 销毁临时 researcher
+  - `graph_editor` 移除临时节点
+- 临时节点标记为 `runtime_transient = true`。
+- `reviewer` 通过返回 `next_node_ids` 控制路由：approve → 20, revise → 18, re_research → 2。
+- `file_writer` 是出口节点（exit_node_id = 21）。
 
 ## 5. 当前工具使用方式
 
@@ -131,9 +161,11 @@ agents/deepseek_demo/
 
 - `echo`
 - `file_writer`
-- `graph_editor`
+- `graph_editor_tool`
+- `agent_manager_tool`
+- `web_search_tool`
 
-### 5.1 `graph_editor`
+### 5.1 `graph_editor_tool`
 
 这是当前最重要的运行时工具之一。它可以：
 
@@ -147,11 +179,22 @@ agents/deepseek_demo/
 
 这意味着文件中定义的图只是初始图，运行时可以继续演化。
 
-### 5.2 `file_writer`
+### 5.2 `agent_manager_tool`
+
+用于在运行时创建和销毁临时 agent。当前 demo 在研究分支中使用它来：
+
+- 创建临时 researcher（`create_agent`）
+- 销毁临时 researcher（`destroy_agent`）
+
+### 5.3 `file_writer`
 
 用于把结果写入文件。当前 demo 默认写到：
 
 - `outputs/deepseek_demo_final.txt`
+
+### 5.4 `web_search_tool`
+
+用于为 researcher 提供网络搜索能力。
 
 ## 6. Skill Contract 的意义
 
@@ -187,13 +230,30 @@ agents/deepseek_demo/
 - `tool` 是运行时能力扩展
 - `core` 是 runtime 解释器
 
+## 8. 运行态边界
+
+这里有一个很重要的实现约束：`agent` 对象本身是长生命周期的，不会为每次请求自动重建。
+
+因此，当前运行态可以分成两类：
+
+- 请求级运行态
+  - `ExecutionState` 会在每次 `graph.run()` 时新建
+  - `RunRecord` 只负责后台 run 的事件和快照，不会回灌到模型
+- agent 级运行态
+  - `Agent._context.messages` 会保留历史消息
+  - `Agent._context.metadata` 会保留 `last_round`、`turns`
+  - `Agent.cognitive_graph` 会持续累积工具调用和推理痕迹
+
+为了防止上一轮内容污染下一轮，当前路由层会在 swarm run 开始前调用 `core.reset_runtime_state()`，把这些可变状态清空后再执行图。
+
 这意味着：
 
-- `agents/*.py` 不承担执行逻辑
-- 执行逻辑由 `graph.py` 和 `core/` 共同完成
-- `skills/` 可单独迭代，不必改 agent 行为代码
+- `run` / `start` / `runs` 适合做“单次任务执行”
+- 如果你在调试单个 agent，`/agents/<agent_id>/round` 仍然可能保留上下文，这是为了保留交互式调试体验
+- `orchestrator` 和 `organizer` 作为架构控制 agent，同样会保留上下文，但 run 边界重置会清空所有 agent 的私有状态
+- 如果你希望完全无状态，需要在路由层或调用方显式重置，而不是假设 agent 默认短生命周期
 
-## 8. 未来扩展建议
+## 9. 未来扩展建议
 
 如果后续继续扩展这个 swarm，建议优先考虑：
 
@@ -202,4 +262,3 @@ agents/deepseek_demo/
 - 给 skill contract 增加更严格的 schema 校验
 - 给 tool 增加分类和权限标记
 - 给 graph editor 增加更细粒度的审计日志
-

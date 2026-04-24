@@ -1,0 +1,55 @@
+{
+  "action": "set_execution_graph",
+  "agent_name": "docs_verifier",
+  "detail": {
+    "entry_node_id": 1,
+    "exit_node_id": 7
+  },
+  "sequence": 16,
+  "snapshot": {
+    "agent_name": "docs_verifier",
+    "agents": [
+      "orchestrator",
+      "backend_verifier",
+      "frontend_verifier",
+      "structure_verifier",
+      "reviewer",
+      "publisher"
+    ],
+    "graph": {
+      "edge_count": 8,
+      "entry_node_id": 1,
+      "exit_node_id": 7,
+      "graph_name": "docs_verifier",
+      "node_count": 7
+    },
+    "last_event": {
+      "action": "set_execution_graph",
+      "sequence": 16,
+      "subject_id": "docs_verifier",
+      "subject_kind": "graph"
+    },
+    "skills": [
+      "backend_verifier_prompt",
+      "backend_verifier_prompt",
+      "frontend_verifier_prompt",
+      "frontend_verifier_prompt",
+      "orchestrator_prompt",
+      "orchestrator_prompt",
+      "publisher_prompt",
+      "publisher_prompt",
+      "reviewer_prompt",
+      "reviewer_prompt",
+      "structure_verifier_prompt",
+      "structure_verifier_prompt"
+    ],
+    "tools": [
+      "echo",
+      "file_writer"
+    ],
+    "updated_at": "2026-04-23T13:49:57.229654+00:00"
+  },
+  "subject_id": "docs_verifier",
+  "subject_kind": "graph",
+  "timestamp": "2026-04-23T13:49:57.229650+00:00"
+}

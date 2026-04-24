@@ -1,0 +1,14 @@
+[skill]
+name = "orchestrator_prompt"
+version = "1.0"
+capability = "verification_orchestration"
+description = "Analyze docs and code indices, then produce a structured verification plan."
+content_file = "orchestrator.prompt.md"
+input_schema = { type = "object", properties = { docs_index = { type = "array" }, code_index = { type = "array" }, verification_scope = { type = "string" } }, required = ["docs_index", "code_index"] }
+output_schema = { type = "object", properties = { plan = { type = "object" }, content = { type = "string" }, next_node_ids = { type = "array" } }, required = ["plan", "content", "next_node_ids"] }
+requires_tools = []
+requires_skills = []
+preconditions = ["docs_index and code_index are available in payload."]
+postconditions = ["A structured verification plan is produced."]
+failure_policy = "retry"
+parallelizable = false

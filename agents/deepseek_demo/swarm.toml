@@ -2,24 +2,44 @@
 name = "deepseek_demo"
 graph_file = "graph.py"
 agent_files = [
+  "agents/orchestrator.py",
+  "agents/organizer.py",
   "agents/planner.py",
+  "agents/researcher.py",
+  "agents/writer.py",
+  "agents/reviewer.py",
   "agents/publisher.py",
 ]
 skill_files = [
+  "skills/orchestrator.prompt.md",
+  "skills/organizer.prompt.md",
   "skills/planner.prompt.md",
+  "skills/researcher.prompt.md",
+  "skills/writer.prompt.md",
+  "skills/reviewer.prompt.md",
   "skills/publisher.prompt.md",
-  "skills/auditor.prompt.md",
 ]
 tool_files = [
   "tools.agent_manager_tool",
   "tools.graph_editor_tool",
   "tools.echo_tool",
   "tools.file_writer_tool",
+  "tools.web_search_tool",
 ]
+
+[tool_capabilities]
+agent_manager = ["agent_lifecycle"]
+graph_editor = ["graph_mutation"]
+file_writer = ["file_write"]
+web_search = ["network_access"]
 
 [llm.default]
 name = "deepseek"
 provider = "openai"
 api_url = "https://api.deepseek.com"
-api_key = "sk-ec34b2d43c7c4ae6a30b0c0c9350f0c1"
+api_key = "${DEEPSEEK_API_KEY}"
 model = "deepseek-reasoner"
+
+[workspace]
+default_mode = "workspace"
+default_root = "../.."

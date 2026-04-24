@@ -1,0 +1,37 @@
+[swarm]
+name = "docs_verifier"
+graph_file = "graph.py"
+agent_files = [
+  "agents/orchestrator.py",
+  "agents/backend_verifier.py",
+  "agents/frontend_verifier.py",
+  "agents/structure_verifier.py",
+  "agents/reviewer.py",
+  "agents/publisher.py",
+]
+skill_files = [
+  "skills/orchestrator.prompt.md",
+  "skills/backend_verifier.prompt.md",
+  "skills/frontend_verifier.prompt.md",
+  "skills/structure_verifier.prompt.md",
+  "skills/reviewer.prompt.md",
+  "skills/publisher.prompt.md",
+]
+tool_files = [
+  "tools.file_writer_tool",
+  "tools.echo_tool",
+]
+
+[tool_capabilities]
+file_writer = ["file_write"]
+
+[llm.default]
+name = "kimi"
+provider = "litellm"
+api_url = "https://api.moonshot.ai/v1"
+api_key = "${MOONSHOT_API_KEY}"
+model = "moonshot/kimi-k2.5"
+
+[workspace]
+default_mode = "workspace"
+default_root = "."
