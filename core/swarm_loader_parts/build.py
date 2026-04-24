@@ -16,7 +16,6 @@ from .utils import (
     _resolve_agent_prompt,
     _resolve_workspace_defaults,
     _resolve_workspace_for_agent,
-    _resolve_workspace_path,
     _resolve_package_local_path,
     _load_module_from_entry,
     collect_tool_requirement_files,
@@ -129,6 +128,7 @@ def build_core_from_package(
 
     default_config = manifest.default_llm or _backend_to_agent_config(manifest.llm_backends[0])
     default_workspace_mode, default_workspace_root = _resolve_workspace_defaults(package_path, manifest)
+    default_workspace_root.mkdir(parents=True, exist_ok=True)
     core = Core(
         agent_name=manifest.swarm_name,
         agent_config=AgentConfig(
@@ -195,6 +195,7 @@ def build_core_from_package(
             workspace_mode=workspace_mode,
             workspace_root=workspace_root,
         )
+        workspace_root.mkdir(parents=True, exist_ok=True)
         print(
             f"[angelus] loaded agent: swarm={manifest.swarm_name} agent={blueprint.agent_id}"
             + (f" backend={blueprint.backend_name}" if blueprint.backend_name else ""),
