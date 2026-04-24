@@ -101,6 +101,12 @@ import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, Paginat
             <span class="detail-label">消息</span>
           </div>
           <div class="detail-message">{{ log.message }}</div>
+          @if (log.raw) {
+            <div class="detail-row" style="margin-top:.5rem">
+              <span class="detail-label">原始数据</span>
+            </div>
+            <pre class="detail-raw">{{ log.raw | json }}</pre>
+          }
         </div>
       }
     </app-modal>
@@ -142,6 +148,7 @@ import { PageHeaderComponent, StatCardGridComponent, PanelCardComponent, Paginat
     .level-info { background:rgba(59,130,246,.12); color:#93C5FD; }
     .level-debug { background:rgba(107,114,128,.12); color:#CBD5E1; }
     .detail-message { background:#0B0F19; border:1px solid rgba(148,163,184,.08); border-radius:8px; padding:.75rem; font-family:'JetBrains Mono',monospace; font-size:.78rem; color:#E2E8F0; line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:300px; overflow-y:auto; }
+    .detail-raw { background:#0B0F19; border:1px solid rgba(148,163,184,.08); border-radius:8px; padding:.75rem; font-family:'JetBrains Mono',monospace; font-size:.72rem; color:#94A3B8; line-height:1.5; white-space:pre-wrap; word-break:break-word; max-height:260px; overflow-y:auto; margin:0; }
   `]
 })
 export class LogsPage {
