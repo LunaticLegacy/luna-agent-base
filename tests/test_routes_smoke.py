@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import inspect
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +7,7 @@ from unittest.mock import patch
 import sys
 import types
 
-from flask import Flask
+from fastapi.testclient import TestClient
 
 sys.modules.setdefault("asyncpg", types.ModuleType("asyncpg"))
 redis_module = types.ModuleType("redis")
@@ -237,6 +234,22 @@ class DummyRunRegistry:
     def active_run_ids(self, swarm_name: str | None = None) -> list[str]:
         return []
 
+    def list_runs(self, swarm_name: str | None = None):
+        return list(self._runs.values())
+
+
+class DummyTask:
+    def snapshot(self):
+        return {"task_id": "task-1", "swarm_name": "demo", "status": "pending", "metadata": {}}
+
+
+class DummyTaskStore:
+    def list_tasks(self, **kwargs):
+        return {"items": [DummyTask().snapshot()], "page": 1, "limit": 20, "total": 1}
+
+    def get_graph_snapshot(self, swarm_name: str):
+        return {"graph_id": f"tasks_{swarm_name}", "summary": {"nodes": 1, "edges": 0}}
+
 
 class DummyRuntimeRegistry:
     def __init__(self, config_path: Path) -> None:
@@ -254,61 +267,53 @@ class DummyRuntimeRegistry:
 
 class RouteSmokeTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory()
-        config_path = Path(self._tmpdir.name) / "config.toml"
+        tmp_root = Path(".test_tmp") / f"{self.__class__.__name__}_{self._testMethodName}"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp_root, ignore_errors=True))
+        config_path = tmp_root / "config.toml"
         config_path.write_text('[app]\nswarm_root = "agents"\n', encoding="utf-8")
         self.runtime = DummyRuntimeRegistry(config_path)
-        original_ensure_sync = Flask.ensure_sync
 
-        def ensure_sync(self, func):
-            if inspect.iscoroutinefunction(func):
-                def wrapper(*args, **kwargs):
-                    return asyncio.run(func(*args, **kwargs))
-
-                return wrapper
-            return original_ensure_sync(self, func)
-
-        self.addCleanup(self._tmpdir.cleanup)
         self._runtime_patch = patch("web.app_factory.RuntimeRegistry.from_config_path", return_value=self.runtime)
         self._content_patch = patch("web.app_factory.ContentStore.from_runtime_registry", return_value=SimpleNamespace())
-        self._ensure_patch = patch.object(Flask, "ensure_sync", new=ensure_sync)
-        for patcher in (self._runtime_patch, self._content_patch, self._ensure_patch):
+        self._tasks_patch = patch("web.app_factory.TaskStore.from_runtime_registry", return_value=DummyTaskStore())
+        for patcher in (self._runtime_patch, self._content_patch, self._tasks_patch):
             patcher.start()
             self.addCleanup(patcher.stop)
 
         self.app = create_app(config_path)
-        self.client = self.app.test_client()
+        self.client = TestClient(self.app)
 
     def test_public_swarm_routes_resolve(self) -> None:
         detail_response = self.client.get("/api/swarms/demo")
         self.assertEqual(detail_response.status_code, 200)
-        detail = detail_response.get_json()
+        detail = detail_response.json()
         self.assertTrue(detail["success"])
         self.assertEqual(detail["swarm"]["swarm_name"], "demo")
 
         graph_response = self.client.get("/api/swarms/demo/graph")
         self.assertEqual(graph_response.status_code, 200)
-        graph = graph_response.get_json()
+        graph = graph_response.json()
         self.assertTrue(graph["success"])
         self.assertEqual(graph["graph"]["graph_name"], "demo-graph")
         self.assertEqual(graph["graph"]["revision"], 1)
 
         graph_state_response = self.client.get("/api/swarms/demo/graph/state?since_revision=0")
         self.assertEqual(graph_state_response.status_code, 200)
-        graph_state = graph_state_response.get_json()
+        graph_state = graph_state_response.json()
         self.assertTrue(graph_state["success"])
         self.assertTrue(graph_state["has_changes_since"])
         self.assertEqual(graph_state["graph"]["revision"], 1)
 
         graph_diff_response = self.client.get("/api/swarms/demo/graph/diff?since_revision=0")
         self.assertEqual(graph_diff_response.status_code, 200)
-        graph_diff = graph_diff_response.get_json()
+        graph_diff = graph_diff_response.json()
         self.assertTrue(graph_diff["success"])
         self.assertEqual(graph_diff["patch"]["current_revision"], 1)
 
         thought_response = self.client.get("/api/swarms/demo/thought-graph")
         self.assertEqual(thought_response.status_code, 200)
-        thought = thought_response.get_json()
+        thought = thought_response.json()
         self.assertTrue(thought["success"])
         self.assertEqual(thought["thought_graph"]["graph_id"], "thought-demo")
         self.assertEqual(thought["thought_graph"]["nodes"][0]["node_type"], "fact")
@@ -316,21 +321,21 @@ class RouteSmokeTest(unittest.TestCase):
 
         task_graph_response = self.client.get("/api/tasks/graph?swarm=demo")
         self.assertEqual(task_graph_response.status_code, 200)
-        task_graph = task_graph_response.get_json()
+        task_graph = task_graph_response.json()
         self.assertTrue(task_graph["success"])
         self.assertEqual(task_graph["graph"]["graph_id"], "tasks_demo")
         self.assertIn("summary", task_graph["graph"])
 
         run_response = self.client.post("/api/swarms/demo/run", json={"input": {"hello": "world"}, "rounds": 2})
         self.assertEqual(run_response.status_code, 200)
-        run_payload = run_response.get_json()
+        run_payload = run_response.json()
         self.assertTrue(run_payload["success"])
         self.assertEqual(run_payload["rounds"], 2)
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 1)
 
         background_response = self.client.post("/api/swarms/demo/runs", json={"input": {"hello": "world"}})
         self.assertEqual(background_response.status_code, 202)
-        background_payload = background_response.get_json()
+        background_payload = background_response.json()
         self.assertTrue(background_payload["success"])
         run_snapshot = background_payload["run"]
         self.assertEqual(run_snapshot["events_url"], f"/api/swarms/runs/{run_snapshot['run_id']}/events")
@@ -338,7 +343,7 @@ class RouteSmokeTest(unittest.TestCase):
 
         stream_response = self.client.get(f"/api/swarms/runs/{run_snapshot['run_id']}/events")
         self.assertEqual(stream_response.status_code, 200)
-        stream_text = stream_response.get_data(as_text=True)
+        stream_text = stream_response.text
         self.assertIn("event: run.snapshot", stream_text)
         self.assertIn(f"\"status_url\": \"/api/swarms/runs/{run_snapshot['run_id']}\"", stream_text)
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 2)
@@ -346,7 +351,7 @@ class RouteSmokeTest(unittest.TestCase):
     def test_settings_routes_round_trip_config_file(self) -> None:
         response = self.client.get("/api/settings")
         self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
+        payload = response.json()
         self.assertTrue(payload["success"])
         self.assertEqual(payload["settings"]["api"]["base_url"], "/api")
         self.assertEqual(payload["settings"]["api"]["timeout_seconds"], 30)
@@ -363,7 +368,7 @@ class RouteSmokeTest(unittest.TestCase):
             },
         )
         self.assertEqual(update_response.status_code, 200)
-        updated = update_response.get_json()
+        updated = update_response.json()
         self.assertTrue(updated["success"])
         self.assertEqual(updated["settings"]["api"]["base_url"], "/gateway")
         self.assertEqual(updated["settings"]["api"]["timeout_seconds"], 42)
@@ -381,7 +386,7 @@ class RouteSmokeTest(unittest.TestCase):
 
         unauthorized = self.client.post("/api/swarms/demo/run", json={"input": "hello"})
         self.assertEqual(unauthorized.status_code, 401)
-        self.assertFalse(unauthorized.get_json()["success"])
+        self.assertFalse(unauthorized.json()["success"])
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 0)
 
         authorized = self.client.post(
@@ -390,7 +395,7 @@ class RouteSmokeTest(unittest.TestCase):
             headers={"Authorization": "Bearer secret-token"},
         )
         self.assertEqual(authorized.status_code, 200)
-        self.assertTrue(authorized.get_json()["success"])
+        self.assertTrue(authorized.json()["success"])
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 1)
 
     def test_cors_respects_allowlist(self) -> None:
@@ -409,7 +414,7 @@ class RouteSmokeTest(unittest.TestCase):
         response = self.client.post("/api/swarms/demo/runs", json={"input": {"hello": "world"}})
 
         self.assertEqual(response.status_code, 409)
-        payload = response.get_json()
+        payload = response.json()
         self.assertFalse(payload["success"])
         self.assertIn("already has an active run", payload["error"])
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 0)
