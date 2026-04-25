@@ -41,7 +41,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
               </div>
             }
           </div>
-          <button class="btn btn-secondary" (click)="state.activeRun() && state.startSwarmStructure()" [disabled]="!state.activeRun()">
+          <button class="btn btn-secondary" (click)="state.activeRun() && state.startRun()" [disabled]="!state.activeRun()">
             重新启动结构
           </button>
         </div>
@@ -192,7 +192,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     </td>
                     <td>{{ state.activeRun()?.started_at || '刚刚' }}</td>
                     <td>
-                      <button class="btn btn-sm" (click)="state.startSwarmStructure()">启动结构</button>
+                      <button class="btn btn-sm" (click)="state.startRun()">启动结构</button>
                     </td>
                   </tr>
                 } @else {

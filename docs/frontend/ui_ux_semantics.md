@@ -308,8 +308,8 @@ export class XxxPageComponent {
 
 ```
 用户点击"启动结构"
-→ StateService.startSwarmStructure()
-→ ApiService.startSwarmBackground() → 返回 run 快照
+→ StateService.startRun()
+→ ApiService.startRun() → 返回 run 快照
 → activeRun.set(run)
 → watchRun(run) 建立 EventSource
 → SSE 事件流入 liveEvents signal
@@ -392,8 +392,8 @@ SSE 连接状态机：
 用户在 Overview 页填写执行目标与上下文
 → 选择输出风格、轮次、是否 Meta 模式
 → 点击"启动结构"
-→ StateService.startSwarmStructure()
-→ POST /swarms/{name}/start/background
+→ StateService.startRun()
+→ POST /swarms/{name}/runs
 → activeRun.set(run) + watchRun(run)
 → SSE 连接建立
 → Agent 图通过 activeRunNodeId 高亮当前执行节点

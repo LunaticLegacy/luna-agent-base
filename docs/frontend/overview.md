@@ -76,29 +76,34 @@
 `Overview` 相关的真实接口都由 [`ApiService`](../../frontend/angelus/src/app/api.service.ts) 发起：
 
 - `GET /api`
-- `GET /api/health`
-- `GET /api/ready`
+- `GET /api/runtime/health`
+- `GET /api/runtime/ready`
 - `GET /api/swarms`
 - `GET /api/swarms/{swarmName}`
-- `GET /api/swarms/{swarmName}/graph`
-- `GET /api/swarms/{swarmName}/agents`
-- `GET /api/swarms/{swarmName}/stats`
-- `GET /api/tasks`
-- `GET /api/tools`
-- `GET /api/events`
-- `GET /api/logs`
-- `GET /api/metrics`
-- `GET /api/knowledge`
-- `GET /api/memory`
-- `POST /api/swarms/{swarmName}/start`
-- `POST /api/swarms/{swarmName}/start/background`
+- `GET /api/swarms/{swarmName}/agent-graph`
+- `POST /api/swarms/{swarmName}/graph/state`
+- `POST /api/swarms/{swarmName}/graph/diff`
+- `GET /api/swarms/{swarmName}/graph/events/from/{revision}`
+- `POST /api/catalog/swarms/{swarmName}/agents/search`
+- `GET /api/catalog/swarms/{swarmName}/stats`
+- `POST /api/swarms/{swarmName}/tasks/search`
+- `GET /api/swarms/{swarmName}/task-graph`
+- `POST /api/catalog/tools/search`
+- `POST /api/catalog/logs/search`
+- `POST /api/catalog/metrics`
+- `POST /api/knowledge/search`
+- `POST /api/memory/search`
+- `POST /api/swarms/{swarmName}/runs/execute`
+- `POST /api/swarms/{swarmName}/runs`
+- `GET /api/runs/{runId}`
+- `GET /api/runs/{runId}/events`
 - `POST /api/swarms/{swarmName}/agents/{agentId}/round`
 
-另外，`ApiService` 里对部分启动接口带了回退逻辑：
+`ApiService` 不再拼 query string。筛选、分页和搜索条件统一放进 JSON body；路径只表达资源身份和层级。
 
-- `startSwarm()` 先打 `/start`，遇到 `405` 时回退到 `/run`
-- `startSwarmBackground()` 现在直接打 `/start/background`
-- `getRun()` 现在直接访问 `/swarms/runs/{runId}`
+- 同步运行：`POST /swarms/{swarmName}/runs/execute`
+- 后台运行：`POST /swarms/{swarmName}/runs`
+- 查询运行：`GET /runs/{runId}`
 
 ## 页面交互
 
@@ -134,7 +139,7 @@
 - 没有 Swarm 的创建、删除、卸载、重载入口
 - 没有任务、事件、日志、知识库、记忆库的筛选和分页控制
 - 没有独立的运行历史列表，只能通过当前运行和响应记录侧面观察
-- `Swarm` 运行控制依赖后端接口可用性，若接口不支持 `/start` 或 `/start/background`，会走回退路径，但前端本身不保证这些动作一定成功
+- `Swarm` 运行控制依赖后端接口可用性，若接口不支持 `/runs/execute` 或 `/runs`，会走回退路径，但前端本身不保证这些动作一定成功
 - 响应记录和实时事件列表都有数量上限，超过后会截断旧项
 
 - 现在可以做的事：

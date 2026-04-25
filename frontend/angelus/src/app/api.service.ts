@@ -1,7 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
-import { HttpErrorResponse } from '@angular/common/http';
 import type {
   AgentListResponse,
   AgentRoundRequest,
@@ -55,23 +54,6 @@ export function joinUrl(baseUrl: string, path: string): string {
   return `${normalizedBase}${normalizedPath}`;
 }
 
-function joinUrlWithQuery(
-  baseUrl: string,
-  path: string,
-  query: Record<string, string | number | boolean | undefined | null> = {}
-): string {
-  const url = joinUrl(baseUrl, path);
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === '') {
-      continue;
-    }
-    params.set(key, String(value));
-  }
-  const queryString = params.toString();
-  return queryString ? `${url}${url.includes('?') ? '&' : '?'}${queryString}` : url;
-}
-
 @Injectable({
   providedIn: 'root',
 })
@@ -83,11 +65,11 @@ export class ApiService {
   }
 
   health(baseUrl = '/api'): Promise<HealthResponse> {
-    return firstValueFrom(this.http.get<HealthResponse>(joinUrl(baseUrl, '/health')));
+    return firstValueFrom(this.http.get<HealthResponse>(joinUrl(baseUrl, '/runtime/health')));
   }
 
   ready(baseUrl = '/api'): Promise<ReadyResponse> {
-    return firstValueFrom(this.http.get<ReadyResponse>(joinUrl(baseUrl, '/ready')));
+    return firstValueFrom(this.http.get<ReadyResponse>(joinUrl(baseUrl, '/runtime/ready')));
   }
 
   getSettings(baseUrl = '/api'): Promise<SettingsResponse> {
@@ -108,7 +90,7 @@ export class ApiService {
   ): Promise<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }> {
     return firstValueFrom(
       this.http.post<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }>(
-        joinUrl(baseUrl, '/swarms/load'),
+        joinUrl(baseUrl, '/swarms'),
         request
       )
     );
@@ -132,17 +114,21 @@ export class ApiService {
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<AgentListResponse> {
     return firstValueFrom(
-      this.http.get<AgentListResponse>(
-        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/agents`, query)
+      this.http.post<AgentListResponse>(
+        joinUrl(baseUrl, `/catalog/swarms/${encodeURIComponent(swarmName)}/agents/search`),
+        query
       )
     );
   }
 
   listTasks(
     baseUrl: string,
+    swarmName: string,
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<TaskListResponse> {
-    return firstValueFrom(this.http.get<TaskListResponse>(joinUrlWithQuery(baseUrl, '/tasks', query)));
+    return firstValueFrom(
+      this.http.post<TaskListResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/tasks/search`), query)
+    );
   }
 
   getTaskGraph(
@@ -150,9 +136,7 @@ export class ApiService {
     swarmName: string
   ): Promise<TaskGraphResponse> {
     return firstValueFrom(
-      this.http.get<TaskGraphResponse>(
-        joinUrlWithQuery(baseUrl, '/tasks/graph', { swarm: swarmName })
-      )
+      this.http.get<TaskGraphResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/task-graph`))
     );
   }
 
@@ -160,12 +144,12 @@ export class ApiService {
     baseUrl: string,
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<ToolListResponse> {
-    return firstValueFrom(this.http.get<ToolListResponse>(joinUrlWithQuery(baseUrl, '/tools', query)));
+    return firstValueFrom(this.http.post<ToolListResponse>(joinUrl(baseUrl, '/catalog/tools/search'), query));
   }
 
   getSwarmStats(baseUrl: string, swarmName: string): Promise<SwarmStatsResponse> {
     return firstValueFrom(
-      this.http.get<SwarmStatsResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/stats`))
+      this.http.get<SwarmStatsResponse>(joinUrl(baseUrl, `/catalog/swarms/${encodeURIComponent(swarmName)}/stats`))
     );
   }
 
@@ -173,21 +157,21 @@ export class ApiService {
     baseUrl: string,
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<LogListResponse> {
-    return firstValueFrom(this.http.get<LogListResponse>(joinUrlWithQuery(baseUrl, '/logs', query)));
+    return firstValueFrom(this.http.post<LogListResponse>(joinUrl(baseUrl, '/catalog/logs/search'), query));
   }
 
   getMetrics(
     baseUrl: string,
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<MetricsResponse> {
-    return firstValueFrom(this.http.get<MetricsResponse>(joinUrlWithQuery(baseUrl, '/metrics', query)));
+    return firstValueFrom(this.http.post<MetricsResponse>(joinUrl(baseUrl, '/catalog/metrics'), query));
   }
 
   listKnowledge(
     baseUrl: string,
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<KnowledgeListResponse> {
-    return firstValueFrom(this.http.get<KnowledgeListResponse>(joinUrlWithQuery(baseUrl, '/knowledge', query)));
+    return firstValueFrom(this.http.post<KnowledgeListResponse>(joinUrl(baseUrl, '/knowledge/search'), query));
   }
 
   getKnowledge(baseUrl: string, knowledgeId: string): Promise<{ success: boolean; knowledge: KnowledgeCatalogItem }> {
@@ -229,7 +213,7 @@ export class ApiService {
     baseUrl: string,
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<MemoryListResponse> {
-    return firstValueFrom(this.http.get<MemoryListResponse>(joinUrlWithQuery(baseUrl, '/memory', query)));
+    return firstValueFrom(this.http.post<MemoryListResponse>(joinUrl(baseUrl, '/memory/search'), query));
   }
 
   getMemory(baseUrl: string, memoryId: string): Promise<{ success: boolean; memory: MemoryCatalogItem }> {
@@ -257,27 +241,25 @@ export class ApiService {
   getGraph(baseUrl: string, swarmName: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot }> {
     return firstValueFrom(
       this.http.get<{ success: boolean; swarm: string; graph: GraphSnapshot }>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph`)
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/agent-graph`)
       )
     );
   }
 
   getGraphState(baseUrl: string, swarmName: string, sinceRevision?: number): Promise<GraphStateResponse> {
     return firstValueFrom(
-      this.http.get<GraphStateResponse>(
-        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/state`, {
-          since_revision: sinceRevision,
-        })
+      this.http.post<GraphStateResponse>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/state`),
+        { since_revision: sinceRevision }
       )
     );
   }
 
   getGraphDiff(baseUrl: string, swarmName: string, sinceRevision: number): Promise<GraphDiffResponse> {
     return firstValueFrom(
-      this.http.get<GraphDiffResponse>(
-        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/diff`, {
-          since_revision: sinceRevision,
-        })
+      this.http.post<GraphDiffResponse>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/diff`),
+        { since_revision: sinceRevision }
       )
     );
   }
@@ -291,12 +273,13 @@ export class ApiService {
   getExecutionTrace(
     baseUrl: string,
     swarmName: string,
-    query: Record<string, string | number | boolean | undefined | null> = {}
+    runId?: string
   ): Promise<ExecutionTraceResponse> {
+    const path = runId
+      ? `/swarms/${encodeURIComponent(swarmName)}/execution-traces/${encodeURIComponent(runId)}`
+      : `/swarms/${encodeURIComponent(swarmName)}/execution-traces/latest`;
     return firstValueFrom(
-      this.http.get<ExecutionTraceResponse>(
-        joinUrlWithQuery(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/execution-trace`, query)
-      )
+      this.http.get<ExecutionTraceResponse>(joinUrl(baseUrl, path))
     );
   }
 
@@ -318,31 +301,19 @@ export class ApiService {
     swarmName: string,
     force = false
   ): Promise<{ success: boolean; action: string; swarm: { swarm_name: string; package_path: string } }> {
-    const query = force ? { force: true } : {};
     return firstValueFrom(
-      this.http.delete<{ success: boolean; action: string; swarm: { swarm_name: string; package_path: string } }>(
+      this.http.request<{ success: boolean; action: string; swarm: { swarm_name: string; package_path: string } }>(
+        'DELETE',
         joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}`),
-        { params: query as Record<string, string | number | boolean> }
+        { body: { force } }
       )
     );
   }
 
   runSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunSwarmResponse> {
     return firstValueFrom(
-      this.http.post<RunSwarmResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/run`), request)
+      this.http.post<RunSwarmResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/runs/execute`), request)
     );
-  }
-
-  startSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunSwarmResponse> {
-    const encoded = encodeURIComponent(swarmName);
-    const preferred = joinUrl(baseUrl, `/swarms/${encoded}/start`);
-    const fallback = joinUrl(baseUrl, `/swarms/${encoded}/run`);
-    return firstValueFrom(this.http.post<RunSwarmResponse>(preferred, request)).catch((error: unknown) => {
-      if (error instanceof HttpErrorResponse && error.status === 405) {
-        return firstValueFrom(this.http.post<RunSwarmResponse>(fallback, request));
-      }
-      throw error;
-    });
   }
 
   startRun(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStartResponse> {
@@ -351,19 +322,10 @@ export class ApiService {
     );
   }
 
-  startSwarmBackground(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStartResponse> {
-    return firstValueFrom(
-      this.http.post<RunStartResponse>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/start/background`),
-        request
-      )
-    );
-  }
-
   getRun(baseUrl: string, runId: string): Promise<{ success: boolean; run: RunSnapshot }> {
     return firstValueFrom(
       this.http.get<{ success: boolean; run: RunSnapshot }>(
-        joinUrl(baseUrl, `/swarms/runs/${encodeURIComponent(runId)}`)
+        joinUrl(baseUrl, `/runs/${encodeURIComponent(runId)}`)
       )
     );
   }
