@@ -3,21 +3,22 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from web.deps import get_content_store, parse_int, parse_json_body
+from web.deps import get_content_store, parse_json_body
 
 router = APIRouter()
 
 
-@router.get("/knowledge")
+@router.post("/knowledge/search")
 async def list_knowledge(request: Request):
     store = get_content_store(request)
+    request_data = await parse_json_body(request)
     payload = store.list_knowledge(
-        type_filter=request.query_params.get("type"),
-        source=request.query_params.get("source"),
-        tag=request.query_params.get("tag"),
-        q=request.query_params.get("q"),
-        page=parse_int(request.query_params.get("page", 1), 1),
-        limit=parse_int(request.query_params.get("limit", 20), 20),
+        type_filter=request_data.get("type"),
+        source=request_data.get("source"),
+        tag=request_data.get("tag"),
+        q=request_data.get("q"),
+        page=int(request_data.get("page", 1) or 1),
+        limit=int(request_data.get("limit", 20) or 20),
     )
     return {"success": True, **payload}
 
@@ -49,15 +50,16 @@ async def delete_knowledge(knowledge_id: str, request: Request):
     return {"success": True, "knowledge": item}
 
 
-@router.get("/memory")
+@router.post("/memory/search")
 async def list_memory(request: Request):
     store = get_content_store(request)
+    request_data = await parse_json_body(request)
     payload = store.list_memory(
-        type_filter=request.query_params.get("type"),
-        source=request.query_params.get("source"),
-        q=request.query_params.get("q"),
-        page=parse_int(request.query_params.get("page", 1), 1),
-        limit=parse_int(request.query_params.get("limit", 20), 20),
+        type_filter=request_data.get("type"),
+        source=request_data.get("source"),
+        q=request_data.get("q"),
+        page=int(request_data.get("page", 1) or 1),
+        limit=int(request_data.get("limit", 20) or 20),
     )
     return {"success": True, **payload}
 

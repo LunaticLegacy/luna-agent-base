@@ -302,14 +302,14 @@ web_search = ["network_access"]
 
 Agent 图的公开接口与执行轨迹图分离：
 
-- `GET /api/swarms/<swarm>/graph` 返回 Agent 图快照
+- `GET /api/swarms/<swarm>/agent-graph` 返回 Agent 图快照
 - `GET /api/swarms/<swarm>/execution-graph` 返回完整执行图快照
-- `GET /api/swarms/<swarm>/execution-trace` 返回当前 run 的事件轨迹
+- `GET /api/swarms/<swarm>/execution-traces/latest` 返回当前 run 的事件轨迹
 - `GET /api/swarms/<swarm>/thought-graph` 返回思维图谱
 - `GET /api/swarms/<swarm>/globals` 返回 swarm 的全局变量配置
 - `PUT /api/swarms/<swarm>/globals` 更新 swarm 的全局变量配置并写回 `swarm.toml`
 - `GET /api/swarms/<swarm>/apis` 返回 swarm 当前已注册的 API 列表，并标记 `native` / `package` 来源
-- `GET /api/tasks/graph?swarm=<name>` 返回任务图谱快照
+- `GET /api/swarms/<name>/task-graph` 返回任务图谱快照
 
 ## 发布链路的内容流与控制流
 
@@ -411,7 +411,7 @@ Agent 图的公开接口与执行轨迹图分离：
 
 对应关系大致是：
 
-- `POST /api/swarms/load` -> `load_swarm()`
+- `POST /api/swarms` -> `load_swarm()`
 - `POST /api/swarms/<name>/reload` -> `reload_swarm()`
 - `DELETE /api/swarms/<name>` -> `unload_swarm()`
 - `GET /api/swarms` / `GET /api/swarms/<name>` -> 读取 `registry.swarms`

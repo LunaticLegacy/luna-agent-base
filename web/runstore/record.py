@@ -114,8 +114,8 @@ class RunRecord:
     def snapshot(self) -> Dict[str, Any]:
         """Return a JSON-ready view of the run."""
         with self._condition:
-            events_url = f"/api/swarms/runs/{self.run_id}/events"
-            status_url = f"/api/swarms/runs/{self.run_id}"
+            events_url = f"/api/runs/{self.run_id}/events"
+            status_url = f"/api/runs/{self.run_id}"
             return {
                 "success": self.status == "completed",
                 "run_id": self.run_id,

@@ -15,19 +15,19 @@
 
 当前接口如下：
 
-- `GET /api/swarms/<swarm_name>/agents`
-- `GET /api/tasks`
-- `GET /api/tools`
-- `GET /api/swarms/<swarm_name>/stats`
-- `GET /api/events`
-- `GET /api/logs`
-- `GET /api/metrics`
+- `POST /api/catalog/swarms/<swarm_name>/agents/search`
+- `POST /api/swarms/<swarm_name>/tasks/search`
+- `POST /api/catalog/tools/search`
+- `GET /api/catalog/swarms/<swarm_name>/stats`
+- `POST /api/catalog/events/search`
+- `POST /api/catalog/logs/search`
+- `POST /api/catalog/metrics`
 
-这些接口本身不改写数据，只负责把 runtime registry、swarm graph、run events 和工具对象整合成前端需要的列表与统计。
+这些接口本身不改写数据，只负责把 runtime registry、swarm graph、run events 和工具对象整合成前端需要的列表与统计。搜索、筛选和分页条件统一放在 JSON body 里，路径只表达资源身份。
 
 ## 二、Agents 是怎么构造的
 
-`GET /api/swarms/<swarm_name>/agents` 会先调用 `build_agent_catalog(swarm, registry.runs.list_runs(swarm_name))`。
+`POST /api/catalog/swarms/<swarm_name>/agents/search` 会先调用 `build_agent_catalog(swarm, registry.runs.list_runs(swarm_name))`。
 
 构造来源主要有三层：
 
@@ -88,7 +88,7 @@
 
 ### 接口侧过滤
 
-`/api/swarms/<swarm_name>/agents` 还支持在 route 层做二次过滤：
+`/api/catalog/swarms/<swarm_name>/agents/search` 还支持在 JSON body 里传入 route 层二次过滤条件：
 
 - `q`
 - `status`
@@ -100,7 +100,7 @@
 
 ## 三、Tasks 是怎么构造的
 
-`GET /api/tasks` 调用 `build_task_catalog(...)`。
+`POST /api/swarms/<swarm_name>/tasks/search` 调用 `build_task_catalog(...)`。swarm 由路径确定，筛选和分页条件放在 JSON body。
 
 任务不是单独的数据库表，而是来自每个 swarm 的任务图谱（Task Graph）快照，再结合 run 事件填充状态和日志。
 
@@ -173,7 +173,7 @@
 
 ## 四、Tools 是怎么构造的
 
-`GET /api/tools` 调用 `build_tool_catalog(...)`。
+`POST /api/catalog/tools/search` 调用 `build_tool_catalog(...)`。
 
 这里的 tool 不是从外部工具市场读来的，而是从每个 swarm 的 `core.tools` 实例拼出来。
 
@@ -245,7 +245,7 @@
 
 ## 五、Events 与 Logs 的来源
 
-`GET /api/events` 和 `GET /api/logs` 都基于同一批 observability items。
+`POST /api/catalog/events/search` 和 `POST /api/catalog/logs/search` 都基于同一批 observability items。
 
 ### 事件来源
 
@@ -269,7 +269,7 @@
 
 ### Event 返回字段
 
-`GET /api/events` 的 item 主要包含：
+`POST /api/catalog/events/search` 的 item 主要包含：
 
 - `id`
 - `time`
@@ -288,7 +288,7 @@
 
 ### Log 返回字段
 
-`GET /api/logs` 也是从同一批 observability items 派生，但字段更偏日志表格：
+`POST /api/catalog/logs/search` 也是从同一批 observability items 派生，但字段更偏日志表格：
 
 - `id`
 - `time`
@@ -299,6 +299,8 @@
 其中 `message` 是把 event 名和 detail 拼在一起得到的。
 
 ### 过滤参数
+
+这些过滤项通过 JSON body 传入，不使用 query string。
 
 `/api/events` 支持：
 
@@ -324,7 +326,7 @@
 
 ## 六、Metrics 是怎么构造的
 
-`GET /api/metrics` 调用 `build_metrics_catalog(...)`。
+`POST /api/catalog/metrics` 调用 `build_metrics_catalog(...)`。
 
 它不是读 Prometheus 或时序库，而是基于历史 run events 做一个“推导型指标面板”。
 
@@ -379,7 +381,7 @@
 
 ## 七、Swarm Stats 是怎么构造的
 
-`GET /api/swarms/<swarm_name>/stats` 调用 `build_swarm_stats(registry, swarm_name)`。
+`GET /api/catalog/swarms/<swarm_name>/stats` 调用 `build_swarm_stats(registry, swarm_name)`。
 
 这是一个 swarm 级别的聚合接口，把 agents、tasks、runs、资源序列合并成一个 dashboard 视图。
 
@@ -439,7 +441,7 @@
 
 ### 路由
 
-- `GET /api/knowledge`
+- `POST /api/knowledge/search`
 - `GET /api/knowledge/<knowledge_id>`
 - `POST /api/knowledge`
 - `PUT /api/knowledge/<knowledge_id>`
@@ -529,7 +531,7 @@
 
 ### 路由
 
-- `GET /api/memory`
+- `POST /api/memory/search`
 - `GET /api/memory/<memory_id>`
 - `POST /api/memory`
 - `DELETE /api/memory/<memory_id>`

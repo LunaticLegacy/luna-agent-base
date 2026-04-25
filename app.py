@@ -5,7 +5,7 @@ from pathlib import Path
 
 import uvicorn
 
-from web import create_app
+from web.app_factory import create_app
 
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
