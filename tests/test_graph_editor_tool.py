@@ -126,6 +126,189 @@ class GraphEditorToolTest(unittest.TestCase):
         self.assertEqual(graph.nodes[4].metadata["persistence"], "transient")
         self.assertEqual(graph.nodes[4].metadata["lifetime_policy"], "run")
 
+    def test_graph_editor_does_not_route_to_inserted_node_by_default(self) -> None:
+        graph = _build_graph()
+        tool = GraphEditorTool()
+
+        response = asyncio.run(
+            tool.execute(
+                {
+                    "action": "add_agent_node",
+                    "node_id": 3,
+                    "node_name": "runtime-agent",
+                    "agent_id": "agent-3",
+                    "next_node_ids": [2],
+                    "runtime_transient": True,
+                },
+                context=ToolContext(
+                    graph=graph,
+                    core=NoopPersistCore(),
+                    capabilities={"graph_mutation"},
+                ),
+            )
+        )
+
+        self.assertNotIn("next_node_id", response)
+        self.assertNotIn("next_node_id", response["metadata_patch"])
+        self.assertIn(3, graph.nodes)
+
+    def test_graph_editor_accepts_nested_graph_edit_payload(self) -> None:
+        graph = _build_graph()
+        tool = GraphEditorTool()
+
+        response = asyncio.run(
+            tool.execute(
+                {
+                    "graph_edit": {
+                        "action": "add_agent_node",
+                        "node_id": 3,
+                        "node_name": "runtime-agent",
+                        "agent_id": "agent-3",
+                        "next_node_ids": [2],
+                        "runtime_transient": True,
+                    },
+                    "content": "keep this payload",
+                },
+                context=ToolContext(
+                    graph=graph,
+                    core=NoopPersistCore(),
+                    capabilities={"graph_mutation"},
+                ),
+            )
+        )
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["content"], "keep this payload")
+        self.assertIn(3, graph.nodes)
+
+    def test_graph_editor_routes_to_inserted_node_only_when_explicit(self) -> None:
+        graph = _build_graph()
+        tool = GraphEditorTool()
+
+        response = asyncio.run(
+            tool.execute(
+                {
+                    "action": "add_agent_node",
+                    "node_id": 3,
+                    "node_name": "runtime-agent",
+                    "agent_id": "agent-3",
+                    "next_node_ids": [2],
+                    "runtime_transient": True,
+                    "route_after_mutation": True,
+                },
+                context=ToolContext(
+                    graph=graph,
+                    core=NoopPersistCore(),
+                    capabilities={"graph_mutation"},
+                ),
+            )
+        )
+
+        self.assertEqual(response["next_node_id"], 3)
+        self.assertNotIn("next_node_id", response["metadata_patch"])
+
+    def test_graph_editor_allocates_auto_node_id(self) -> None:
+        graph = _build_graph()
+        tool = GraphEditorTool()
+
+        response = asyncio.run(
+            tool.execute(
+                {
+                    "action": "add_agent_node",
+                    "node_id": "auto",
+                    "node_name": "runtime-agent",
+                    "agent_id": "agent-3",
+                    "next_node_ids": [2],
+                    "runtime_transient": True,
+                },
+                context=ToolContext(
+                    graph=graph,
+                    core=NoopPersistCore(),
+                    capabilities={"graph_mutation"},
+                ),
+            )
+        )
+
+        self.assertEqual(response["metadata_patch"]["graph_node_id"], 3)
+        self.assertIn(3, graph.nodes)
+
+    def test_graph_editor_rejects_duplicate_node_id_without_replace(self) -> None:
+        graph = _build_graph()
+        tool = GraphEditorTool()
+
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            asyncio.run(
+                tool.execute(
+                    {
+                        "action": "add_agent_node",
+                        "node_id": 2,
+                        "node_name": "duplicate",
+                        "agent_id": "agent-3",
+                        "runtime_transient": True,
+                    },
+                    context=ToolContext(
+                        graph=graph,
+                        core=NoopPersistCore(),
+                        capabilities={"graph_mutation"},
+                    ),
+                )
+            )
+
+    def test_graph_editor_replace_existing_preserves_links(self) -> None:
+        graph = _build_graph()
+        graph.add_node(Node(node_id=3, node_name="three"))
+        graph.add_edge(1, 2, label="old-in", priority=5)
+        graph.add_edge(2, 3, label="old-out", priority=4)
+        graph.set_exit(2)
+        tool = GraphEditorTool()
+
+        asyncio.run(
+            tool.execute(
+                {
+                    "action": "add_agent_node",
+                    "node_id": 2,
+                    "node_name": "replacement",
+                    "agent_id": "agent-3",
+                    "replace_existing": True,
+                    "runtime_transient": True,
+                },
+                context=ToolContext(
+                    graph=graph,
+                    core=NoopPersistCore(),
+                    capabilities={"graph_mutation"},
+                ),
+            )
+        )
+
+        self.assertEqual(graph.nodes[2].node_name, "replacement")
+        self.assertEqual(graph.nodes[1].next_node_ids, [2])
+        self.assertEqual(graph.nodes[2].next_node_ids, [3])
+        self.assertEqual(graph.exit_node_id, 2)
+
+    def test_graph_editor_rejects_route_after_mutation_for_non_insert(self) -> None:
+        graph = _build_graph()
+        tool = GraphEditorTool()
+
+        with self.assertRaisesRegex(ValueError, "node insertion"):
+            asyncio.run(
+                tool.execute(
+                    {
+                        "action": "add_edge",
+                        "from_node_id": 1,
+                        "to_node_id": 2,
+                        "route_after_mutation": True,
+                    },
+                    context=ToolContext(
+                        graph=graph,
+                        core=NoopPersistCore(),
+                        capabilities={"graph_mutation"},
+                    ),
+                )
+            )
+
+        self.assertEqual(graph.nodes[1].next_node_ids, [])
+        self.assertEqual(graph.edges, [])
+
     def test_runtime_graph_persistence_writes_json_revision_not_graph_source(self) -> None:
         workspace_root = make_test_dir("runtime_graph_persistence")
         runtime_dir = workspace_root / "runtime_info"
