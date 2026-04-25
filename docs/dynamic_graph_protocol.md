@@ -80,7 +80,7 @@
 5. `graph.outgoing_edges(node.node_id)`
 6. `node.next_node_ids`
 
-这意味着：只要工具或 agent 返回了 `next_node_id`，执行器就会优先按它跳转。
+这意味着：只要工具或 agent 返回了 `next_node_id`，执行器就会优先按它跳转。当前实现已收紧 `graph_editor`：图编辑默认只修改图，不返回 `next_node_id`；只有插入节点动作显式传入 `route_after_mutation: true` 时，才允许把新节点作为下一跳返回。
 
 ### 2.5 runtime_info 记录
 
@@ -97,7 +97,7 @@
 
 这是当前最核心的问题。
 
-- `agent_manager` 和 `graph_editor` 的返回里都曾携带 `next_node_id`
+- `agent_manager` 和旧版 `graph_editor` 的返回里都曾携带 `next_node_id`
 - 执行器会优先相信这个值
 - 结果就是工具抢占了调度权
 
@@ -106,6 +106,14 @@
 - 还没插入的节点
 - 已经删除的节点
 - 不应该立刻执行的节点
+
+当前修复口径：
+
+- `agent_manager` 不返回 top-level `next_node_id`
+- `graph_editor` 的 `metadata_patch` 不写入 `next_node_id`
+- `graph_editor` 插入节点后默认不跳转
+- 只有 `add_agent_node` / `add_tool_node` 且 `route_after_mutation: true` 时，才返回 top-level `next_node_id`
+- 非插入动作如果传入 `route_after_mutation` 会在 mutation 前失败
 
 ### 3.2 控制面和数据面混在一起
 
@@ -134,14 +142,28 @@
 - 删除错节点
 - 孤儿边
 
+当前修复口径：
+
+- `graph_editor` 的 `add_agent_node` / `add_tool_node` 允许省略 `node_id`，或显式传入 `node_id: "auto"`
+- 自动 ID 使用当前图里下一个可用整数 ID
+- 如果手动传入的 `node_id` 已存在，默认直接拒绝
+- 只有显式 `replace_existing: true` 时，才允许替换已有节点
+
 ### 3.6 `replace_existing` 语义过强
 
 直接删掉旧节点再插入新节点，如果没有自动重接上下游，图很容易断裂。
 
+当前修复口径：
+
+- `replace_existing` 仍然需要显式开启
+- 替换时保留原节点入边
+- 如果没有显式传入新的 `next_node_ids`，替换节点会继承原节点出边
+- 如果原节点是 entry / exit，替换后会恢复 entry / exit 指向
+
 ### 3.7 mutation 后缺少强制一致性校验
 
 图在静态上合法，不代表 mutation 后仍然安全。  
-目前缺少每次 mutation 后的局部一致性检查，例如：
+当前 `GraphTransaction.prepare()` 会在 working graph 上应用 mutation 后立刻执行 `graph.validate(core)`；校验失败则不会提交到活图。例如：
 
 - 节点是否仍可达
 - 边是否仍有效
@@ -194,12 +216,12 @@
 
 建议优先修复以下内容：
 
-1. 让创建 / 删除工具完全不返回 `next_node_id`
-2. 让只有“插入节点”的工具能决定跳转
-3. 每次 mutation 后做局部图校验
-4. 清理旧的 `next_node_id` / `spawned_agent_*` / `deleted_agent_*` metadata
-5. 为动态节点引入更清晰的 ID 管理策略
-6. 把 runtime_info 从“审计”增强为“执行后置检查辅助”
+1. 已完成：创建 / 删除工具默认不返回 `next_node_id`
+2. 已完成：只有插入节点动作显式 `route_after_mutation` 时能决定跳转
+3. 已完成：每次 mutation 通过 `GraphTransaction.prepare()` 做图校验
+4. 已完成：删除动作会清理旧的 `next_node_id` / `spawned_agent_*` / `deleted_agent_*` metadata
+5. 已完成：动态节点支持 `node_id: "auto"`，手动 ID 冲突默认拒绝
+6. 待继续：把 runtime_info 从“审计”增强为“执行后置检查辅助”
 
 ## 5. 协议总结
 
