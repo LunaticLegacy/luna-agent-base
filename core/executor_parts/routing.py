@@ -58,6 +58,7 @@ class RoutingHelperMixin:
         node: Any,
         payload: Any,
         next_node_override: Optional[int],
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> List[int]:
         if next_node_override is not None:
             if next_node_override == node.node_id:
@@ -65,6 +66,28 @@ class RoutingHelperMixin:
             else:
                 return [next_node_override]
 
+        # Envelope mode: control decisions live in metadata["control"], not payload.
+        control = metadata.get("control") if isinstance(metadata, dict) else None
+        if isinstance(control, dict):
+            next_node_ids = control.get("next_node_ids")
+            if isinstance(next_node_ids, list) and next_node_ids:
+                return [int(item) for item in next_node_ids]
+
+            branch = control.get("branch")
+            if branch is not None:
+                matched = self._match_branch_targets(graph, node.node_id, branch)
+                if matched:
+                    return matched
+
+            branches = control.get("branches")
+            if isinstance(branches, list) and branches:
+                resolved: List[int] = []
+                for item in branches:
+                    resolved.extend(self._match_branch_targets(graph, node.node_id, item))
+                if resolved:
+                    return list(dict.fromkeys(resolved))
+
+        # Legacy mode (and envelope fallback): inspect payload dict.
         if isinstance(payload, dict):
             next_node_ids = payload.get("next_node_ids")
             if isinstance(next_node_ids, list) and next_node_ids:

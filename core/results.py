@@ -57,6 +57,18 @@ class ExecutionState:
             branch_results=copy.deepcopy(self.branch_results),
         )
 
+    @property
+    def is_envelope(self) -> bool:
+        """True when the state uses the immutable envelope model.
+
+        Envelope mode is auto-detected from the initial payload shape:
+        a dict that contains either an ``original_request`` key or the
+        ``_envelope`` sentinel.
+        """
+        return isinstance(self.payload, dict) and (
+            "original_request" in self.payload or self.payload.get("_envelope") is True
+        )
+
     def snapshot(self) -> Dict[str, Any]:
         """Create a lightweight runtime snapshot for tracing and live streaming."""
         return {

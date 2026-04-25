@@ -208,7 +208,11 @@ class GraphExecutor(
                     else:
                         agent = core.get_agent(node.agent_id)
                     state.rounds += 1
-                    agent_input = self._format_agent_input(state.payload, node)
+                    # Envelope mode: build a rich prompt from the canonical request + previous outputs.
+                    if state.is_envelope:
+                        agent_input = self._build_envelope_agent_input(state, node)
+                    else:
+                        agent_input = self._format_agent_input(state.payload, node)
                     cognitive_prompt = self._inject_cognitive_context(core, node)
                     combined_prompt = node.additional_prompt
                     if cognitive_prompt:
@@ -229,7 +233,23 @@ class GraphExecutor(
                     )
                     output_payload = node_result.output_payload
                     routing_payload = node_result.routing_payload
-                    state.payload = node_result.state_payload
+
+                    if state.is_envelope:
+                        # Envelope mode: payload is immutable; append outputs to metadata.
+                        state.metadata.setdefault("outputs", {})
+                        state.metadata["outputs"][str(node.node_id)] = (
+                            node_result.output_payload if node_result.output_payload is not None else node_result.state_payload
+                        )
+                        # Apply control patch for routing decisions.
+                        control_patch = getattr(node_result, "control_patch", None)
+                        if control_patch:
+                            state.metadata.setdefault("control", {})
+                            state.metadata["control"].update(control_patch)
+                        # Preserve payload immutability.
+                    else:
+                        # Legacy mode: overwrite payload as before.
+                        state.payload = node_result.state_payload
+
                     next_node_override = node_result.next_node_override
                     merge_delta = getattr(core, "merge_agent_cognitive_delta", None)
                     if callable(merge_delta):
@@ -261,13 +281,21 @@ class GraphExecutor(
                         input_payload=input_payload,
                     )
                     routing_payload = node_result.routing_payload
-                    state.payload = node_result.state_payload
+
+                    if state.is_envelope:
+                        # Envelope mode: preserve the full tool output in metadata.
+                        state.metadata.setdefault("outputs", {})
+                        state.metadata["outputs"][str(node.node_id)] = node_result.output_payload
+                        # Do not overwrite the immutable canonical payload.
+                    else:
+                        state.payload = node_result.state_payload
+
                     next_node_override = node_result.next_node_override
                 else:
                     output_payload = state.payload
                     routing_payload = state.payload
 
-                next_targets = self._resolve_next_targets(graph, node, routing_payload, next_node_override)
+                next_targets = self._resolve_next_targets(graph, node, routing_payload, next_node_override, metadata=state.metadata)
                 self._validate_next_targets(graph, node, next_targets)
 
                 state.trace.append(
@@ -504,11 +532,16 @@ class GraphExecutor(
                     )
 
                 state.branch_results[str(node.node_id)] = branch_results
-                state.payload = {
+                branch_merge_payload = {
                     "type": "branch_merge",
                     "source_node_id": node.node_id,
                     "branches": branch_results,
                 }
+                if state.is_envelope:
+                    state.metadata.setdefault("outputs", {})
+                    state.metadata["outputs"][str(node.node_id)] = branch_merge_payload
+                else:
+                    state.payload = branch_merge_payload
                 state.rounds = max([state.rounds] + [branch_result["rounds"] for branch_result in branch_results])
                 join_node_id = node.metadata.get("join_node_id")
                 if join_node_id is None:

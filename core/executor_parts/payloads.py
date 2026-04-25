@@ -25,7 +25,86 @@ class PayloadHelperMixin:
         "branches",
         "status",
         "error",
+        "decision",
+        "verdict",
+        "graph_edit",
     }
+
+    # ------------------------------------------------------------------
+    # Envelope helpers
+    # ------------------------------------------------------------------
+
+    def _extract_metadata_patch(self, parsed_output: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract non-control fields from an agent output to store as metadata."""
+        patch: Dict[str, Any] = {}
+        for key, value in parsed_output.items():
+            if key not in self._CONTROL_PAYLOAD_KEYS:
+                patch[key] = value
+        return patch
+
+    def _extract_control_patch(self, parsed_output: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract routing / control fields from an agent output."""
+        control: Dict[str, Any] = {}
+        for key in ("next_node_id", "next_node_ids", "branch", "branches", "decision", "verdict", "graph_edit"):
+            if key in parsed_output:
+                control[key] = parsed_output[key]
+        return control
+
+    def _build_envelope_agent_input(self, state: ExecutionState, node: AgentNode) -> str:
+        """Build a rich user message in envelope mode.
+
+        The agent receives:
+        1. The canonical original_request (immutable)
+        2. Requirements / constraints / artifact from the envelope
+        3. Summaries of previous node outputs (so the agent has full context)
+        4. The node's additional_prompt
+        """
+        request = state.payload
+        parts: List[str] = []
+
+        # 1. Canonical request
+        if isinstance(request, dict):
+            orig = request.get("original_request")
+            if orig:
+                parts.append(f"## Original Request\n{orig}")
+            artifact = request.get("artifact")
+            if artifact:
+                parts.append(f"## Target Artifact\n{artifact}")
+            reqs = request.get("requirements")
+            if reqs:
+                parts.append(f"## Requirements\n{json.dumps(reqs, ensure_ascii=False, indent=2)}")
+            constraints = request.get("constraints")
+            if constraints:
+                parts.append(f"## Constraints\n{json.dumps(constraints, ensure_ascii=False, indent=2)}")
+            attachments = request.get("attachments")
+            if attachments:
+                parts.append(f"## Attachments\n{json.dumps(attachments, ensure_ascii=False, indent=2)}")
+        else:
+            parts.append(f"## Request\n{request}")
+
+        # 2. Previous node outputs (chronological)
+        outputs = state.metadata.get("outputs")
+        if isinstance(outputs, dict) and outputs:
+            parts.append("## Previous Node Outputs")
+            for node_id, output in outputs.items():
+                if isinstance(output, dict) and "content" in output:
+                    text = str(output["content"])[:1200]
+                    parts.append(f"### Node {node_id}\n{text}")
+                elif isinstance(output, str):
+                    parts.append(f"### Node {node_id}\n{output[:1200]}")
+                else:
+                    text = json.dumps(output, ensure_ascii=False, indent=2)[:1200]
+                    parts.append(f"### Node {node_id}\n{text}")
+
+        # 3. Additional prompt from the graph node
+        if node.additional_prompt:
+            parts.append(f"## Additional Instructions\n{node.additional_prompt}")
+
+        return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Legacy helpers (kept for backward compatibility)
+    # ------------------------------------------------------------------
 
     def _apply_metadata_updates(self, target_metadata: Dict[str, Any], payload: Dict[str, Any]) -> None:
         metadata_patch = payload.get("metadata_patch")
@@ -119,6 +198,10 @@ class PayloadHelperMixin:
         base_arguments.setdefault("runtime_metadata", dict(runtime_metadata))
         return base_arguments
 
+    # ------------------------------------------------------------------
+    # Normalisation
+    # ------------------------------------------------------------------
+
     def _normalize_agent_node_result(
         self,
         state: ExecutionState,
@@ -133,19 +216,34 @@ class PayloadHelperMixin:
         output_payload = result
         routing_payload = state_payload
         next_node_override = self._extract_next_node_id(state_payload)
+        metadata_patch: Optional[Dict[str, Any]] = None
+        control_patch: Optional[Dict[str, Any]] = None
 
         if parsed_output is not None:
             output_payload = parsed_output
             routing_payload = parsed_output
-            state_payload = self._state_payload_from_structured_agent_output(
-                state,
-                parsed_output,
-                input_payload=input_payload,
-                fallback_payload=state_payload,
-            )
             next_node_override = self._extract_next_node_id(parsed_output)
 
-        self._capture_report_payload(state, node, state_payload)
+            if state.is_envelope:
+                # Envelope mode: do NOT compress payload to a string.
+                # Instead, split the output into metadata (node output) and control (routing).
+                metadata_patch = self._extract_metadata_patch(parsed_output)
+                control_patch = self._extract_control_patch(parsed_output)
+                # state_payload is intentionally left as the raw assistant message
+                # so that trace/events still show the raw output.
+                state_payload = result.assistant_message if hasattr(result, "assistant_message") else parsed_output
+            else:
+                # Legacy mode: keep existing compression behaviour.
+                state_payload = self._state_payload_from_structured_agent_output(
+                    state,
+                    parsed_output,
+                    input_payload=input_payload,
+                    fallback_payload=state_payload,
+                )
+
+        if not state.is_envelope:
+            self._capture_report_payload(state, node, state_payload)
+
         return NodeExecutionResult(
             output_payload=output_payload,
             routing_payload=routing_payload,
@@ -166,10 +264,15 @@ class PayloadHelperMixin:
             self._apply_metadata_updates(state.metadata, output_payload)
             self._preserve_report_fields(state, output_payload, input_payload=input_payload)
             final_payload = self._extract_final_report_payload(output_payload)
-            if self._has_content(final_payload):
-                state_payload = final_payload
-            elif "content" in output_payload:
-                state_payload = output_payload["content"]
+            if state.is_envelope:
+                # Envelope mode: preserve the full dict so downstream agents can read
+                # e.g. tool-written file paths, byte counts, etc.
+                state_payload = output_payload
+            else:
+                if self._has_content(final_payload):
+                    state_payload = final_payload
+                elif "content" in output_payload:
+                    state_payload = output_payload["content"]
 
         return NodeExecutionResult(
             output_payload=output_payload,
@@ -251,6 +354,8 @@ class PayloadHelperMixin:
         return text.strip()
 
     def _format_agent_input(self, payload: Any, node: AgentNode) -> str:
+        # Envelope mode is handled at the caller site (engine.py) via _build_envelope_agent_input.
+        # This legacy path is kept for backward compatibility and for simple string payloads.
         if isinstance(payload, dict):
             if "input" in payload and len(payload) == 1:
                 return str(payload["input"])
