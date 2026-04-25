@@ -2,5 +2,6 @@
 __pycache__
 .*venv
 data
+tests/.artifacts/
 
 load_sk.sh

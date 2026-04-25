@@ -8,7 +8,7 @@ from core.task_graph import Task, TaskGraph
 from web.task_store import TaskStore
 
 
-TEST_TMP_ROOT = Path(".test_tmp")
+TEST_TMP_ROOT = Path(__file__).resolve().parent / ".artifacts"
 TEST_TMP_ROOT.mkdir(exist_ok=True)
 
 

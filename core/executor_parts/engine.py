@@ -221,57 +221,16 @@ class GraphExecutor(
                         user_message=agent_input,
                         additional_prompt=combined_prompt,
                     )
-                    output_payload = result
-                    parsed_agent_output = self._parse_structured_agent_output(result.assistant_message)
-                    if getattr(result, "assistant_message", None):
-                        state.payload = result.assistant_message
-                    elif getattr(result, "raw_response", None) is not None:
-                        state.payload = result.raw_response
-                    else:
-                        state.payload = result
-                    if parsed_agent_output is not None:
-                        output_payload = parsed_agent_output
-                        routing_payload = parsed_agent_output
-                        if isinstance(parsed_agent_output, dict):
-                            self._apply_metadata_updates(state.metadata, parsed_agent_output)
-                            for key, value in parsed_agent_output.items():
-                                if key in {
-                                    "content",
-                                    "final_answer",
-                                    "final_report",
-                                    "approved_report",
-                                    "draft_report",
-                                    "report_text",
-                                    "metadata_patch",
-                                    "metadata_clear",
-                                    "next_node_id",
-                                    "next_node_ids",
-                                    "branch",
-                                    "branches",
-                                    "status",
-                                    "error",
-                                }:
-                                    continue
-                                state.metadata[key] = value
-                            self._preserve_report_fields(state, parsed_agent_output, input_payload=input_payload)
-                            final_payload = self._extract_final_report_payload(parsed_agent_output)
-                            if self._has_content(final_payload):
-                                state.payload = final_payload
-                            elif "content" in parsed_agent_output and self._has_content(parsed_agent_output["content"]):
-                                state.payload = parsed_agent_output["content"]
-                            elif self._is_review_control_payload(parsed_agent_output):
-                                state.payload = self._latest_report_payload(state, input_payload)
-                            elif "content" not in parsed_agent_output:
-                                state.payload = parsed_agent_output
-                            next_node_override = self._extract_next_node_id(parsed_agent_output)
-                        elif isinstance(parsed_agent_output, str):
-                            state.payload = parsed_agent_output
-                            routing_payload = parsed_agent_output
-                    else:
-                        next_node_override = self._extract_next_node_id(state.payload)
-                        routing_payload = state.payload
-
-                    self._capture_report_payload(state, node, state.payload)
+                    node_result = self._normalize_agent_node_result(
+                        state,
+                        node,
+                        result,
+                        input_payload=input_payload,
+                    )
+                    output_payload = node_result.output_payload
+                    routing_payload = node_result.routing_payload
+                    state.payload = node_result.state_payload
+                    next_node_override = node_result.next_node_override
                     merge_delta = getattr(core, "merge_agent_cognitive_delta", None)
                     if callable(merge_delta):
                         merge_delta(blueprint_ref, getattr(result, "cognitive_graph_delta", None))
@@ -296,20 +255,14 @@ class GraphExecutor(
                     )
                     arguments = self._build_tool_arguments(node, state.payload, state.metadata)
                     output_payload = await tool.execute(arguments, context=tool_context)
-                    routing_payload = output_payload
-                    if isinstance(output_payload, dict):
-                        self._apply_metadata_updates(state.metadata, output_payload)
-                        self._preserve_report_fields(state, output_payload, input_payload=input_payload)
-                        final_payload = self._extract_final_report_payload(output_payload)
-                        if self._has_content(final_payload):
-                            state.payload = final_payload
-                        elif "content" in output_payload:
-                            state.payload = output_payload["content"]
-                        else:
-                            state.payload = output_payload
-                    else:
-                        state.payload = output_payload
-                    next_node_override = self._extract_next_node_id(output_payload)
+                    node_result = self._normalize_tool_node_result(
+                        state,
+                        output_payload,
+                        input_payload=input_payload,
+                    )
+                    routing_payload = node_result.routing_payload
+                    state.payload = node_result.state_payload
+                    next_node_override = node_result.next_node_override
                 else:
                     output_payload = state.payload
                     routing_payload = state.payload

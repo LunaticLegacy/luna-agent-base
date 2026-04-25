@@ -28,6 +28,16 @@ class AgentRoundResult:
 
 
 @dataclass
+class NodeExecutionResult:
+    """Normalized result produced by one graph node."""
+
+    output_payload: Any
+    routing_payload: Any
+    state_payload: Any
+    next_node_override: Optional[int] = None
+
+
+@dataclass
 class ExecutionState:
     """Mutable state passed through an execution graph."""
 

@@ -121,11 +121,17 @@ class ExecutionGraphStateMixin:
                 "nodes": [],
                 "edges": [],
             }
-        from web.runs import serialize_graph_snapshot
-
-        return serialize_graph_snapshot(graph)
+        return _graph_snapshot(graph)
 
     def check_execution_graph_available(self) -> GraphValidationResult:
+        if self._execution_graph is None:
+            return GraphValidationResult(
+                is_valid=False,
+                errors=["Execution graph is not attached."],
+            )
+        return self._execution_graph.validate(self)
+
+    def check_execution_graph_complete(self) -> GraphValidationResult:
         if self._execution_graph is None:
             return GraphValidationResult(
                 is_valid=False,
@@ -251,10 +257,27 @@ def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
     )
     tmp_path.replace(path)
 
-    def check_execution_graph_complete(self) -> GraphValidationResult:
-        if self._execution_graph is None:
-            return GraphValidationResult(
-                is_valid=False,
-                errors=["Execution graph is not attached."],
+
+def _graph_snapshot(graph: ExecutionGraph) -> Dict[str, Any]:
+    return {
+        "graph_name": graph.graph_name,
+        "graph_kind": getattr(graph, "graph_kind", "execution"),
+        "entry_node_id": graph.entry_node_id,
+        "exit_node_id": graph.exit_node_id,
+        "node_count": len(graph.nodes),
+        "edge_count": len(graph.edges),
+        "nodes": [_serialize_node(node) for node in sorted(graph.nodes.values(), key=lambda item: item.node_id)],
+        "edges": [
+            _serialize_edge(edge)
+            for edge in sorted(
+                graph.edges,
+                key=lambda item: (
+                    item.from_node_id,
+                    item.priority,
+                    item.to_node_id,
+                    item.label or "",
+                    item.condition or "",
+                ),
             )
-        return self._execution_graph.validate(self)
+        ],
+    }
