@@ -12,7 +12,7 @@ from core.toodefl import ToolContext
 from tools.graph_editor_tool import GraphEditorTool
 
 
-TEST_TMP_ROOT = Path(".test_tmp")
+TEST_TMP_ROOT = Path(__file__).resolve().parent / ".artifacts"
 TEST_TMP_ROOT.mkdir(exist_ok=True)
 
 

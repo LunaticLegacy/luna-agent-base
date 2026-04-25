@@ -1,6 +1,6 @@
 """Meta-execution runtime for Angelus.
 
-The MetaExecutor wraps a single ExecutionGraph.run() into an iterative,
+The MetaExecutor wraps GraphExecutor execution into an iterative,
 self-driving loop.  After each pass it inspects the swarm cognitive graph
 for unresolved issues (unsupported claims, conflicts, open questions) and
 automatically re-injects a follow-up mission until the graph converges or

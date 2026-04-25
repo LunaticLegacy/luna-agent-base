@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+from core.executor import GraphExecutor
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -100,7 +101,7 @@ async def _execute_swarm_run(request: Request, swarm_name: str, *, use_backgroun
         meta = MetaExecutor(max_iterations=5)
         state = await meta.run(graph, swarm.core, payload, rounds=rounds)
     else:
-        state = await graph.run(swarm.core, payload, rounds=rounds)
+        state = await GraphExecutor().execute(graph, swarm.core, payload, rounds=rounds)
 
     return {
         "success": True,
