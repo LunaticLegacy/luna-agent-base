@@ -51,7 +51,7 @@ Still planned:
 
 ### HTTP API
 
-`app.py` starts the Flask app on `127.0.0.1` by default. `web/app_factory.py`
+`app.py` starts the FastAPI app on `127.0.0.1` by default. `web/app_factory.py`
 registers all API blueprints and installs `web/security.py`.
 
 `web/security.py` protects high-risk API methods under `/api/*`:

@@ -8,22 +8,22 @@
 
 - `parse_args()` 读取 `--config`、`--host`、`--port`、`--debug`
 - `main()` 调用 `create_app(args.config)`
-- 然后用 Flask 内置开发服务器启动
+- 然后用 Uvicorn ASGI 服务器启动
 
 也就是说：
 
 - `app.py` 负责“启动进程”
-- [`web/app_factory.py`](/run/media/luna/数据和游戏/Codes/Python/angelus/web/app_factory.py) 负责“组装 Flask 应用”
+- [`web/app_factory.py`](/run/media/luna/数据和游戏/Codes/Python/angelus/web/app_factory.py) 负责“组装 FastAPI 应用”
 
 `web/__init__.py` 只是把 `create_app` 重新导出，方便 `from web import create_app`。
 
 ## 2. App Factory
 
-`create_app(config_path: str | Path = "config.toml") -> Flask` 是后端核心组装点。
+`create_app(config_path: str | Path = "config.toml") -> FastAPI` 是后端核心组装点。
 
 它做了几件事：
 
-1. 创建 Flask app
+1. 创建 FastAPI app
 2. 读取顶层 `config.toml`
 3. 构建 runtime registry 和 content store
 4. 注册错误处理器
@@ -173,7 +173,7 @@
 ## 7. 实际排查时最容易踩的点
 
 1. `OPTIONS` 不是 405 的来源
-   - 由于有全局 `OPTIONS` 兜底，浏览器预检一般不会直接挂在 Flask 的默认 405 上
+   - 由于有全局 `OPTIONS` 兜底，浏览器预检一般不会直接挂在 FastAPI 的默认 405 上
 
 2. `/api/swarms` 由 swarms 路由模块统一承载
    - `app_factory.py` 只负责注册路由模块

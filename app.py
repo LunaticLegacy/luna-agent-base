@@ -29,7 +29,7 @@ def main() -> None:
     """Application entry point."""
     args = parse_args()
     app = create_app(args.config)
-    uvicorn.run(app, host=args.host, port=args.port, reload=args.debug)
+    uvicorn.run(app, host=args.host, port=args.port, reload=args.debug, timeout_graceful_shutdown=10)
 
 
 if __name__ == "__main__":

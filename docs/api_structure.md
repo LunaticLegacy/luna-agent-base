@@ -1,6 +1,6 @@
 # 当前 API 结构说明
 
-本文档总结当前项目的 Flask API 形态、返回结构，以及它和 `core/` 运行时之间的关系。
+本文档总结当前项目的 FastAPI 形态、返回结构，以及它和 `core/` 运行时之间的关系。
 
 ## 1. API 总体定位
 
@@ -28,7 +28,7 @@ API 本身不负责：
 
 - 读取 `config.toml`
 - 扫描 `agents/` 下的 swarm 包
-- 创建 Flask app
+- 创建 FastAPI app
 - 注册 health 和 swarm 路由
 
 ## 3. 当前路由
@@ -307,7 +307,7 @@ SSE 事件体是 JSON 字符串，前端可用来实时高亮当前节点、更�
 
 ## 5. 运行时绑定关系
 
-当前 Flask app 会把运行时注册表放到：
+当前 FastAPI app 会把运行时注册表放到：
 
 - `app.extensions["angelus_runtime"]`
 
@@ -327,7 +327,7 @@ API 层只负责调用 runtime，不直接执行业务逻辑。
 
 典型流程是：
 
-1. Flask 路由接收请求
+1. FastAPI 路由接收请求
 2. 根据 swarm 名称找到已加载运行时
 3. 调用 `ExecutionGraph.run(...)` 或 `Agent.round_call(...)`
 4. 把结果转成 JSON 返回

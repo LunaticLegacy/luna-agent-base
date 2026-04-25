@@ -5,7 +5,7 @@
 ## 总览
 
 - [API 结构说明](./api_structure.md)
-  - 当前 Flask API 的总体结构、路由、错误处理和运行时绑定关系
+  - 当前 FastAPI 的总体结构、路由、错误处理和运行时绑定关系
 - [Metadata Reference](./metadata_reference.md)
   - 图节点、运行态、Agent、Tool、Skill 的 metadata 约定
 - [英文文档索引](./en/README.md)

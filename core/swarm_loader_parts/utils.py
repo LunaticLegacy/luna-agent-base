@@ -190,12 +190,33 @@ def _load_module_from_path(path: Path):
     if not path.exists():
         raise SwarmLoaderError(f"Python file not found: {path}")
 
-    module_name = f"angelus_swarm_{path.parent.name}_{path.stem}"
+    parent = path.parent
+    package_name = f"angelus_swarm_{parent.name}"
+    init_path = parent / "__init__.py"
+
+    # If the file lives inside a package directory, register the parent package
+    # so that relative imports (e.g. ``from .common import ...``) work.
+    if init_path.exists() and package_name not in sys.modules:
+        pkg_spec = importlib.util.spec_from_file_location(
+            package_name, str(init_path), submodule_search_locations=[str(parent)]
+        )
+        if pkg_spec is not None:
+            pkg = importlib.util.module_from_spec(pkg_spec)
+            sys.modules[package_name] = pkg
+            if pkg_spec.loader is not None:
+                pkg_spec.loader.exec_module(pkg)
+
+    if init_path.exists():
+        module_name = f"{package_name}.{path.stem}"
+    else:
+        module_name = f"angelus_swarm_{parent.name}_{path.stem}"
+
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise SwarmLoaderError(f"Unable to load module from {path}")
 
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 

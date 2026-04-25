@@ -9,7 +9,7 @@
 ### A multi-agent orchestration runtime with live graph editing, temporary agent creation, and runtime mutation tracking
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-async-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Angular](https://img.shields.io/badge/Angular-frontend-DD0031?logo=angular&logoColor=white)](https://angular.dev)
 [![Runtime](https://img.shields.io/badge/Runtime-swarm%20orchestration-4B5563)](#docs-index)
 
@@ -87,7 +87,7 @@ This page is the consolidated English documentation entry point for Angelus.
 ## Overview
 
 - [API Structure](./api_structure.md)
-  - High-level description of the Flask API, routes, error handling, and runtime binding
+  - High-level description of the FastAPI, routes, error handling, and runtime binding
 - [Metadata Reference](./metadata_reference.md)
   - Metadata conventions for graph nodes, runtime state, agents, tools, and skills
 
@@ -187,7 +187,7 @@ flowchart TD
     N --> P[runtime_info]
     O --> P
     P --> Q[agents/<swarm>/runtime_info/]
-    B --> R[Flask API]
+    B --> R[FastAPI]
     R --> S[Angular console]
 ```
 
@@ -200,7 +200,7 @@ angelus/
 ├── core/                  # runtime kernel
 ├── modules/               # infrastructure modules
 ├── tools/                 # default runtime tools
-├── web/                   # Flask API
+├── web/                   # FastAPI
 ├── agents/                # loadable swarm packages
 │   └── deepseek_demo/     # current demo package
 ├── frontend/              # Angular console

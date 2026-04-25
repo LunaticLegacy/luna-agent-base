@@ -9,7 +9,7 @@
 - `core/`：运行时与编排内核，负责 agent、tool、skill、graph 的注册、校验和执行。
 - `agents/`：业务 swarm 包目录，每个子目录代表一个可加载的 swarm。
 - `tools/`：默认工具实现，供 swarm 直接复用，也可以被单独引用。
-- `web/`：HTTP 接入层，用 Flask 暴露运行时接口。
+- `web/`：HTTP 接入层，用 FastAPI 暴露运行时接口。
 
 ## 2. Swarm 包结构
 
