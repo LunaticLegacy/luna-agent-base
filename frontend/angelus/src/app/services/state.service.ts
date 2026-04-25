@@ -2258,7 +2258,7 @@ this.loadLogs(),
     };
   }
 
-  private pushFeed(title: string, method: string, endpoint: string, tone: FeedItem['tone'], payload: unknown, meta?: string): void {
+  pushFeed(title: string, method: string, endpoint: string, tone: FeedItem['tone'], payload: unknown, meta?: string): void {
     const item: FeedItem = { id: this.nextFeedId(), title, endpoint, method, tone, timestamp: shortTime(), payload: normalizeJsonValue(payload), meta };
     this.responseFeed.set([item, ...this.responseFeed()].slice(0, 14));
   }
@@ -2272,6 +2272,14 @@ this.loadLogs(),
     this.eventSource = source;
     source.onopen = () => { this.streamState.set('open'); this.streamNote.set(`实时事件流已开启: ${run.run_id}`); };
     source.onerror = () => {
+      // If the run has already finished, treat stream closure as normal rather than error.
+      const currentRun = this.activeRun();
+      if (currentRun?.run_id === run.run_id && (currentRun.status === 'completed' || currentRun.status === 'failed')) {
+        this.streamState.set('closed');
+        this.streamNote.set(`运行已结束: ${run.run_id}`);
+        this.closeStream();
+        return;
+      }
       this.streamState.set('error');
       this.streamNote.set(`实时事件流已中断: ${run.run_id}`);
       if (this.autoReconnect()) {
@@ -2294,9 +2302,23 @@ this.loadLogs(),
     const refreshOnEvent = () => {
       this.scheduleRunRefresh(run.run_id);
     };
-    for (const eventName of ['run.started', 'node.started', 'branch.started', 'run.completed', 'run.failed', 'node.failed', 'branch.failed']) {
+    for (const eventName of ['run.started', 'node.started', 'branch.started', 'node.failed', 'branch.failed']) {
       source.addEventListener(eventName, refreshOnEvent);
     }
+    // Terminal events: close stream gracefully and clear any stale error.
+    source.addEventListener('run.completed', () => {
+      refreshOnEvent();
+      this.error.set(null);
+      this.streamState.set('closed');
+      this.streamNote.set(`运行已完成: ${run.run_id}`);
+      this.closeStream();
+    });
+    source.addEventListener('run.failed', () => {
+      refreshOnEvent();
+      this.streamState.set('closed');
+      this.streamNote.set(`运行失败: ${run.run_id}`);
+      this.closeStream();
+    });
   }
 
   private scheduleRunRefresh(runId: string): void {

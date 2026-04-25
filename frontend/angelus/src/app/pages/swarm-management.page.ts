@@ -312,13 +312,19 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                   <app-empty-state message="当前没有可展示的运行轨迹。"></app-empty-state>
                 }
               </app-panel-card>
-              <app-panel-card title="事件列表" [badge]="state.selectedExecutionTrace()?.events?.length ?? 0" [noPadding]="true">
+              <app-panel-card title="事件列表" [badge]="state.selectedExecutionTrace()?.events?.length ?? 0" [hasActions]="true" [noPadding]="true">
+                <div actions>
+                  <button class="btn btn-sm" (click)="copyAllEvents()">复制全部</button>
+                </div>
                 <div class="trace-event-list">
                   @for (event of state.selectedExecutionTrace()?.events ?? []; track $index) {
                     <div class="trace-event-item">
                       <div class="trace-event-head">
-                        <span class="trace-event-index mono">#{{ $index + 1 }}</span>
-                        <span class="trace-event-title">{{ traceEventLabel(event) }}</span>
+                        <div class="trace-event-head-left">
+                          <span class="trace-event-index mono">#{{ $index + 1 }}</span>
+                          <span class="trace-event-title">{{ traceEventLabel(event) }}</span>
+                        </div>
+                        <button class="btn btn-sm btn-ghost" (click)="copyEvent(event)">复制</button>
                       </div>
                       <pre class="trace-event-body">{{ event | json }}</pre>
                     </div>
@@ -1040,8 +1046,9 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       flex: 1 1 auto;
     }
     .trace-event-list {
-      max-height: 100%;
-      overflow: auto;
+      max-height: calc(100vh - 340px);
+      min-height: 200px;
+      overflow-y: auto;
       padding: 12px 14px 14px;
       display: grid;
       gap: 10px;
@@ -1055,8 +1062,29 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
     .trace-event-head {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 10px;
       margin-bottom: 8px;
+    }
+    .trace-event-head-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid rgba(148,163,184,0.15);
+      color: #94a3b8;
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-ghost:hover {
+      background: rgba(139,92,246,0.10);
+      border-color: rgba(139,92,246,0.30);
+      color: #c4b5fd;
     }
     .trace-event-index {
       color: #94a3b8;
@@ -1176,6 +1204,31 @@ export class SwarmManagementPageComponent {
       }
     }
     return 'event';
+  }
+
+  async copyEvent(event: unknown): Promise<void> {
+    const text = typeof event === 'string' ? event : JSON.stringify(event, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      this.state.pushFeed('已复制事件到剪贴板', 'COPY', '', 'success', {});
+    } catch {
+      this.state.pushFeed('复制失败，请手动复制', 'COPY', '', 'error', {});
+    }
+  }
+
+  async copyAllEvents(): Promise<void> {
+    const events = this.state.selectedExecutionTrace()?.events ?? [];
+    if (events.length === 0) {
+      this.state.pushFeed('没有可复制的事件', 'COPY', '', 'warn', {});
+      return;
+    }
+    const text = JSON.stringify(events, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      this.state.pushFeed(`已复制全部 ${events.length} 个事件到剪贴板`, 'COPY', '', 'success', { count: events.length });
+    } catch {
+      this.state.pushFeed('复制失败，请手动复制', 'COPY', '', 'error', {});
+    }
   }
 
 }
