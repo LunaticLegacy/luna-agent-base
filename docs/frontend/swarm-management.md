@@ -44,7 +44,7 @@
 
 - `loadOverview()`：拉 `index / health / ready / swarms`
 - `reloadSelectedSwarm()`：拉单个 swarm 的详情
-- `loadSelectedGraph()`：优先使用列表里缓存的 graph，缓存没有时再请求后端 `GET /swarms/{name}/graph`
+- `loadSelectedGraph()`：优先使用列表里缓存的 graph，缓存没有时再请求后端 `GET /swarms/{name}/agent-graph`
 
 这个逻辑的特点是：
 
@@ -74,24 +74,20 @@
 
 ### 4. 运行启动控制
 
-当前页面已经接了两种运行启动方式：
+当前页面已经接了后台运行启动：
 
-- `startSwarmStructure()`：同步启动
-- `startSwarmBackground()`：后台启动
+- `startRun()`：后台启动
 
 页面中可见的触发点包括：
 
 - 右上角“重新启动结构”
 - 运行表格里的“启动结构”
 
-启动逻辑使用的是 `ApiService.startSwarm()` 和 `ApiService.startSwarmBackground()`，并带有兼容回退：
+启动逻辑使用的是 `ApiService.startRun()`，不带旧接口兼容回退：
 
-- `startSwarm()` 优先请求 `/swarms/{name}/start`
-- 如果返回 405，会回退到 `/swarms/{name}/run`
-- `startSwarmBackground()` 优先请求 `/swarms/{name}/start/background`
-- 如果返回 405，会回退到 `/swarms/{name}/runs`
+- `startRun()` 直接请求 `/swarms/{name}/runs`
 
-这部分说明前端已经在兼容后端不同版本的路径设计。
+这部分说明前端已经切到 v2 的 run 资源入口。
 
 ### 5. Agent 轮次调试
 
@@ -106,7 +102,7 @@
 
 这块是当前前端里最明确的实时链路。
 
-`startSwarmBackground()` 成功后会：
+`startRun()` 成功后会：
 
 - 把返回的 `run` 写入 `activeRun`
 - 调用 `watchRun(run)`
@@ -215,7 +211,7 @@
 
 ### 3. 重新启动结构
 
-右上角的 `重新启动结构` 按钮会尝试调用 `startSwarmStructure()`。
+右上角的 `重新启动结构` 按钮会尝试调用 `startRun()`。
 如果当前没有 active run，这个按钮会在 UI 上被禁用。
 
 虽然 `ApiService` 已经有：
@@ -228,16 +224,16 @@
 
 如果从“Swarm 管理板”的角度看，这一块现在是 API 有、UI 未接。
 
-### 6. 同步启动与后台启动的 UI 命名有点混用
+### 6. 后台启动与后台启动的 UI 命名有点混用
 
 页面里显示的是“重新启动结构”“启动结构”，但底层实际又分成：
 
-- 同步启动
+- 后台启动
 - 后台启动
 
 这部分目前保留了现有命名，因为它直接对应运行控制语义，没有再改成更抽象的标签。
 
-而当前模板主要直接调用 `startSwarmStructure()`，后台启动按钮并没有完整铺到 UI 上。
+而当前模板主要直接调用 `startRun()`，后台启动按钮并没有完整铺到 UI 上。
 
 ## 结论
 

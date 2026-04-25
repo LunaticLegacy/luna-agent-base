@@ -1329,7 +1329,7 @@ export class StateService {
       }
       if (healthResult.status === 'fulfilled') {
         this.health.set(healthResult.value);
-        this.pushFeed('健康检查', 'GET', `${baseUrl}/health`, 'info', healthResult.value);
+        this.pushFeed('健康检查', 'GET', `${baseUrl}/runtime/health`, 'info', healthResult.value);
       } else if (this.isOfflineLikeError(healthResult.reason)) {
         offlineDetected = true;
       } else {
@@ -1337,7 +1337,7 @@ export class StateService {
       }
       if (readyResult.status === 'fulfilled') {
         this.ready.set(readyResult.value);
-        this.pushFeed('就绪状态', 'GET', `${baseUrl}/ready`, 'info', readyResult.value);
+        this.pushFeed('就绪状态', 'GET', `${baseUrl}/runtime/ready`, 'info', readyResult.value);
       } else if (this.isOfflineLikeError(readyResult.reason)) {
         offlineDetected = true;
       } else {
@@ -1556,7 +1556,7 @@ this.loadLogs(),
       if (applied) {
         this.selectedGraphRevision = patch.current_revision;
         this.selectedGraphState.update((state) => state ? { ...state, revision: patch.current_revision, last_change: patch.last_change } : state);
-        this.pushFeed(`图增量 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/graph/diff?since_revision=${localRevision}`, 'info', diffResponse);
+        this.pushFeed(`图增量 · ${swarmName}`, 'POST', `${baseUrl}/swarms/${swarmName}/graph/diff`, 'info', diffResponse);
         this.watchGraphEvents();
         return;
       }
@@ -1590,7 +1590,7 @@ this.loadLogs(),
       updated_at: response.graph.updated_at ?? '',
       last_change: response.graph.last_change ?? null,
     });
-    this.pushFeed(`图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/graph`, 'info', response, meta);
+    this.pushFeed(`图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/agent-graph`, 'info', response, meta);
   }
 
   private applyGraphPatch(patch: GraphDiffResponse['patch']): boolean {
@@ -1721,7 +1721,7 @@ this.loadLogs(),
     }
     this.graphStreamState.set('connecting');
     this.graphStreamNote.set(`正在监听 ${swarmName} 图变更`);
-    const sourceUrl = `${joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/graph/events`)}?since_revision=${currentRevision}`;
+    const sourceUrl = joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/graph/events/from/${currentRevision}`);
     const source = new EventSource(sourceUrl);
     this.graphEventSource = source;
     this.graphStreamRevision = currentRevision;
@@ -1801,9 +1801,9 @@ this.loadLogs(),
     try {
       const baseUrl = this.baseUrl();
       const runId = this.activeRun()?.run_id;
-      const response = await this.apiService.getExecutionTrace(baseUrl, swarmName, runId ? { run_id: runId } : {});
+      const response = await this.apiService.getExecutionTrace(baseUrl, swarmName, runId);
       this.selectedExecutionTrace.set(response);
-      this.pushFeed(`执行轨迹 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/execution-trace`, 'info', response);
+      this.pushFeed(`执行轨迹 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/execution-traces/${runId || 'latest'}`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
@@ -1835,8 +1835,12 @@ this.loadLogs(),
   async loadTasks(): Promise<void> {
     const swarmName = this.selectedSwarmName();
     try {
-      const response = await this.apiService.listTasks(this.baseUrl(), {
-        swarm: swarmName ?? undefined,
+      if (!swarmName) {
+        this.tasks.set([]);
+        this.tasksLoaded.set(true);
+        return;
+      }
+      const response = await this.apiService.listTasks(this.baseUrl(), swarmName, {
         limit: 500,
         page: 1,
       });
@@ -1845,7 +1849,7 @@ this.loadLogs(),
       this.pushFeed(
         `Tasks 列表${swarmName ? ` · ${swarmName}` : ''}`,
         'GET',
-        `${this.baseUrl()}/tasks`,
+        `${this.baseUrl()}/swarms/${swarmName}/tasks/search`,
         'info',
         response
       );
@@ -1855,7 +1859,7 @@ this.loadLogs(),
         this.pushFeed(
           `Tasks 列表失败${swarmName ? ` · ${swarmName}` : ''}`,
           'GET',
-          `${this.baseUrl()}/tasks`,
+          `${this.baseUrl()}/swarms/${swarmName}/tasks/search`,
           'error',
           { error: errorSummary(error) }
         );
@@ -1872,12 +1876,12 @@ this.loadLogs(),
     try {
       const response = await this.apiService.getTaskGraph(this.baseUrl(), swarmName);
       this.selectedTaskGraph.set(response);
-      this.pushFeed(`任务图谱 · ${swarmName}`, 'GET', `${this.baseUrl()}/tasks/graph?swarm=${swarmName}`, 'info', response);
+      this.pushFeed(`任务图谱 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/task-graph`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.selectedTaskGraph.set(null);
         this.error.set(formatErrorDetail(error));
-        this.pushFeed(`任务图谱失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/tasks/graph?swarm=${swarmName}`, 'error', { error: errorSummary(error) });
+        this.pushFeed(`任务图谱失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/task-graph`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -1887,11 +1891,11 @@ this.loadLogs(),
       const response = await this.apiService.listTools(this.baseUrl(), {});
       this.tools.set(response.tools.map((item) => this.mapToolCatalogItem(item)));
       this.toolsLoaded.set(true);
-      this.pushFeed('Tools 列表', 'GET', `${this.baseUrl()}/tools`, 'info', response);
+      this.pushFeed('Tools 列表', 'POST', `${this.baseUrl()}/catalog/tools/search`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
-        this.pushFeed('Tools 列表失败', 'GET', `${this.baseUrl()}/tools`, 'error', { error: errorSummary(error) });
+        this.pushFeed('Tools 列表失败', 'POST', `${this.baseUrl()}/catalog/tools/search`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -1929,11 +1933,11 @@ this.loadLogs(),
       const response = await this.apiService.getSwarmStats(this.baseUrl(), swarmName);
       this.swarmStats.set(response);
       this.swarmStatsLoaded.set(true);
-      this.pushFeed(`Swarm 统计 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'info', response);
+      this.pushFeed(`Swarm 统计 · ${swarmName}`, 'GET', `${this.baseUrl()}/catalog/swarms/${swarmName}/stats`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
-        this.pushFeed(`Swarm 统计失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/stats`, 'error', { error: errorSummary(error) });
+        this.pushFeed(`Swarm 统计失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/catalog/swarms/${swarmName}/stats`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -1946,13 +1950,13 @@ this.loadLogs(),
       this.logs.set(response.items.map((item) => this.mapLogCatalogItem(item)));
       this.logsResponse.set(response);
       this.logsLoaded.set(true);
-      this.pushFeed('日志列表', 'GET', `${this.baseUrl()}/logs`, 'info', response);
+      this.pushFeed('日志列表', 'POST', `${this.baseUrl()}/catalog/logs/search`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.logsResponse.set(null);
         this.logsLoaded.set(false);
         this.error.set(formatErrorDetail(error));
-        this.pushFeed('日志列表失败', 'GET', `${this.baseUrl()}/logs`, 'error', { error: errorSummary(error) });
+        this.pushFeed('日志列表失败', 'POST', `${this.baseUrl()}/catalog/logs/search`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -1965,12 +1969,12 @@ this.loadLogs(),
       });
       this.metrics.set(response);
       this.metricsLoaded.set(true);
-      this.pushFeed('系统指标', 'GET', `${this.baseUrl()}/metrics`, 'info', response);
+      this.pushFeed('系统指标', 'POST', `${this.baseUrl()}/catalog/metrics`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.metricsLoaded.set(false);
         this.error.set(formatErrorDetail(error));
-        this.pushFeed('系统指标失败', 'GET', `${this.baseUrl()}/metrics`, 'error', { error: errorSummary(error) });
+        this.pushFeed('系统指标失败', 'POST', `${this.baseUrl()}/catalog/metrics`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -1980,12 +1984,12 @@ this.loadLogs(),
       const response = await this.apiService.listKnowledge(this.baseUrl(), { page: 1, limit: 500 });
       this.knowledge.set(response.items.map((item) => this.mapKnowledgeCatalogItem(item)));
       this.knowledgeLoaded.set(true);
-      this.pushFeed('知识库列表', 'GET', `${this.baseUrl()}/knowledge`, 'info', response);
+      this.pushFeed('知识库列表', 'POST', `${this.baseUrl()}/knowledge/search`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.knowledgeLoaded.set(false);
         this.error.set(formatErrorDetail(error));
-        this.pushFeed('知识库列表失败', 'GET', `${this.baseUrl()}/knowledge`, 'error', { error: errorSummary(error) });
+        this.pushFeed('知识库列表失败', 'POST', `${this.baseUrl()}/knowledge/search`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -1995,12 +1999,12 @@ this.loadLogs(),
       const response = await this.apiService.listMemory(this.baseUrl(), { page: 1, limit: 500 });
       this.memories.set(response.items.map((item) => this.mapMemoryCatalogItem(item)));
       this.memoriesLoaded.set(true);
-      this.pushFeed('记忆库列表', 'GET', `${this.baseUrl()}/memory`, 'info', response);
+      this.pushFeed('记忆库列表', 'POST', `${this.baseUrl()}/memory/search`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.memoriesLoaded.set(false);
         this.error.set(formatErrorDetail(error));
-        this.pushFeed('记忆库列表失败', 'GET', `${this.baseUrl()}/memory`, 'error', { error: errorSummary(error) });
+        this.pushFeed('记忆库列表失败', 'POST', `${this.baseUrl()}/memory/search`, 'error', { error: errorSummary(error) });
       }
     }
   }
@@ -2015,13 +2019,13 @@ this.loadLogs(),
     this.error.set(null);
     try {
       const response = await this.apiService.loadSwarm(this.baseUrl(), { source: trimmed, replace });
-      this.pushFeed(`Swarm 加载 · ${response.swarm.swarm_name}`, 'POST', `${this.baseUrl()}/swarms/load`, 'success', response);
+      this.pushFeed(`Swarm 加载 · ${response.swarm.swarm_name}`, 'POST', `${this.baseUrl()}/swarms`, 'success', response);
       this.selectedSwarmName.set(response.swarm.swarm_name);
       await this.loadOverview({ gracefulOffline: true });
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
-        this.pushFeed(`Swarm 加载失败 · ${trimmed}`, 'POST', `${this.baseUrl()}/swarms/load`, 'error', { error: errorSummary(error) });
+        this.pushFeed(`Swarm 加载失败 · ${trimmed}`, 'POST', `${this.baseUrl()}/swarms`, 'error', { error: errorSummary(error) });
       }
     } finally {
       this.loading.set(false);
@@ -2159,38 +2163,26 @@ this.loadLogs(),
     }
   }
 
-  async startSwarmStructure(): Promise<void> {
+  async startRun(): Promise<void> {
     const swarmName = this.selectedSwarmName();
     if (!swarmName) { this.error.set(makeUserError('启动结构前请选择一个 Swarm。')); return; }
     const prompt = this.swarmExecutionPrompt().trim();
     if (!prompt) { this.error.set(makeUserError('执行目标不能为空。')); return; }
     this.loading.set(true); this.error.set(null);
     try {
-      const response = await this.apiService.startSwarmBackground(this.baseUrl(), swarmName, {
+      const response = await this.apiService.startRun(this.baseUrl(), swarmName, {
         input: asJsonValue(this.buildSwarmExecutionInput()),
         rounds: this.swarmRounds(),
         meta_mode: this.metaMode(),
       });
       this.activeRun.set(response.run);
-      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'success', response);
+      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs`), 'success', response);
       this.watchRun(response.run);
     } catch (error) {
       this.error.set(formatErrorDetail(error));
-      this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/start/background`), 'error', { error: errorSummary(error) });
+      this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs`), 'error', { error: errorSummary(error) });
     }
     finally { this.loading.set(false); }
-  }
-
-  async startSwarmBackground(): Promise<void> {
-    await this.startSwarmStructure();
-  }
-
-  async runSwarmSync(): Promise<void> {
-    await this.startSwarmStructure();
-  }
-
-  async startBackgroundRun(): Promise<void> {
-    await this.startSwarmBackground();
   }
 
   async loadRunById(runId: string): Promise<void> {
@@ -2408,14 +2400,13 @@ this.loadLogs(),
   });
 
   private resolveRunUrl(run: RunSnapshot, kind: 'status' | 'events'): string {
-    const legacyPattern = /\/api\/runs\//;
     const rawUrl = kind === 'status' ? run.status_url : run.events_url;
     const canonicalPath = kind === 'status'
-      ? `/swarms/runs/${encodeURIComponent(run.run_id)}`
-      : `/swarms/runs/${encodeURIComponent(run.run_id)}/events`;
+      ? `/runs/${encodeURIComponent(run.run_id)}`
+      : `/runs/${encodeURIComponent(run.run_id)}/events`;
     const trimmedUrl = rawUrl?.trim();
 
-    if (trimmedUrl && !legacyPattern.test(trimmedUrl)) {
+    if (trimmedUrl) {
       if (trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')) {
         return trimmedUrl;
       }
