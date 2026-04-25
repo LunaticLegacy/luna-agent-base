@@ -35,7 +35,7 @@ At startup it:
 
 The public API is mounted under `/api`.
 
-### `GET /api/health`
+### `GET /api/runtime/health`
 
 Basic liveness check.
 
@@ -48,7 +48,7 @@ Example:
 }
 ```
 
-### `GET /api/ready`
+### `GET /api/runtime/ready`
 
 Checks whether the runtime is ready.
 
@@ -116,7 +116,7 @@ Includes:
 - `graph_errors`
 - `graph_warnings`
 
-### `POST /api/swarms/<swarm_name>/run`
+### `POST /api/swarms/<swarm_name>/runs/execute`
 
 Runs the selected swarm graph.
 
@@ -163,7 +163,7 @@ Returns:
 - `result`
 - `context`
 
-### `GET /api/swarms/<swarm_name>/graph`
+### `GET /api/swarms/<swarm_name>/agent-graph`
 
 Returns the current Agent graph snapshot.
 
@@ -173,7 +173,7 @@ Used by the frontend to draw the static Agent graph before overlaying runtime st
 
 Returns the full execution graph snapshot, including tool-routing nodes and runtime-only structure.
 
-### `GET /api/swarms/<swarm_name>/execution-trace`
+### `GET /api/swarms/<swarm_name>/execution-traces/latest`
 
 Returns the latest run events as an execution trace.
 
@@ -181,10 +181,10 @@ Returns the latest run events as an execution trace.
 
 Starts an async run session and returns a `run_id` immediately.
 
-### `GET /api/swarms/runs/<run_id>`
+### `GET /api/runs/<run_id>`
 
 Returns the current state snapshot of an async run session.
 
-### `GET /api/swarms/runs/<run_id>/events`
+### `GET /api/runs/<run_id>/events`
 
 Subscribes to the SSE event stream for a run session.

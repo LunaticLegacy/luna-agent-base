@@ -6,12 +6,12 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/runtime/health")
 async def health():
     return {"success": True, "status": "ok"}
 
 
-@router.get("/ready")
+@router.get("/runtime/ready")
 async def ready(request: Request):
     registry = getattr(request.app.state, "angelus_runtime", None)
     if registry is None:
@@ -46,3 +46,21 @@ async def ready(request: Request):
         return JSONResponse({"success": False, "ready": False, "invalid_swarms": invalid}, status_code=503)
 
     return {"success": True, "ready": True, "swarm_count": len(swarms)}
+
+
+@router.get("/runtime/status")
+async def runtime_status(request: Request):
+    registry = getattr(request.app.state, "angelus_runtime", None)
+    if registry is None:
+        return JSONResponse(
+            {"success": False, "status": "unavailable", "reason": "runtime registry missing"},
+            status_code=503,
+        )
+    return {
+        "success": True,
+        "status": "ok" if not registry.load_error else "degraded",
+        "service": "angelus",
+        "swarm_count": len(registry.swarms),
+        "active_run_count": registry.runs.active_run_count(),
+        "load_error": registry.load_error,
+    }

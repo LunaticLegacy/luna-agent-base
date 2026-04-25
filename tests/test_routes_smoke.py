@@ -291,21 +291,21 @@ class RouteSmokeTest(unittest.TestCase):
         self.assertTrue(detail["success"])
         self.assertEqual(detail["swarm"]["swarm_name"], "demo")
 
-        graph_response = self.client.get("/api/swarms/demo/graph")
+        graph_response = self.client.get("/api/swarms/demo/agent-graph")
         self.assertEqual(graph_response.status_code, 200)
         graph = graph_response.json()
         self.assertTrue(graph["success"])
         self.assertEqual(graph["graph"]["graph_name"], "demo-graph")
         self.assertEqual(graph["graph"]["revision"], 1)
 
-        graph_state_response = self.client.get("/api/swarms/demo/graph/state?since_revision=0")
+        graph_state_response = self.client.post("/api/swarms/demo/graph/state", json={"since_revision": 0})
         self.assertEqual(graph_state_response.status_code, 200)
         graph_state = graph_state_response.json()
         self.assertTrue(graph_state["success"])
         self.assertTrue(graph_state["has_changes_since"])
         self.assertEqual(graph_state["graph"]["revision"], 1)
 
-        graph_diff_response = self.client.get("/api/swarms/demo/graph/diff?since_revision=0")
+        graph_diff_response = self.client.post("/api/swarms/demo/graph/diff", json={"since_revision": 0})
         self.assertEqual(graph_diff_response.status_code, 200)
         graph_diff = graph_diff_response.json()
         self.assertTrue(graph_diff["success"])
@@ -319,14 +319,14 @@ class RouteSmokeTest(unittest.TestCase):
         self.assertEqual(thought["thought_graph"]["nodes"][0]["node_type"], "fact")
         self.assertIn("active_subgraphs", thought["thought_graph"])
 
-        task_graph_response = self.client.get("/api/tasks/graph?swarm=demo")
+        task_graph_response = self.client.get("/api/swarms/demo/task-graph")
         self.assertEqual(task_graph_response.status_code, 200)
         task_graph = task_graph_response.json()
         self.assertTrue(task_graph["success"])
         self.assertEqual(task_graph["graph"]["graph_id"], "tasks_demo")
         self.assertIn("summary", task_graph["graph"])
 
-        run_response = self.client.post("/api/swarms/demo/run", json={"input": {"hello": "world"}, "rounds": 2})
+        run_response = self.client.post("/api/swarms/demo/runs/execute", json={"input": {"hello": "world"}, "rounds": 2})
         self.assertEqual(run_response.status_code, 200)
         run_payload = run_response.json()
         self.assertTrue(run_payload["success"])
@@ -338,14 +338,14 @@ class RouteSmokeTest(unittest.TestCase):
         background_payload = background_response.json()
         self.assertTrue(background_payload["success"])
         run_snapshot = background_payload["run"]
-        self.assertEqual(run_snapshot["events_url"], f"/api/swarms/runs/{run_snapshot['run_id']}/events")
-        self.assertEqual(run_snapshot["status_url"], f"/api/swarms/runs/{run_snapshot['run_id']}")
+        self.assertEqual(run_snapshot["events_url"], f"/api/runs/{run_snapshot['run_id']}/events")
+        self.assertEqual(run_snapshot["status_url"], f"/api/runs/{run_snapshot['run_id']}")
 
-        stream_response = self.client.get(f"/api/swarms/runs/{run_snapshot['run_id']}/events")
+        stream_response = self.client.get(f"/api/runs/{run_snapshot['run_id']}/events")
         self.assertEqual(stream_response.status_code, 200)
         stream_text = stream_response.text
         self.assertIn("event: run.snapshot", stream_text)
-        self.assertIn(f"\"status_url\": \"/api/swarms/runs/{run_snapshot['run_id']}\"", stream_text)
+        self.assertIn(f"\"status_url\": \"/api/runs/{run_snapshot['run_id']}\"", stream_text)
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 2)
 
     def test_settings_routes_round_trip_config_file(self) -> None:
@@ -384,13 +384,13 @@ class RouteSmokeTest(unittest.TestCase):
     def test_mutating_routes_require_token_when_auth_enabled(self) -> None:
         self.runtime.root_config.api = ApiConfig(require_auth=True, api_token="secret-token")
 
-        unauthorized = self.client.post("/api/swarms/demo/run", json={"input": "hello"})
+        unauthorized = self.client.post("/api/swarms/demo/runs/execute", json={"input": "hello"})
         self.assertEqual(unauthorized.status_code, 401)
         self.assertFalse(unauthorized.json()["success"])
         self.assertEqual(self.runtime.swarms["demo"].core.reset_calls, 0)
 
         authorized = self.client.post(
-            "/api/swarms/demo/run",
+            "/api/swarms/demo/runs/execute",
             json={"input": "hello"},
             headers={"Authorization": "Bearer secret-token"},
         )

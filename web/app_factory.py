@@ -8,11 +8,9 @@ from core.swarm_loader import SwarmLoaderError
 from web.content_store import ContentStore
 from web.runtime import RuntimeRegistry
 from web.task_store import TaskStore
-from web.routes.swarms import router as swarms_router
-from web.routes.swarms import _serialize_swarm_with_runtime
 
 from .errors import register_error_handlers
-from .routes import catalog_router, content_router, health_router, settings_router, tasks_router
+from .routes import catalog_router, content_router, health_router, runs_router, settings_router, swarms_router, tasks_router
 from .security import install_api_security
 
 
@@ -48,16 +46,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
     app.include_router(settings_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
     app.include_router(swarms_router, prefix="/api/swarms")
-
-    @app.get("/api/swarms")
-    async def api_swarms():
-        return {
-            "success": True,
-            "swarms": [
-                _serialize_swarm_with_runtime(app.state.angelus_runtime, swarm)
-                for swarm in app.state.angelus_runtime.swarms.values()
-            ],
-        }
+    app.include_router(runs_router, prefix="/api/runs")
 
     @app.get("/")
     async def index():
@@ -76,6 +65,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
             "swarm_count": len(app.state.angelus_runtime.swarms),
             "load_error": app.state.angelus_runtime.load_error,
             "api_root": "/api",
+            "api_version": "v2",
         }
 
     return app
