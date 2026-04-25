@@ -6,10 +6,8 @@
 
 ```mermaid
 flowchart TD
-    A[POST /api/swarms/<swarm>/run] --> B[_execute_swarm_run]
-    A2[POST /api/swarms/<swarm>/start] --> B
+    A[POST /api/swarms/<swarm>/runs/execute] --> B[_execute_swarm_run]
     C[POST /api/swarms/<swarm>/runs] --> D[RunRegistry.launch_run]
-    C2[POST /api/swarms/<swarm>/start/background] --> D
 
     B --> E[ExecutionGraph.run / MetaExecutor.run]
     D --> F[创建 RunRecord]
@@ -19,8 +17,8 @@ flowchart TD
     I --> J[RunRecord.snapshot]
     I --> K[RunRecord.stream_events]
 
-    L[GET /api/swarms/runs/<run_id>] --> J
-    M[GET /api/swarms/runs/<run_id>/events] --> K
+    L[GET /api/runs/<run_id>] --> J
+    M[GET /api/runs/<run_id>/events] --> K
 ```
 
 当前实现里，执行链路分成两类：
@@ -32,14 +30,12 @@ flowchart TD
 
 `web/routes/swarms.py` 里和运行相关的路由是这些：
 
-- `POST /api/swarms/<swarm_name>/run`
-- `POST /api/swarms/<swarm_name>/start`
+- `POST /api/swarms/<swarm_name>/runs/execute`
 - `POST /api/swarms/<swarm_name>/runs`
-- `POST /api/swarms/<swarm_name>/start/background`
-- `GET /api/swarms/runs/<run_id>`
-- `GET /api/swarms/runs/<run_id>/events`
+- `GET /api/runs/<run_id>`
+- `GET /api/runs/<run_id>/events`
 
-`web/app_factory.py` 里把 `swarms_bp` 注册到了 `/api/swarms` 前缀下，所以这些路径会以 `/api/swarms/...` 的形式暴露。
+`web/app_factory.py` 里把 `swarms_router` 注册到 `/api/swarms`，把 `runs_router` 注册到 `/api/runs`。启动 run 是 swarm 下的动作，查询 run 和订阅 SSE 是 run 自己的资源。
 
 ## 3. 同步运行
 
@@ -78,7 +74,7 @@ flowchart TD
 
 ### 3.3 运行态隔离
 
-当前实现里，`/run` 和 `/runs` 在正式执行前都会先重置 swarm 级运行态，避免上一轮残留影响下一轮输入。
+当前实现里，`/runs/execute` 和 `/runs` 在正式执行前都会先重置 swarm 级运行态，避免上一轮残留影响下一轮输入。
 
 这里的重置包括：
 
@@ -260,7 +256,7 @@ flowchart TD
 
 ## 7. SSE 事件流
 
-`GET /api/swarms/runs/<run_id>/events` 由 `stream_run()` 提供，响应类型是 `text/event-stream`。
+`GET /api/runs/<run_id>/events` 由 `stream_run()` 提供，响应类型是 `text/event-stream`。
 
 ### 7.1 事件流起始行为
 
@@ -309,14 +305,14 @@ flowchart TD
 
 | 项目 | 现在生成的值 | 真实路由 |
 |---|---|---|
-| `status_url` | `/api/swarms/runs/{run_id}` | `/api/swarms/runs/{run_id}` |
-| `events_url` | `/api/swarms/runs/{run_id}/events` | `/api/swarms/runs/{run_id}/events` |
+| `status_url` | `/api/runs/{run_id}` | `/api/runs/{run_id}` |
+| `events_url` | `/api/runs/{run_id}/events` | `/api/runs/{run_id}/events` |
 
 也就是说：
 
 - 后端快照里写的 URL 现在已经和实际暴露地址一致
 - 前端仍保留了对旧快照格式的防御性回退，避免读取到历史缓存值时出错
-- 新的快照和 SSE 订阅都直接指向 `/api/swarms/runs/...`
+- 新的快照和 SSE 订阅都直接指向 `/api/runs/...`
 
 另外还有一个小细节：
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from modules.llm_fetcher import LLMFetcher
 
@@ -12,8 +13,81 @@ from ..skills import SkillAsset
 from ..toodefl import ToolDefinition, normalize_capabilities
 
 
+class AgentInstancePool:
+    """Resolve agent blueprints into runtime instances."""
+
+    def __init__(self, core: Any) -> None:
+        self.core = core
+        self._quarantined: Set[str] = set()
+        self._active_counts: Dict[str, int] = {}
+
+    def acquire(self, blueprint_ref: str, *, instance_policy: str = "singleton") -> AgentLike:
+        if blueprint_ref in self._quarantined:
+            raise RuntimeError(f"Agent blueprint '{blueprint_ref}' is quarantined.")
+        normalized_policy = str(instance_policy or "singleton").strip().lower() or "singleton"
+        self._active_counts[blueprint_ref] = self._active_counts.get(blueprint_ref, 0) + 1
+        if normalized_policy == "singleton":
+            return self.core.get_agent_blueprint(blueprint_ref)
+
+        if normalized_policy != "per_call":
+            raise ValueError(f"Unsupported agent instance policy: {instance_policy}")
+
+        prototype = self.core.get_agent_blueprint(blueprint_ref)
+        clone_for_runtime = getattr(prototype, "clone_for_runtime", None)
+        if not callable(clone_for_runtime):
+            return prototype
+        instance = clone_for_runtime()
+        set_run_id = getattr(instance, "set_run_id", None)
+        if callable(set_run_id):
+            set_run_id(self.core.current_run_id)
+        return instance
+
+    def release(self, blueprint_ref: str) -> None:
+        if blueprint_ref not in self._active_counts:
+            return
+        remaining = max(0, int(self._active_counts.get(blueprint_ref, 0)) - 1)
+        if remaining == 0:
+            self._active_counts.pop(blueprint_ref, None)
+            return
+        self._active_counts[blueprint_ref] = remaining
+
+    def quarantine(self, blueprint_ref: str) -> None:
+        if blueprint_ref:
+            self._quarantined.add(blueprint_ref)
+
+    def restore(self, blueprint_ref: str) -> None:
+        self._quarantined.discard(blueprint_ref)
+
+    async def drain(self, blueprint_ref: str, timeout: float = 5.0) -> Dict[str, Any]:
+        deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout))
+        while self._active_counts.get(blueprint_ref, 0) > 0:
+            if asyncio.get_running_loop().time() >= deadline:
+                return {
+                    "blueprint_ref": blueprint_ref,
+                    "drained": False,
+                    "active_count": self._active_counts.get(blueprint_ref, 0),
+                }
+            await asyncio.sleep(0.01)
+        return {
+            "blueprint_ref": blueprint_ref,
+            "drained": True,
+            "active_count": 0,
+        }
+
+
 class RuntimeRegistryMixin:
     """Agent, tool, and skill registry helpers for a runtime core."""
+
+    def register_agent_blueprint(self, blueprint_ref: str, agent: AgentLike) -> None:
+        self.agent_blueprints[blueprint_ref] = agent
+
+    def has_agent_blueprint(self, blueprint_ref: str) -> bool:
+        return blueprint_ref in self.agent_blueprints or blueprint_ref in self.agents
+
+    def get_agent_blueprint(self, blueprint_ref: str) -> AgentLike:
+        if blueprint_ref in self.agent_blueprints:
+            return self.agent_blueprints[blueprint_ref]
+        return self.get_agent(blueprint_ref)
 
     def create_agent(
         self,
@@ -48,6 +122,7 @@ class RuntimeRegistryMixin:
         )
         agent.set_run_id(self.current_run_id)
         self.add_agent(agent)
+        self.register_agent_blueprint(agent_id, agent)
         return agent
 
     def add_agent(self, agent: AgentLike) -> None:
@@ -80,6 +155,20 @@ class RuntimeRegistryMixin:
             return self.agents[agent_id]
         except KeyError as exc:
             raise KeyError(f"Unknown agent_id: {agent_id}") from exc
+
+    def acquire_agent_instance(
+        self,
+        blueprint_ref: str,
+        *,
+        instance_policy: str = "singleton",
+    ) -> AgentLike:
+        return self.agent_instance_pool.acquire(
+            blueprint_ref,
+            instance_policy=instance_policy,
+        )
+
+    def release_agent_instance(self, blueprint_ref: str) -> None:
+        self.agent_instance_pool.release(blueprint_ref)
 
     def list_agents(self) -> List[AgentLike]:
         return list(self.agents.values())
@@ -119,6 +208,68 @@ class RuntimeRegistryMixin:
         except KeyError as exc:
             raise KeyError(f"Unknown tool_name: {tool_name}") from exc
 
+    def register_api(
+        self,
+        api_name: str,
+        api: Any,
+        *,
+        origin: str = "package",
+        source: Optional[str] = None,
+    ) -> None:
+        normalized_name = str(api_name).strip()
+        if not normalized_name:
+            raise ValueError("api_name must not be empty.")
+        if normalized_name in self.apis:
+            raise ValueError(f"Duplicate api_name: {normalized_name}")
+        normalized_origin = str(origin or "package").strip().lower() or "package"
+        self.apis[normalized_name] = api
+        self.api_sources[normalized_name] = {
+            "origin": normalized_origin,
+            "source": source,
+        }
+        self._record_runtime_change(
+            action="register_api",
+            subject_kind="api",
+            subject_id=normalized_name,
+            detail={
+                "origin": normalized_origin,
+                "source": source,
+                "type": api.__class__.__name__,
+            },
+        )
+
+    def get_api(self, api_name: str) -> Any:
+        try:
+            return self.apis[api_name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown api_name: {api_name}") from exc
+
+    def get_api_metadata(self, api_name: str) -> Dict[str, Any]:
+        if api_name not in self.api_sources:
+            raise KeyError(f"Unknown api_name: {api_name}")
+        return dict(self.api_sources[api_name])
+
+    def list_apis(self, *, origin: Optional[str] = None) -> List[Any]:
+        if origin is None:
+            return list(self.apis.values())
+        normalized_origin = str(origin).strip().lower()
+        return [
+            api
+            for name, api in self.apis.items()
+            if str(self.api_sources.get(name, {}).get("origin", "")).strip().lower() == normalized_origin
+        ]
+
+    def remove_api(self, api_name: str) -> None:
+        removed = self.apis.pop(api_name, None)
+        metadata = self.api_sources.pop(api_name, None)
+        if removed is not None or metadata is not None:
+            self._record_runtime_change(
+                action="remove_api",
+                subject_kind="api",
+                subject_id=api_name,
+                detail=metadata or {},
+            )
+
     def register_skill(self, skill: SkillAsset) -> None:
         canonical = f"{self.agent_name}/{skill.name}"
         if canonical in self.skills:
@@ -145,4 +296,3 @@ class RuntimeRegistryMixin:
 
     def list_skills(self) -> List[SkillAsset]:
         return list(self.skills.values())
-

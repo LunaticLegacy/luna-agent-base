@@ -51,7 +51,9 @@
 
 `StateService.loadLogs()` 会调用：
 
-- `GET /api/logs?page=1&limit=200`
+- `POST /api/catalog/logs/search`
+
+分页条件放在 JSON body 里，例如 `{"page": 1, "limit": 200}`。
 
 返回后，前端会把 `response.items` 映射为页面使用的 `LogItem`，再写入 `state.logs()`。
 

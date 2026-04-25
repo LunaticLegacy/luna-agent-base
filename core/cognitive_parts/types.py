@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Dict, List
 
 
+# 认知节点类型。
 class CognitiveNodeType(str, Enum):
     FACT = "fact"
     GOAL = "goal"
@@ -23,7 +24,7 @@ class CognitiveNodeType(str, Enum):
     TOOL_RESULT = "tool_result"
     EXECUTION_TRACE = "execution_trace"
 
-
+# 认知关系类型。
 class CognitiveRelationType(str, Enum):
     SUPPORTS = "supports"
     OPPOSES = "opposes"
@@ -39,6 +40,7 @@ class CognitiveRelationType(str, Enum):
     EVIDENCE_FOR = "evidence_for"
 
 
+# 认知图
 @dataclass
 class CognitiveSubgraphDescriptor:
     """A schedulable view into the shared thought graph."""
@@ -86,7 +88,7 @@ class CognitiveSubgraphDescriptor:
             created_at=str(data.get("created_at", datetime.now(timezone.utc).isoformat())),
         )
 
-
+# 一个人直接点。
 @dataclass
 class CognitiveNode:
     """A single thought / claim / evidence piece in the cognitive space."""

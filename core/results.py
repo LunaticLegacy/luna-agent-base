@@ -24,6 +24,17 @@ class AgentRoundResult:
     raw_response: Any = None
     additional_prompt: Optional[str] = None
     cognitive_graph_snapshot: Optional[Dict[str, Any]] = None
+    cognitive_graph_delta: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class NodeExecutionResult:
+    """Normalized result produced by one graph node."""
+
+    output_payload: Any
+    routing_payload: Any
+    state_payload: Any
+    next_node_override: Optional[int] = None
 
 
 @dataclass

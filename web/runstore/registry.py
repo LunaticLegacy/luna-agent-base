@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core.executor import GraphExecutor
 from core.results import ExecutionEvent
 
 from .record import RunRecord
@@ -122,7 +123,8 @@ class RunRegistry:
                     event_sink=record.append_event,
                 )
             else:
-                await graph.run(
+                await GraphExecutor().execute(
+                    graph,
                     core,
                     initial_payload,
                     rounds=rounds,

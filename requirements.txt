@@ -2,4 +2,5 @@ openai
 litellm
 redis
 asyncpg
-Flask[async]
+fastapi
+uvicorn

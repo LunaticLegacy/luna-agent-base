@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import shutil
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from core.agent import Agent
 from core.toodefl import ToolContext, ToolDefinition
+
+
+TEST_ARTIFACT_ROOT = Path(__file__).resolve().parent / ".artifacts"
+
+
+def make_test_workspace(name: str) -> Path:
+    path = TEST_ARTIFACT_ROOT / name
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class RecordingLLM:
@@ -72,6 +85,7 @@ class DummyCore:
 
 class AgentToolLoopTest(unittest.IsolatedAsyncioTestCase):
     async def test_tool_result_is_available_to_next_llm_call(self) -> None:
+        workspace_root = make_test_workspace("agent_tool_loop")
         llm = RecordingLLM()
         tool = RecordingTool()
         agent = Agent(
@@ -80,15 +94,21 @@ class AgentToolLoopTest(unittest.IsolatedAsyncioTestCase):
             character_prompt="Use tools.",
             tools=[tool],
             core=DummyCore(tool),
+            workspace_root=workspace_root,
+            swarm_name="test_swarm",
         )
 
-        await agent.round_call(rounds=1, user_message="hello")
+        try:
+            await agent.round_call(rounds=1, user_message="hello")
 
-        second_prev_messages = llm.prev_messages[1]
-        self.assertTrue(
-            any("seen needle" in message.content for message in second_prev_messages),
-            second_prev_messages,
-        )
+            second_prev_messages = llm.prev_messages[1]
+            self.assertTrue(
+                any("seen needle" in message.content for message in second_prev_messages),
+                second_prev_messages,
+            )
+            self.assertTrue((workspace_root / ".angelus_private").exists())
+        finally:
+            shutil.rmtree(workspace_root, ignore_errors=True)
 
 
 if __name__ == "__main__":

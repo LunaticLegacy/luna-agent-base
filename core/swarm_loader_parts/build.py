@@ -18,8 +18,11 @@ from .utils import (
     _resolve_workspace_for_agent,
     _resolve_package_local_path,
     _load_module_from_entry,
+    collect_api_requirement_files,
     collect_tool_requirement_files,
+    install_api_requirements,
     install_tool_requirements,
+    load_swarm_apis,
     load_swarm_tools,
     _resolve_module_path,
 )
@@ -46,7 +49,9 @@ class LoadedSwarm:
     core: Core
     skills: Dict[str, SkillAsset] = field(default_factory=dict)
     tools: Dict[str, ToolDefinition] = field(default_factory=dict)
+    apis: Dict[str, object] = field(default_factory=dict)
     tool_requirement_files: List[Path] = field(default_factory=list)
+    api_requirement_files: List[Path] = field(default_factory=list)
 
 
 def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) -> ExecutionGraph:
@@ -122,7 +127,8 @@ def build_core_from_package(
 
     print(
         f"[angelus] loaded assets: swarm={manifest.swarm_name} "
-        f"agents={len(blueprints)} skills={len(skills)} tools_declared={len(manifest.tool_files)}",
+        f"agents={len(blueprints)} skills={len(skills)} tools_declared={len(manifest.tool_files)} "
+        f"apis_declared={len(manifest.api_files)}",
         flush=True,
     )
 
@@ -141,6 +147,7 @@ def build_core_from_package(
     )
     core.workspace_mode = default_workspace_mode
     core.set_runtime_info_dir(package_path / "runtime_info")
+    core.set_global_variables(manifest.global_variables)
 
     for skill in skills:
         core.register_skill(skill)
@@ -163,6 +170,22 @@ def build_core_from_package(
         core.set_tool_capabilities(tool.tool_name, manifest.tool_capabilities.get(tool.tool_name, []))
         print(
             f"[angelus] registered tool: swarm={manifest.swarm_name} tool={tool.tool_name}",
+            flush=True,
+        )
+
+    apis, api_requirement_files = load_swarm_apis(package_path, manifest)
+    for api_name, entry in apis.items():
+        core.register_api(
+            api_name,
+            entry["api"],
+            origin=str(entry.get("origin", "package")),
+            source=str(entry.get("source") or ""),
+        )
+        register_hook = getattr(entry["api"], "register_api", None)
+        if callable(register_hook):
+            register_hook(core)
+        print(
+            f"[angelus] registered api: swarm={manifest.swarm_name} api={api_name} origin={entry.get('origin', 'package')}",
             flush=True,
         )
 
@@ -206,7 +229,7 @@ def build_core_from_package(
     core.set_execution_graph(graph)
     print(
         f"[angelus] swarm loaded: name={manifest.swarm_name} agents={len(core.agents)} "
-        f"skills={len(core.skills)} tools={len(core.tools)}",
+        f"skills={len(core.skills)} tools={len(core.tools)} apis={len(getattr(core, 'apis', {}))}",
         flush=True,
     )
     return LoadedSwarm(
@@ -216,7 +239,9 @@ def build_core_from_package(
         core=core,
         skills={skill.name: skill for skill in skills},
         tools=tools,
+        apis={name: entry["api"] for name, entry in apis.items()},
         tool_requirement_files=tool_requirement_files,
+        api_requirement_files=api_requirement_files,
     )
 
 
@@ -237,6 +262,14 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -
                 flush=True,
             )
         install_tool_requirements(requirements)
+
+    api_requirements = collect_api_requirement_files(package_paths, manifest_entries)
+    if preinstall_tool_requirements and api_requirements:
+        print(
+            f"[angelus] preinstalling api requirements: files={len(api_requirements)}",
+            flush=True,
+        )
+        install_api_requirements(api_requirements)
 
     swarms: List[LoadedSwarm] = []
     for package_path, (manifest_path, manifest) in zip(package_paths, manifest_entries):

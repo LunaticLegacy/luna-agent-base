@@ -27,17 +27,37 @@ class ScriptedAgent:
 class DummyCore:
     def __init__(self, agents: dict[str, ScriptedAgent], tools=None) -> None:
         self.agents = agents
+        self.agent_blueprints = dict(agents)
         self.tools = tools or {}
         self.swarm_cognitive_graph = CognitiveGraph(graph_id="shared")
+        self.current_run_id = None
 
     def get_agent(self, agent_id: str) -> ScriptedAgent:
         return self.agents[agent_id]
+
+    def get_agent_blueprint(self, blueprint_ref: str) -> ScriptedAgent:
+        return self.agent_blueprints[blueprint_ref]
+
+    def has_agent_blueprint(self, blueprint_ref: str) -> bool:
+        return blueprint_ref in self.agent_blueprints
+
+    def acquire_agent_instance(self, blueprint_ref: str, *, instance_policy: str = "singleton"):
+        if instance_policy == "per_call":
+            prototype = self.agent_blueprints[blueprint_ref]
+            clone = getattr(prototype, "clone_for_runtime", None)
+            if callable(clone):
+                return clone()
+        return self.agent_blueprints[blueprint_ref]
 
     def get_tool(self, tool_name: str):
         return self.tools[tool_name]
 
     def merge_agent_cognitive_graph(self, agent_id: str) -> None:
         return None
+
+    def merge_agent_cognitive_delta(self, agent_id: str, snapshot) -> None:
+        if snapshot:
+            self.swarm_cognitive_graph = CognitiveGraph.from_dict(snapshot)
 
     def get_cognitive_graph_export(self, query=None, max_nodes=20) -> str:
         return ""
@@ -143,6 +163,36 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(ValueError, "not an allowed outgoing edge"):
             await GraphExecutor().execute(graph, core, "mission")
+
+    async def test_per_call_agent_node_uses_fresh_runtime_instance(self) -> None:
+        class CloneableScriptedAgent(ScriptedAgent):
+            def __init__(self, *responses: str) -> None:
+                super().__init__(*responses)
+                self.clone_count = 0
+
+            def clone_for_runtime(self):
+                self.clone_count += 1
+                return CloneableScriptedAgent(*self.responses)
+
+        graph = ExecutionGraph("per-call")
+        graph.add_node(
+            AgentNode(
+                node_id=1,
+                node_name="writer",
+                blueprint_ref="writer",
+                instance_policy="per_call",
+                next_node_ids=[],
+            )
+        )
+        graph.set_entry(1)
+        graph.set_exit(1)
+        prototype = CloneableScriptedAgent('{"content": "draft"}')
+        core = DummyCore({"writer": prototype})
+
+        state = await GraphExecutor().execute(graph, core, "mission")
+
+        self.assertEqual(state.payload, "draft")
+        self.assertEqual(prototype.clone_count, 1)
 
 
 if __name__ == "__main__":

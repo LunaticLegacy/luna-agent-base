@@ -36,7 +36,7 @@
 
 `StateService.loadEvents()` 会调用：
 
-- `GET /api/events`
+- `POST /api/catalog/events/search`
 
 然后把返回的 `response.items` 映射成页面使用的 `EventItem`，存进 `state.events()`。
 
@@ -130,7 +130,7 @@
 
 `StateService.watchRun()` 会在后台运行启动后被调用，典型入口是：
 
-- `startSwarmBackground()`
+- `startRun()`
 - 以及它内部继续调用的 `watchRun(response.run)`
 
 它会根据 `run.events_url` 创建 `EventSource`，然后监听：

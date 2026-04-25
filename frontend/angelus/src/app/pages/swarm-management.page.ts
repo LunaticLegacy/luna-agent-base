@@ -21,7 +21,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
               {{ state.health()?.status === 'ok' ? '运行中' : '离线' }}
             </span>
           </div>
-          <p class="subtitle">ID: {{ state.selectedSwarm()?.swarm_name || '—' }} · 最后更新: —</p>
+          <p class="subtitle">{{ state.swarmSummaryText() }}</p>
         </div>
         <div class="header-actions">
           <button class="btn btn-secondary" (click)="reloadSwarm()" [disabled]="state.loadingDetails() || state.loading()">
@@ -41,7 +41,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
               </div>
             }
           </div>
-          <button class="btn btn-secondary" (click)="state.activeRun() && state.startSwarmStructure()" [disabled]="!state.activeRun()">
+          <button class="btn btn-secondary" (click)="state.activeRun() && state.startRun()" [disabled]="!state.activeRun()">
             重新启动结构
           </button>
         </div>
@@ -54,7 +54,8 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
         { label: '当前任务', value: state.activeRunStatusText() },
         { label: '成功率', value: state.swarmMgmtStats().successRate + '%', tone: 'good' },
         { label: '任务吞吐量', value: state.swarmMgmtStats().throughput },
-        { label: 'Token 使用', value: state.swarmMgmtStats().tokenUsage }
+        { label: 'Token 使用', value: state.swarmMgmtStats().tokenUsage },
+        { label: 'API 数量', value: state.swarmMgmtStats().apiCount ?? (state.selectedSwarm()?.api_count ?? 0) }
       ]"></app-stat-card-grid>
 
       <!-- Tab Bar -->
@@ -191,7 +192,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     </td>
                     <td>{{ state.activeRun()?.started_at || '刚刚' }}</td>
                     <td>
-                      <button class="btn btn-sm" (click)="state.startSwarmStructure()">启动结构</button>
+                      <button class="btn btn-sm" (click)="state.startRun()">启动结构</button>
                     </td>
                   </tr>
                 } @else {
@@ -488,8 +489,30 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                 <div class="info-row"><span class="info-key">Agent 数量</span><span class="info-val">{{ state.selectedSwarm()?.agent_count ?? 0 }}</span></div>
                 <div class="info-row"><span class="info-key">技能数量</span><span class="info-val">{{ state.selectedSwarm()?.skill_count ?? 0 }}</span></div>
                 <div class="info-row"><span class="info-key">工具数量</span><span class="info-val">{{ state.selectedSwarm()?.tool_count ?? 0 }}</span></div>
+                <div class="info-row"><span class="info-key">API 数量</span><span class="info-val">{{ state.selectedSwarm()?.api_count ?? 0 }}</span></div>
                 <div class="info-row"><span class="info-key">Graph 有效</span><span class="info-val">{{ state.selectedSwarm()?.graph_valid ? '是' : '否' }}</span></div>
               </div>
+            </app-panel-card>
+            <app-panel-card title="API 列表" [badge]="state.apis().length" [noPadding]="true">
+              @if (state.apisLoaded() && state.apis().length > 0) {
+                <div class="table-wrap">
+                  <table class="data-table">
+                    <thead><tr><th>名称</th><th>来源</th><th>类型</th><th>路径</th></tr></thead>
+                    <tbody>
+                      @for (api of state.apis(); track api.name) {
+                        <tr>
+                          <td class="mono">{{ api.name }}</td>
+                          <td><span class="pill active">{{ api.origin }}</span></td>
+                          <td>{{ api.type }}</td>
+                          <td class="mono">{{ api.source || '—' }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              } @else {
+                <app-empty-state message="暂无已注册 API"></app-empty-state>
+              }
             </app-panel-card>
           </div>
         }

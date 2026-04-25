@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, current_app, jsonify, request
+from fastapi import APIRouter, Request
 
 from web.catalog import (
     build_agent_catalog,
@@ -8,38 +8,22 @@ from web.catalog import (
     build_log_catalog,
     build_metrics_catalog,
     build_swarm_stats,
-    build_task_catalog,
     build_tool_catalog,
 )
-from web.errors import ApiError
+from web.deps import get_runtime_registry, parse_json_body
 
-catalog_bp = Blueprint("catalog", __name__)
-
-
-def _get_runtime_registry():
-    registry = current_app.extensions.get("angelus_runtime")
-    if registry is None:
-        raise ApiError("Runtime registry is not initialized.")
-    return registry
+router = APIRouter()
 
 
-def _parse_int(raw, default: int) -> int:
-    try:
-        return int(raw)
-    except Exception:
-        return default
+async def _json_filters(request: Request) -> dict:
+    return await parse_json_body(request)
 
 
-def _parse_time_arg(name: str):
-    value = request.args.get(name)
-    return value if value else None
-
-
-@catalog_bp.get("/swarms/<string:swarm_name>/agents")
-def list_swarm_agents(swarm_name: str):
-    registry = _get_runtime_registry()
+@router.post("/catalog/swarms/{swarm_name}/agents/search")
+async def list_swarm_agents(swarm_name: str, request: Request):
+    registry = get_runtime_registry(request)
     swarm = registry.get_swarm(swarm_name)
-    request_args = request.args
+    request_args = await _json_filters(request)
     agents, _ = build_agent_catalog(swarm, registry.runs.list_runs(swarm_name))
 
     normalized_query = str(request_args.get("q", "")).strip().lower()
@@ -88,100 +72,77 @@ def list_swarm_agents(swarm_name: str):
         "token_usage_total": sum(int(agent.get("token_usage_total", 0)) for agent in filtered),
     }
 
-    return jsonify(
-        {
-            "success": True,
-            "swarm": swarm_name,
-            "total": len(filtered),
-            "agents": filtered,
-            "stats": filtered_stats,
-        }
-    )
+    return {
+        "success": True,
+        "swarm": swarm_name,
+        "total": len(filtered),
+        "agents": filtered,
+        "stats": filtered_stats,
+    }
 
 
-@catalog_bp.get("/tasks")
-def list_tasks():
-    registry = _get_runtime_registry()
-    swarm_name = request.args.get("swarm") or None
-    if swarm_name:
-        registry.get_swarm(swarm_name)
-
-    page = _parse_int(request.args.get("page", 1), 1)
-    limit = _parse_int(request.args.get("limit", 20), 20)
-    payload = build_task_catalog(
-        registry,
-        swarm_name=swarm_name,
-        status=request.args.get("status"),
-        priority=request.args.get("priority"),
-        executor=request.args.get("executor"),
-        from_time=request.args.get("from"),
-        to_time=request.args.get("to"),
-        q=request.args.get("q"),
-        page=page,
-        limit=limit,
-    )
-    return jsonify({"success": True, **payload})
-
-
-@catalog_bp.get("/tools")
-def list_tools():
-    registry = _get_runtime_registry()
+@router.post("/catalog/tools/search")
+async def list_tools(request: Request):
+    registry = get_runtime_registry(request)
+    request_args = await _json_filters(request)
     payload = build_tool_catalog(
         registry,
-        type_filter=request.args.get("type"),
-        status=request.args.get("status"),
-        q=request.args.get("q"),
-        swarm_name=request.args.get("swarm") or None,
+        type_filter=request_args.get("type"),
+        status=request_args.get("status"),
+        q=request_args.get("q"),
+        swarm_name=request_args.get("swarm") or None,
     )
-    return jsonify({"success": True, **payload})
+    return {"success": True, **payload}
 
 
-@catalog_bp.get("/swarms/<string:swarm_name>/stats")
-def swarm_stats(swarm_name: str):
-    registry = _get_runtime_registry()
+@router.get("/catalog/swarms/{swarm_name}/stats")
+async def swarm_stats(swarm_name: str, request: Request):
+    registry = get_runtime_registry(request)
     registry.get_swarm(swarm_name)
     payload = build_swarm_stats(registry, swarm_name)
-    return jsonify({"success": True, **payload})
+    return {"success": True, **payload}
 
 
-@catalog_bp.get("/events")
-def list_events():
-    registry = _get_runtime_registry()
+@router.post("/catalog/events/search")
+async def list_events(request: Request):
+    registry = get_runtime_registry(request)
+    request_args = await _json_filters(request)
     payload = build_event_catalog(
         registry,
-        level=request.args.get("level"),
-        source=request.args.get("source"),
-        from_time=_parse_time_arg("from"),
-        to_time=_parse_time_arg("to"),
-        q=request.args.get("q"),
-        page=_parse_int(request.args.get("page", 1), 1),
-        limit=_parse_int(request.args.get("limit", 50), 50),
+        level=request_args.get("level"),
+        source=request_args.get("source"),
+        from_time=request_args.get("from"),
+        to_time=request_args.get("to"),
+        q=request_args.get("q"),
+        page=int(request_args.get("page", 1) or 1),
+        limit=int(request_args.get("limit", 50) or 50),
     )
-    return jsonify({"success": True, **payload})
+    return {"success": True, **payload}
 
 
-@catalog_bp.get("/logs")
-def list_logs():
-    registry = _get_runtime_registry()
+@router.post("/catalog/logs/search")
+async def list_logs(request: Request):
+    registry = get_runtime_registry(request)
+    request_args = await _json_filters(request)
     payload = build_log_catalog(
         registry,
-        level=request.args.get("level"),
-        service=request.args.get("service"),
-        from_time=_parse_time_arg("from"),
-        to_time=_parse_time_arg("to"),
-        q=request.args.get("q"),
-        page=_parse_int(request.args.get("page", 1), 1),
-        limit=_parse_int(request.args.get("limit", 100), 100),
+        level=request_args.get("level"),
+        service=request_args.get("service"),
+        from_time=request_args.get("from"),
+        to_time=request_args.get("to"),
+        q=request_args.get("q"),
+        page=int(request_args.get("page", 1) or 1),
+        limit=int(request_args.get("limit", 100) or 100),
     )
-    return jsonify({"success": True, **payload})
+    return {"success": True, **payload}
 
 
-@catalog_bp.get("/metrics")
-def metrics():
-    registry = _get_runtime_registry()
-    payload = build_metrics_catalog(
+@router.post("/catalog/metrics")
+async def metrics(request: Request):
+    registry = get_runtime_registry(request)
+    request_args = await _json_filters(request)
+    return build_metrics_catalog(
         registry,
-        window=request.args.get("window"),
-        resolution=request.args.get("resolution"),
+        window=request_args.get("window"),
+        resolution=request_args.get("resolution"),
     )
-    return jsonify(payload)

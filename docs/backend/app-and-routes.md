@@ -33,7 +33,7 @@
 如果 `RuntimeRegistry.from_config_path()` 读取配置失败，会捕获 `SwarmLoaderError`，并把 `load_error` 放进 `RuntimeRegistry` 里继续启动。这意味着：
 
 - 服务仍然可以起来
-- 但 `/api/ready` 之类的接口会反映出加载失败
+- 但 `/api/runtime/ready` 之类的接口会反映出加载失败
 
 ## 3. CORS 与 OPTIONS
 
@@ -92,7 +92,7 @@
 - `GET /api`
 - `GET /api/swarms`
 - `GET /api/swarms/<swarm_name>`
-- `GET /api/swarms/<swarm_name>/graph`
+- `GET /api/swarms/<swarm_name>/agent-graph`
 
 其中：
 
@@ -100,11 +100,11 @@
 - `/api` 是 API 根页
 - `/api/swarms` 返回 swarm 列表
 - `/api/swarms/<swarm_name>` 返回单个 swarm 详情
-- `/api/swarms/<swarm_name>/graph` 返回单个 swarm 的图快照
+- `/api/swarms/<swarm_name>/agent-graph` 返回单个 swarm 的图快照
 
 注意：
 
-- 这里的 `/api/swarms`、`/api/swarms/<swarm_name>`、`/api/swarms/<swarm_name>/graph` 和 `swarms_bp` 里的同路径 GET 接口是并存的
+- 这里的 `/api/swarms`、`/api/swarms/<swarm_name>`、`/api/swarms/<swarm_name>/agent-graph` 和 `swarms_bp` 里的同路径 GET 接口是并存的
 - 当前代码里它们都确实被注册了
 - 实际排查时，看到这些路径时要先确认是命中了 app-level 版本还是 blueprint 版本
 
@@ -126,8 +126,8 @@
 
 | Method | Path | 说明 |
 |---|---|---|
-| `GET` | `/api/health` | 存活检查 |
-| `GET` | `/api/ready` | 就绪检查，会检查 runtime、swarm 加载和图有效性 |
+| `GET` | `/api/runtime/health` | 存活检查 |
+| `GET` | `/api/runtime/ready` | 就绪检查，会检查 runtime、swarm 加载和图有效性 |
 
 ### 6.3 Catalog
 
@@ -136,7 +136,7 @@
 | `GET` | `/api/swarms/<swarm_name>/agents` | swarm 的 agent 目录 |
 | `GET` | `/api/tasks` | 任务目录 |
 | `GET` | `/api/tools` | 工具目录 |
-| `GET` | `/api/swarms/<swarm_name>/stats` | swarm 统计信息 |
+| `GET` | `/api/catalog/swarms/<swarm_name>/stats` | swarm 统计信息 |
 | `GET` | `/api/events` | 事件目录 |
 | `GET` | `/api/logs` | 日志目录 |
 | `GET` | `/api/metrics` | 指标查询 |
@@ -159,15 +159,13 @@
 
 | Method | Path | 说明 |
 |---|---|---|
-| `POST` | `/api/swarms/load` | 加载 swarm |
+| `POST` | `/api/swarms` | 加载 swarm |
 | `GET` | `/api/swarms/<swarm_name>` | swarm 详情 |
-| `GET` | `/api/swarms/<swarm_name>/graph` | swarm 图快照 |
-| `POST` | `/api/swarms/<swarm_name>/run` | 同步运行 swarm |
-| `POST` | `/api/swarms/<swarm_name>/start` | 同步启动，和 `/run` 等价 |
+| `GET` | `/api/swarms/<swarm_name>/agent-graph` | swarm 图快照 |
+| `POST` | `/api/swarms/<swarm_name>/runs/execute` | 同步运行 swarm |
 | `POST` | `/api/swarms/<swarm_name>/runs` | 后台运行 |
-| `POST` | `/api/swarms/<swarm_name>/start/background` | 后台启动，和 `/runs` 等价 |
-| `GET` | `/api/swarms/runs/<run_id>` | 运行快照 |
-| `GET` | `/api/swarms/runs/<run_id>/events` | 运行事件流，SSE |
+| `GET` | `/api/runs/<run_id>` | 运行快照 |
+| `GET` | `/api/runs/<run_id>/events` | 运行事件流，SSE |
 | `DELETE` | `/api/swarms/<swarm_name>` | 卸载 swarm |
 | `POST` | `/api/swarms/<swarm_name>/reload` | 热重载 swarm |
 | `POST` | `/api/swarms/<swarm_name>/agents/<agent_id>/round` | 单个 agent 的 round 调用 |
@@ -177,14 +175,13 @@
 1. `OPTIONS` 不是 405 的来源
    - 由于有全局 `OPTIONS` 兜底，浏览器预检一般不会直接挂在 Flask 的默认 405 上
 
-2. `/api/swarms` 有两层来源
-   - 一层是 `app_factory.py` 里的 app-level 路由
-   - 一层是 `swarms_bp` 蓝图注册后生成的路径
+2. `/api/swarms` 由 swarms 路由模块统一承载
+   - `app_factory.py` 只负责注册路由模块
+   - 列表、加载、详情、运行入口都在 `web/routes/swarms.py`
 
-3. `swarms_bp` 的蓝图前缀和注册前缀是叠加关系
-   - 蓝图定义：`/swarms`
-   - app 注册：`/api/swarms`
-   - 最终对外路径：`/api/swarms/...`
+3. `runs` 是独立资源
+   - 启动 run 属于 swarm：`/api/swarms/<swarm_name>/runs`
+   - 查询 run 属于 run 资源：`/api/runs/<run_id>`
 
 4. `app.py` 只是入口，不承担路由组织
    - 真正要查“接口为什么 405 / 404”，主要看 `web/app_factory.py` 和 `web/routes/*`

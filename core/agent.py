@@ -84,6 +84,24 @@ class Agent:
         """Attach this agent to the current graph run."""
         self.current_run_id = str(run_id).strip() if run_id else None
 
+    def clone_for_runtime(self) -> "Agent":
+        """Create a fresh runtime instance from the same agent blueprint."""
+        cloned = Agent(
+            agent_id=self.agent_id,
+            llm_handler=self.llm_handler,
+            character_prompt=self.character_prompt,
+            name=self.name,
+            tools=list(self.tools),
+            core=self.core,
+            max_tool_rounds=self.max_tool_rounds,
+            cognitive_graph=CognitiveGraph(graph_id=f"agent_{self.agent_id}"),
+            workspace_mode=self.workspace_mode,
+            workspace_root=self.workspace_root,
+            swarm_name=self.swarm_name,
+        )
+        cloned.set_run_id(self.current_run_id)
+        return cloned
+
     @property
     def private_workspace_dir(self) -> Path:
         """Directory for this agent's private, non-shared runtime artifacts.
@@ -137,6 +155,13 @@ class Agent:
             json.dumps(self.cognitive_graph.snapshot(), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _merge_cognitive_graphs(target: CognitiveGraph, source: CognitiveGraph) -> None:
+        for node in source.nodes.values():
+            target.add_node(node)
+        for edge in source.edges:
+            target.add_edge(edge)
 
     def _build_system_prompt(self, additional_prompt: Optional[str] = None) -> str:
         prompts = [self.character_prompt.strip()]
@@ -250,6 +275,7 @@ class Agent:
 
         assistant_message = None
         raw_response = None
+        round_cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}_round_{rounds}")
 
         for tool_round in range(self.max_tool_rounds):
             raw_response = await self.llm_handler.fetch(
@@ -280,7 +306,7 @@ class Agent:
             for tc in tool_calls:
                 result = await self._execute_tool_call(tc)
                 self.append_context("tool", result)
-                self._record_tool_call_in_cognitive_graph(tc, result)
+                self._record_tool_call_in_cognitive_graph(tc, result, round_cognitive_graph)
 
             # Refresh prev_messages for the next LLM call
             prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages]
@@ -297,10 +323,13 @@ class Agent:
             for node in cg.nodes.values():
                 if not node.source:
                     node.source = self.agent_id
-                self.cognitive_graph.add_node(node)
+                round_cognitive_graph.add_node(node)
             for edge in cg.edges:
-                self.cognitive_graph.add_edge(edge)
+                round_cognitive_graph.add_edge(edge)
             assistant_message = strip_cognitive_graph_tags(assistant_message)
+
+        self._merge_cognitive_graphs(self.cognitive_graph, round_cognitive_graph)
+        if round_cognitive_graph.nodes or round_cognitive_graph.edges:
             self.persist_private_thought_snapshot()
 
         return AgentRoundResult(
@@ -310,9 +339,15 @@ class Agent:
             raw_response=raw_response,
             additional_prompt=additional_prompt,
             cognitive_graph_snapshot=self.cognitive_graph.snapshot(),
+            cognitive_graph_delta=round_cognitive_graph.snapshot(),
         )
 
-    def _record_tool_call_in_cognitive_graph(self, tool_call: Any, result: str) -> None:
+    def _record_tool_call_in_cognitive_graph(
+        self,
+        tool_call: Any,
+        result: str,
+        target_graph: CognitiveGraph,
+    ) -> None:
         """Auto-graphify a tool call and its result into the agent's cognitive graph."""
         # Extract tool name and arguments
         if hasattr(tool_call, "function"):
@@ -338,7 +373,7 @@ class Agent:
             source=self.agent_id,
             metadata={"tool_name": tool_name, "arguments": arguments},
         )
-        self.cognitive_graph.add_node(tool_node)
+        target_graph.add_node(tool_node)
 
         # Create EVIDENCE node from result (truncate for brevity)
         result_summary = result[:500] if len(result) > 500 else result
@@ -348,10 +383,10 @@ class Agent:
             source=self.agent_id,
             metadata={"tool_name": tool_name, "result_truncated": len(result) > 500},
         )
-        self.cognitive_graph.add_node(evidence_node)
+        target_graph.add_node(evidence_node)
 
         # Link: tool call leads_to evidence
-        self.cognitive_graph.add_edge(
+        target_graph.add_edge(
             CognitiveEdge(
                 source_id=tool_node.node_id,
                 target_id=evidence_node.node_id,
@@ -362,13 +397,13 @@ class Agent:
         )
         # Link latest evidence to any existing REASONING node (heuristic: connect to most recent)
         recent_reasoning = [
-            n for n in self.cognitive_graph.nodes.values()
+            n for n in target_graph.nodes.values()
             if n.node_type == CognitiveNodeType.REASONING
         ]
         if recent_reasoning:
             # Sort by created_at descending (newest first)
             recent_reasoning.sort(key=lambda n: n.created_at, reverse=True)
-            self.cognitive_graph.add_edge(
+            target_graph.add_edge(
                 CognitiveEdge(
                     source_id=evidence_node.node_id,
                     target_id=recent_reasoning[0].node_id,
@@ -377,4 +412,3 @@ class Agent:
                     description="Supports recent reasoning",
                 )
             )
-        self.persist_private_thought_snapshot()

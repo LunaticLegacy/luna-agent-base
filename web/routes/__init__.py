@@ -1,8 +1,17 @@
-from .health import health_bp
-from .catalog import catalog_bp
-from .content import content_bp
-from .settings import settings_bp
-from .swarms import swarms_bp
-from .tasks import tasks_bp
+from .health import router as health_router
+from .catalog import router as catalog_router
+from .content import router as content_router
+from .settings import router as settings_router
+from .swarms import router as swarms_router
+from .tasks import router as tasks_router
+from .runs import router as runs_router
 
-__all__ = ["health_bp", "catalog_bp", "content_bp", "settings_bp", "swarms_bp", "tasks_bp"]
+__all__ = [
+    "health_router",
+    "catalog_router",
+    "content_router",
+    "settings_router",
+    "swarms_router",
+    "tasks_router",
+    "runs_router",
+]

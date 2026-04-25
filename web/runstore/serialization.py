@@ -27,8 +27,10 @@ def serialize_node(node: Node) -> Dict[str, Any]:
     if isinstance(node, AgentNode):
         payload.update(
             {
+                "blueprint_ref": node.blueprint_ref,
                 "agent_id": node.agent_id,
                 "additional_prompt": node.additional_prompt,
+                "instance_policy": node.instance_policy,
             }
         )
     elif isinstance(node, ToolNode):
@@ -77,6 +79,7 @@ def serialize_swarm_summary(swarm) -> Dict[str, Any]:
         "agent_count": len(swarm.core.list_agents()),
         "skill_count": len(swarm.core.list_skills()),
         "tool_count": len(swarm.core.tools),
+        "api_count": len(getattr(swarm.core, "apis", {})),
         "graph_attached": swarm.core.get_execution_graph() is not None,
         "graph_valid": validation.is_valid,
         "graph_errors": validation.errors,
@@ -87,6 +90,16 @@ def serialize_swarm_summary(swarm) -> Dict[str, Any]:
 def serialize_swarm_detail(swarm) -> Dict[str, Any]:
     payload = serialize_swarm_summary(swarm)
     payload["agent_files"] = list(swarm.manifest.agent_files)
+    globals_config = getattr(swarm.manifest, "global_variables", None)
+    globals_values = getattr(globals_config, "values", {}) if globals_config is not None else {}
+    globals_visibility = getattr(globals_config, "visibility", {}) if globals_config is not None else {}
+    payload["global_variables"] = {
+        "values": to_jsonable(dict(globals_values)),
+        "visibility": {
+            key: list(value)
+            for key, value in globals_visibility.items()
+        },
+    }
     graph_getter = getattr(swarm.core, "get_agent_graph", None)
     graph = graph_getter() if callable(graph_getter) else swarm.core.get_execution_graph()
     payload["graph"] = serialize_graph_snapshot(graph) if graph is not None else None

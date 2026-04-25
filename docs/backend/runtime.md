@@ -206,7 +206,7 @@ web_search = ["network_access"]
 
 - `python -m pip install -r <file>`
 
-如果开发环境需要预装工具依赖，可以显式调用 `load_all_swarms(root, preinstall_tool_requirements=True)`，或手动执行对应的 `tool_requirements.txt`。这是为了避免“加载 swarm package”同时变成隐式网络安装和代码执行边界。
+如果开发环境需要预装工具或 API 依赖，可以显式调用 `load_all_swarms(root, preinstall_tool_requirements=True)`，或手动执行对应的 `tool_requirements.txt` / `api_requirements.txt`。这是为了避免“加载 swarm package”同时变成隐式网络安装和代码执行边界。
 
 ## 单个 swarm 的加载
 
@@ -238,14 +238,16 @@ web_search = ["network_access"]
 4. 注册 skill
 5. 合并 LLM backends
 6. 加载 tool modules 并注册 tool
-7. 从 `[tool_capabilities]` 给工具写入能力集
-8. 根据 blueprint 创建 agent
-9. 加载 graph 文件并绑定到 core
+7. 加载 API modules 并注册 API
+8. 从 `[tool_capabilities]` 给工具写入能力集
+9. 根据 blueprint 创建 agent
+10. 加载 graph 文件并绑定到 core
 
 这意味着：
 
-- tool 先于 agent 创建完成注册
+- tool 与 API 先于 agent 创建完成注册
 - 高风险工具只有声明了能力才可执行对应动作
+- 包 API 会以 `origin=package` 写入 runtime registry，框架原生 API 则标为 `origin=native`
 - graph 最后附着到 core
 - 只要其中任一步失败，整个 swarm 就不会进入 registry
 
@@ -294,15 +296,20 @@ web_search = ["network_access"]
 - 当前 agent 的可调度子图
 - 当前 agent 的私有 workspace 摘要
 
+如果 swarm 在 `swarm.toml` 里配置了 `[globals]`，运行时还会为允许可见的 agent 额外注入一段 **Framework Global Variables** 上下文。该上下文来自 `Core.build_global_context_export()`，只会包含当前 agent 被允许读取的变量。
+
 可调度子图由 `CognitiveSubgraphDescriptor` 描述，包含 root nodes、frontier nodes、purpose、visibility、owner agent、expected next information 和状态字段。它不是新的执行图节点，而是给 LLM 使用的语义任务切片。
 
 Agent 图的公开接口与执行轨迹图分离：
 
-- `GET /api/swarms/<swarm>/graph` 返回 Agent 图快照
+- `GET /api/swarms/<swarm>/agent-graph` 返回 Agent 图快照
 - `GET /api/swarms/<swarm>/execution-graph` 返回完整执行图快照
-- `GET /api/swarms/<swarm>/execution-trace` 返回当前 run 的事件轨迹
+- `GET /api/swarms/<swarm>/execution-traces/latest` 返回当前 run 的事件轨迹
 - `GET /api/swarms/<swarm>/thought-graph` 返回思维图谱
-- `GET /api/tasks/graph?swarm=<name>` 返回任务图谱快照
+- `GET /api/swarms/<swarm>/globals` 返回 swarm 的全局变量配置
+- `PUT /api/swarms/<swarm>/globals` 更新 swarm 的全局变量配置并写回 `swarm.toml`
+- `GET /api/swarms/<swarm>/apis` 返回 swarm 当前已注册的 API 列表，并标记 `native` / `package` 来源
+- `GET /api/swarms/<name>/task-graph` 返回任务图谱快照
 
 ## 发布链路的内容流与控制流
 
@@ -404,7 +411,7 @@ Agent 图的公开接口与执行轨迹图分离：
 
 对应关系大致是：
 
-- `POST /api/swarms/load` -> `load_swarm()`
+- `POST /api/swarms` -> `load_swarm()`
 - `POST /api/swarms/<name>/reload` -> `reload_swarm()`
 - `DELETE /api/swarms/<name>` -> `unload_swarm()`
 - `GET /api/swarms` / `GET /api/swarms/<name>` -> 读取 `registry.swarms`

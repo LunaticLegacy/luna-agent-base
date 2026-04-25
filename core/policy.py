@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pprint import pformat
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Literal
 
 from .results import ExecutionEvent, ExecutionState, GraphValidationResult
 
@@ -31,12 +31,42 @@ class Edge:
     priority: int = 0
 
 
-@dataclass
+@dataclass(init=False)
 class AgentNode(Node):
     """Graph node that delegates execution to a managed agent."""
 
-    agent_id: str = ""
-    additional_prompt: Optional[str] = None
+    blueprint_ref: str
+    additional_prompt: Optional[str]
+    instance_policy: Literal["singleton", "per_call"]
+
+    def __init__(
+        self,
+        node_id: int,
+        node_name: str,
+        next_node_ids: Optional[List[int]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        blueprint_ref: str = "",
+        additional_prompt: Optional[str] = None,
+        instance_policy: Literal["singleton", "per_call"] = "singleton",
+        *,
+        agent_id: Optional[str] = None,
+    ) -> None:
+        self.node_id = node_id
+        self.node_name = node_name
+        self.next_node_ids = list(next_node_ids or [])
+        self.metadata = dict(metadata or {})
+        self.blueprint_ref = str(blueprint_ref or agent_id or "").strip()
+        self.additional_prompt = additional_prompt
+        self.instance_policy = str(instance_policy or "singleton").strip().lower() or "singleton"
+
+    @property
+    def agent_id(self) -> str:
+        """Backward-compatible alias for older graph definitions."""
+        return self.blueprint_ref
+
+    @agent_id.setter
+    def agent_id(self, value: str) -> None:
+        self.blueprint_ref = str(value or "").strip()
 
 
 @dataclass
@@ -162,8 +192,9 @@ class ExecutionGraph:
                     node_name=node.node_name,
                     next_node_ids=[],
                     metadata=dict(node.metadata),
-                    agent_id=node.agent_id,
+                    blueprint_ref=node.blueprint_ref,
                     additional_prompt=node.additional_prompt,
+                    instance_policy=node.instance_policy,
                 )
             )
 
@@ -281,17 +312,17 @@ class ExecutionGraph:
                     )
 
             if isinstance(node, AgentNode):
-                if not node.agent_id:
-                    errors.append(f"Agent node {node.node_id} has no agent_id.")
-                elif core is not None and node.agent_id not in core.agents:
+                if not node.blueprint_ref:
+                    errors.append(f"Agent node {node.node_id} has no blueprint_ref.")
+                elif core is not None and not _core_has_agent_blueprint(core, node.blueprint_ref):
                     if self._allows_missing_binding(node):
                         warnings.append(
-                            f"Agent node {node.node_id} references missing agent '{node.agent_id}' "
+                            f"Agent node {node.node_id} references missing agent blueprint '{node.blueprint_ref}' "
                             "but is marked transient."
                         )
                     else:
                         errors.append(
-                            f"Agent node {node.node_id} references missing agent '{node.agent_id}'."
+                            f"Agent node {node.node_id} references missing agent blueprint '{node.blueprint_ref}'."
                         )
 
             if isinstance(node, ToolNode):
@@ -424,8 +455,9 @@ class ExecutionGraph:
                     f"            node_name={pformat(node.node_name, sort_dicts=True)},",
                     f"            next_node_ids={pformat(list(node.next_node_ids), sort_dicts=True)},",
                     f"            metadata={pformat(dict(node.metadata), sort_dicts=True)},",
-                    f"            agent_id={pformat(node.agent_id, sort_dicts=True)},",
+                    f"            blueprint_ref={pformat(node.blueprint_ref, sort_dicts=True)},",
                     f"            additional_prompt={pformat(node.additional_prompt, sort_dicts=True)},",
+                    f"            instance_policy={pformat(node.instance_policy, sort_dicts=True)},",
                     "        ),",
                 ]
             )
@@ -477,8 +509,9 @@ class ExecutionGraph:
     def _node_specific_kwargs(self, node: Node) -> Dict[str, Any]:
         if isinstance(node, AgentNode):
             return {
-                "agent_id": node.agent_id,
+                "blueprint_ref": node.blueprint_ref,
                 "additional_prompt": node.additional_prompt,
+                "instance_policy": node.instance_policy,
             }
         if isinstance(node, ToolNode):
             return {
@@ -530,3 +563,14 @@ def _node_is_transient(metadata: Dict[str, Any]) -> bool:
         return lifetime_policy in {"run", "session"}
 
     return bool(metadata.get("temporary"))
+
+
+def _core_has_agent_blueprint(core: "Core", blueprint_ref: str) -> bool:
+    has_blueprint = getattr(core, "has_agent_blueprint", None)
+    if callable(has_blueprint):
+        try:
+            return bool(has_blueprint(blueprint_ref))
+        except Exception:
+            return False
+    agents = getattr(core, "agents", {})
+    return blueprint_ref in agents

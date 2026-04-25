@@ -57,7 +57,7 @@ import { EmptyStateComponent, PageHeaderComponent, PanelCardComponent, StatCardG
                 <div class="swarm-meta">{{ state.swarmOverview() || '选择一个 Swarm 查看详情' }}</div>
               </div>
               <div class="run-actions">
-                <button class="btn btn-secondary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
+                <button class="btn btn-secondary" (click)="state.startRun()" [disabled]="state.loading() || !state.selectedSwarm()">
                   启动结构
                 </button>
               </div>
@@ -141,7 +141,7 @@ import { EmptyStateComponent, PageHeaderComponent, PanelCardComponent, StatCardG
               ></textarea>
             </div>
             <div class="console-actions">
-              <button class="btn btn-primary" (click)="state.startSwarmStructure()" [disabled]="state.loading() || !state.selectedSwarm()">
+              <button class="btn btn-primary" (click)="state.startRun()" [disabled]="state.loading() || !state.selectedSwarm()">
                 启动结构
               </button>
             </div>

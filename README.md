@@ -7,7 +7,7 @@
 ### 一个支持动态改图、临时 agent 生成与运行时记录的多智能体编排运行时
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-async-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Angular](https://img.shields.io/badge/Angular-frontend-DD0031?logo=angular&logoColor=white)](https://angular.dev)
 [![Runtime](https://img.shields.io/badge/Runtime-swarm%20orchestration-4B5563)](./docs/index.md)
 
@@ -36,7 +36,7 @@ Angelus 不是一个单纯的 agent 调度器，而是一个面向 swarm 场景�
 - ⚙️ **动态编排** —— 工具可以改图，agent 可以生成新的 agent，也可以删除它
 - 🪞 **运行时可追踪** —— 变化会立刻写入 `agents/<swarm_name>/runtime_info/`
 - 🌊 **实时执行流** —— 后端支持异步 run session 和 SSE 事件流
-- 🧪 **前后端分离** —— Flask 后端 + Angular 控制台，便于持续迭代
+- 🧪 **前后端分离** —— FastAPI 后端 + Angular 控制台，便于持续迭代
 
 ---
 
@@ -162,7 +162,7 @@ flowchart TD
     N --> P[runtime_info]
     O --> P
     P --> Q[agents/<swarm>/runtime_info/]
-    B --> R[Flask API]
+    B --> R[FastAPI]
     R --> S[Angular 控制台]
 ```
 
@@ -177,7 +177,7 @@ angelus/
 ├── core/                  # 运行时内核
 ├── modules/               # 基础设施模块
 ├── tools/                 # 默认 runtime tools
-├── web/                   # Flask API
+├── web/                   # FastAPI API
 ├── agents/                # 可加载 swarm 包
 │   └── deepseek_demo/     # 当前演示包
 ├── frontend/              # Angular 控制台

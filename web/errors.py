@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Tuple
-
-from flask import jsonify
-from werkzeug.exceptions import HTTPException
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from fastapi.responses import JSONResponse
 
 from core.swarm_spec import SwarmLoaderError
 
@@ -13,8 +12,8 @@ class ApiError(RuntimeError):
 
     status_code = 400
 
-    def to_response(self) -> Tuple[Any, int]:
-        return jsonify({"success": False, "error": str(self)}), self.status_code
+    def to_response(self) -> JSONResponse:
+        return JSONResponse({"success": False, "error": str(self)}, status_code=self.status_code)
 
 
 class NotFoundError(ApiError):
@@ -29,27 +28,29 @@ class ConflictError(ApiError):
     status_code = 409
 
 
-def register_error_handlers(app) -> None:
-    """Register Flask error handlers for runtime exceptions."""
+def register_error_handlers(app: FastAPI) -> None:
+    """Register FastAPI error handlers for runtime exceptions."""
 
-    @app.errorhandler(ApiError)
-    def handle_api_error(exc: ApiError):
+    @app.exception_handler(ApiError)
+    async def handle_api_error(_request: Request, exc: ApiError):
         return exc.to_response()
 
-    @app.errorhandler(SwarmLoaderError)
-    def handle_swarm_loader_error(exc: SwarmLoaderError):
-        return jsonify({"success": False, "error": str(exc)}), 500
+    @app.exception_handler(SwarmLoaderError)
+    async def handle_swarm_loader_error(_request: Request, exc: SwarmLoaderError):
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
 
-    @app.errorhandler(KeyError)
-    def handle_key_error(exc: KeyError):
-        return jsonify({"success": False, "error": str(exc)}), 404
+    @app.exception_handler(KeyError)
+    async def handle_key_error(_request: Request, exc: KeyError):
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=404)
 
-    @app.errorhandler(ValueError)
-    def handle_value_error(exc: ValueError):
-        return jsonify({"success": False, "error": str(exc)}), 400
+    @app.exception_handler(ValueError)
+    async def handle_value_error(_request: Request, exc: ValueError):
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
 
-    @app.errorhandler(Exception)
-    def handle_unexpected_error(exc: Exception):
-        if isinstance(exc, HTTPException):
-            return jsonify({"success": False, "error": exc.description}), exc.code
-        return jsonify({"success": False, "error": str(exc)}), 500
+    @app.exception_handler(FastAPIHTTPException)
+    async def handle_http_error(_request: Request, exc: FastAPIHTTPException):
+        return JSONResponse({"success": False, "error": str(exc.detail)}, status_code=exc.status_code)
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(_request: Request, exc: Exception):
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)

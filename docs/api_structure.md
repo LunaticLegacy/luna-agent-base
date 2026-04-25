@@ -35,7 +35,7 @@ API 本身不负责：
 
 当前项目对外 API 统一使用 `/api` 前缀。
 
-### 3.1 `GET /api/health`
+### 3.1 `GET /api/runtime/health`
 
 基础存活检查。
 
@@ -48,7 +48,7 @@ API 本身不负责：
 }
 ```
 
-### 3.2 `GET /api/ready`
+### 3.2 `GET /api/runtime/ready`
 
 检查当前运行时是否可用。
 
@@ -116,7 +116,7 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 - `graph_errors`
 - `graph_warnings`
 
-### 3.7 `POST /api/swarms/<swarm_name>/run`
+### 3.7 `POST /api/swarms/<swarm_name>/runs/execute`
 
 执行指定 swarm 的工作图。
 
@@ -176,7 +176,7 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 - `result` 是这轮 agent 调用结果
 - `context` 是该 agent 的隔离上下文快照
 
-### 3.9 `GET /api/swarms/<swarm_name>/graph`
+### 3.9 `GET /api/swarms/<swarm_name>/agent-graph`
 
 返回当前 swarm 的 Agent 图快照。
 
@@ -195,17 +195,17 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 
 返回当前 swarm 的完整执行图快照。
 
-### 3.11 `GET /api/swarms/<swarm_name>/execution-trace`
+### 3.11 `GET /api/swarms/<swarm_name>/execution-traces/latest`
 
 返回当前 swarm 最新 run 的执行轨迹。
 
 这个接口用于前端先把“静态图”画出来，再叠加实时运行态。
 
-### 3.10 `POST /api/swarms/<swarm_name>/runs`
+### 3.12 `POST /api/swarms/<swarm_name>/runs`
 
 启动一个异步 run session。
 
-请求体与同步 `/run` 基本一致：
+请求体与同步 `/runs/execute` 基本一致：
 
 ```json
 {
@@ -226,15 +226,15 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
   "run": {
     "run_id": "9f2c...",
     "status": "running",
-    "events_url": "/api/swarms/runs/9f2c.../events",
-    "status_url": "/api/swarms/runs/9f2c..."
+    "events_url": "/api/runs/9f2c.../events",
+    "status_url": "/api/runs/9f2c..."
   }
 }
 ```
 
 这个接口不会等待图执行结束，而是返回一个 `run_id` 供后续查询和订阅。
 
-### 3.11 `GET /api/swarms/runs/<run_id>`
+### 3.11 `GET /api/runs/<run_id>`
 
 查询一个异步 run session 的当前状态。
 
@@ -254,7 +254,7 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 
 这个接口适合轮询式前端，也适合调试当前执行进度。
 
-### 3.12 `GET /api/swarms/runs/<run_id>/events`
+### 3.12 `GET /api/runs/<run_id>/events`
 
 订阅一个异步 run session 的 SSE 事件流。
 
@@ -346,8 +346,8 @@ API 层只负责调用 runtime，不直接执行业务逻辑。
 
 - `GET /swarms/<name>/agents`
 - `GET /swarms/<name>/skills`
-- `GET /swarms/<name>/graph`
-- `POST /swarms/<name>/graph/edit`
+- `GET /swarms/<name>/agent-graph`
+- `POST /swarms/<name>/agent-graph/edit`
 - `POST /swarms/<name>/tools/<tool_name>/execute`
 
 这些接口适合调试、运维和可视化，但现在还不是必须项。

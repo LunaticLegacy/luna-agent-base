@@ -16,14 +16,14 @@
 
 当前应用在 `create_app()` 里注册这些公开接口：
 
-- `GET /api/health`
-- `GET /api/ready`
+- `GET /api/runtime/health`
+- `GET /api/runtime/ready`
 
 同时，`register_error_handlers(app)` 会在应用启动时注册统一错误处理器，因此绝大多数路由里的异常最后都会被转成 JSON。
 
 ## 健康检查接口
 
-### `GET /api/health`
+### `GET /api/runtime/health`
 
 这个接口是最轻量的存活检查，只返回固定 JSON：
 
@@ -36,7 +36,7 @@
 
 它不检查运行时注册表、swarm 是否加载成功，也不检查执行图是否可用。
 
-### `GET /api/ready`
+### `GET /api/runtime/ready`
 
 这个接口是就绪检查，会逐层验证后端运行状态。
 
@@ -234,11 +234,11 @@
 
 如果你要判断后端是否“活着”：
 
-- 用 `GET /api/health`
+- 用 `GET /api/runtime/health`
 
 如果你要判断后端是否“可提供业务服务”：
 
-- 用 `GET /api/ready`
+- 用 `GET /api/runtime/ready`
 
 如果你在调试 API 返回：
 

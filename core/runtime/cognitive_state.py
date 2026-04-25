@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
-from ..cognitive import CognitiveGraph, CognitiveSubgraphDescriptor, merge_cognitive_graphs
+from ..cognitive import CognitiveGraph, CognitiveNodeType, CognitiveSubgraphDescriptor, merge_cognitive_graphs
 from ..context_graph import ContextEntry, ContextEntryType, ContextGraph, ContextReference, ContextRelation
 from ..task_graph import TaskGraph
 
@@ -31,6 +31,19 @@ class CognitiveRuntimeMixin:
         if agent_cg is None or not isinstance(agent_cg, CognitiveGraph):
             return
         merge_cognitive_graphs(self.swarm_cognitive_graph, agent_cg)
+
+    def merge_agent_cognitive_delta(
+        self,
+        agent_id: str,
+        snapshot: Optional[Dict[str, Any]],
+    ) -> None:
+        if not snapshot:
+            return
+        try:
+            delta_graph = CognitiveGraph.from_dict(snapshot)
+        except Exception:
+            return
+        merge_cognitive_graphs(self.swarm_cognitive_graph, delta_graph)
 
     def get_cognitive_graph_export(self, query: Optional[str] = None, max_nodes: int = 20) -> str:
         return self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=max_nodes)
@@ -73,6 +86,54 @@ class CognitiveRuntimeMixin:
         if callable(summarize):
             return str(summarize())
         return "No private workspace summary available."
+
+    def set_global_variables(self, globals_config) -> None:
+        self.global_variables = globals_config
+        self._record_runtime_change(
+            action="set_global_variables",
+            subject_kind="globals",
+            subject_id=self.agent_name,
+            detail={
+                "values": list(getattr(globals_config, "values", {}).keys()),
+                "visibility": {
+                    key: list(value)
+                    for key, value in getattr(globals_config, "visibility", {}).items()
+                },
+            },
+        )
+
+    def get_global_variables_snapshot(self) -> Dict[str, Any]:
+        globals_config = getattr(self, "global_variables", None)
+        if globals_config is None:
+            return {"values": {}, "visibility": {}}
+        return {
+            "values": dict(getattr(globals_config, "values", {})),
+            "visibility": {
+                key: list(value)
+                for key, value in getattr(globals_config, "visibility", {}).items()
+            },
+        }
+
+    def get_global_variables_for_agent(self, agent_id: str) -> Dict[str, Any]:
+        globals_config = getattr(self, "global_variables", None)
+        if globals_config is None:
+            return {}
+        visible = getattr(globals_config, "visible_values_for_agent", None)
+        if callable(visible):
+            return dict(visible(agent_id))
+        return {}
+
+    def build_global_context_export(self, *, agent_id: str) -> str:
+        visible = self.get_global_variables_for_agent(agent_id)
+        if not visible:
+            return ""
+        lines = [
+            "## Framework Global Variables",
+            "Use these values as configuration facts scoped to the current swarm.",
+        ]
+        for key in sorted(visible):
+            lines.append(f"- {key}: {visible[key]!r}")
+        return "\n".join(lines)
 
     def set_current_run_id(self, run_id: Optional[str]) -> None:
         self.current_run_id = str(run_id).strip() if run_id else None

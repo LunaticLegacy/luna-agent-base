@@ -76,7 +76,7 @@
 
 `StateService.loadTools()` 会调用 `ApiService.listTools(baseUrl, {})`，也就是：
 
-- `GET /api/tools`
+- `POST /api/catalog/tools/search`
 
 返回后会把 `response.tools` 映射成页面所需的 `ToolItem`。
 

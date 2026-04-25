@@ -70,7 +70,7 @@ The current executor resolves the next hop in this order:
 5. `graph.outgoing_edges(node.node_id)`
 6. `node.next_node_ids`
 
-That means any tool or agent that returns `next_node_id` effectively gets scheduling priority.
+That means any tool or agent that returns `next_node_id` effectively gets scheduling priority. The current implementation now narrows `graph_editor`: graph edits do not return `next_node_id` by default; only insertion actions with `route_after_mutation: true` may return the newly inserted node as the next hop.
 
 ### 2.5 runtime_info recording
 
@@ -87,7 +87,7 @@ This makes graph edits, agent edits, and tool registration changes traceable.
 
 This is the biggest issue.
 
-- `agent_manager` and `graph_editor` have returned `next_node_id`
+- `agent_manager` and older `graph_editor` behavior have returned `next_node_id`
 - the executor trusts that value first
 - this lets tools hijack scheduling
 
@@ -96,6 +96,14 @@ For dynamic graph editing, this is dangerous because the executor may jump to:
 - a node that has not been inserted yet
 - a node that has already been deleted
 - a node that should not be executed yet
+
+Current fix:
+
+- `agent_manager` does not return top-level `next_node_id`
+- `graph_editor` does not write `next_node_id` into `metadata_patch`
+- `graph_editor` does not route to inserted nodes by default
+- only `add_agent_node` / `add_tool_node` with `route_after_mutation: true` may return top-level `next_node_id`
+- non-insertion actions reject `route_after_mutation` before mutating the graph
 
 ### 3.2 Control plane and data plane are mixed
 
@@ -122,14 +130,28 @@ If the planner, tool, and graph editor disagree on node IDs, collisions happen:
 - deleting the wrong node
 - orphaned edges
 
+Current fix:
+
+- `graph_editor` `add_agent_node` / `add_tool_node` may omit `node_id`, or pass `node_id: "auto"`
+- automatic IDs use the next available integer in the current graph
+- manually supplied IDs are rejected by default if they already exist
+- replacement only happens with explicit `replace_existing: true`
+
 ### 3.6 `replace_existing` is too strong
 
 Deleting the old node and inserting a new one without automatically reconnecting neighbors can break the graph.
 
+Current fix:
+
+- `replace_existing` still requires an explicit opt-in
+- replacement preserves incoming edges
+- if no new `next_node_ids` are supplied, the replacement inherits outgoing edges
+- if the old node was entry / exit, entry / exit is restored to the replacement
+
 ### 3.7 No forced consistency check after mutation
 
 A graph can still be structurally valid before mutation but unsafe after mutation.  
-The runtime currently lacks a mandatory local consistency check after every mutation.
+`GraphTransaction.prepare()` now applies the mutation to a working graph and immediately runs `graph.validate(core)`; invalid mutations are rejected before touching the live graph.
 
 ### 3.8 Temporary nodes do not have an explicit lifecycle marker
 
@@ -177,12 +199,12 @@ So it is traceability, not execution protection.
 
 Recommended fix order:
 
-1. Make create / delete tools stop returning `next_node_id`
-2. Let only the node insertion tool decide the jump target
-3. Run a local graph consistency check after every mutation
-4. Clear stale `next_node_id` / `spawned_agent_*` / `deleted_agent_*` metadata
-5. Introduce a clearer node-ID management strategy
-6. Upgrade `runtime_info` from audit logging to post-mutation verification support
+1. Done: create / delete tools do not return `next_node_id` by default
+2. Done: only insertion actions with explicit `route_after_mutation` may decide jumps
+3. Done: each mutation goes through `GraphTransaction.prepare()` validation
+4. Done: deletion clears stale `next_node_id` / `spawned_agent_*` / `deleted_agent_*` metadata
+5. Done: dynamic nodes support `node_id: "auto"`, and manual ID collisions are rejected by default
+6. Still pending: upgrade `runtime_info` from audit logging to post-mutation verification support
 
 ## 5. Summary
 

@@ -4,11 +4,28 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..policy import AgentNode, ToolNode
-from ..results import ExecutionState
+from ..results import ExecutionState, NodeExecutionResult
 
 
 class PayloadHelperMixin:
     """Structured payload helpers for graph execution."""
+
+    _CONTROL_PAYLOAD_KEYS = {
+        "content",
+        "final_answer",
+        "final_report",
+        "approved_report",
+        "draft_report",
+        "report_text",
+        "metadata_patch",
+        "metadata_clear",
+        "next_node_id",
+        "next_node_ids",
+        "branch",
+        "branches",
+        "status",
+        "error",
+    }
 
     def _apply_metadata_updates(self, target_metadata: Dict[str, Any], payload: Dict[str, Any]) -> None:
         metadata_patch = payload.get("metadata_patch")
@@ -102,6 +119,105 @@ class PayloadHelperMixin:
         base_arguments.setdefault("runtime_metadata", dict(runtime_metadata))
         return base_arguments
 
+    def _normalize_agent_node_result(
+        self,
+        state: ExecutionState,
+        node: AgentNode,
+        result: Any,
+        *,
+        input_payload: Any,
+    ) -> NodeExecutionResult:
+        """Apply the agent output protocol and return routing-ready payloads."""
+        parsed_output = self._parse_structured_agent_output(getattr(result, "assistant_message", None))
+        state_payload = self._raw_agent_payload(result)
+        output_payload = result
+        routing_payload = state_payload
+        next_node_override = self._extract_next_node_id(state_payload)
+
+        if parsed_output is not None:
+            output_payload = parsed_output
+            routing_payload = parsed_output
+            state_payload = self._state_payload_from_structured_agent_output(
+                state,
+                parsed_output,
+                input_payload=input_payload,
+                fallback_payload=state_payload,
+            )
+            next_node_override = self._extract_next_node_id(parsed_output)
+
+        self._capture_report_payload(state, node, state_payload)
+        return NodeExecutionResult(
+            output_payload=output_payload,
+            routing_payload=routing_payload,
+            state_payload=state_payload,
+            next_node_override=next_node_override,
+        )
+
+    def _normalize_tool_node_result(
+        self,
+        state: ExecutionState,
+        output_payload: Any,
+        *,
+        input_payload: Any,
+    ) -> NodeExecutionResult:
+        """Apply the tool output protocol and return routing-ready payloads."""
+        state_payload = output_payload
+        if isinstance(output_payload, dict):
+            self._apply_metadata_updates(state.metadata, output_payload)
+            self._preserve_report_fields(state, output_payload, input_payload=input_payload)
+            final_payload = self._extract_final_report_payload(output_payload)
+            if self._has_content(final_payload):
+                state_payload = final_payload
+            elif "content" in output_payload:
+                state_payload = output_payload["content"]
+
+        return NodeExecutionResult(
+            output_payload=output_payload,
+            routing_payload=output_payload,
+            state_payload=state_payload,
+            next_node_override=self._extract_next_node_id(output_payload),
+        )
+
+    def _raw_agent_payload(self, result: Any) -> Any:
+        if getattr(result, "assistant_message", None):
+            return result.assistant_message
+        if getattr(result, "raw_response", None) is not None:
+            return result.raw_response
+        return result
+
+    def _state_payload_from_structured_agent_output(
+        self,
+        state: ExecutionState,
+        parsed_output: Any,
+        *,
+        input_payload: Any,
+        fallback_payload: Any,
+    ) -> Any:
+        if isinstance(parsed_output, str):
+            return parsed_output
+        if not isinstance(parsed_output, dict):
+            return fallback_payload
+
+        self._apply_metadata_updates(state.metadata, parsed_output)
+        self._copy_protocol_metadata(state.metadata, parsed_output)
+        self._preserve_report_fields(state, parsed_output, input_payload=input_payload)
+
+        final_payload = self._extract_final_report_payload(parsed_output)
+        if self._has_content(final_payload):
+            return final_payload
+        if "content" in parsed_output and self._has_content(parsed_output["content"]):
+            return parsed_output["content"]
+        if self._is_review_control_payload(parsed_output):
+            return self._latest_report_payload(state, input_payload)
+        if "content" not in parsed_output:
+            return parsed_output
+        return fallback_payload
+
+    def _copy_protocol_metadata(self, target_metadata: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        for key, value in payload.items():
+            if key not in self._CONTROL_PAYLOAD_KEYS:
+                target_metadata[key] = value
+
     def _extract_next_node_id(self, payload: Any) -> Optional[int]:
         if not isinstance(payload, dict):
             return None
@@ -142,4 +258,3 @@ class PayloadHelperMixin:
         if node.additional_prompt:
             return f"{payload}\n\n{node.additional_prompt}"
         return str(payload)
-

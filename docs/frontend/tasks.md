@@ -24,9 +24,9 @@
 
 1. 正常后端加载
 - `StateService.loadTasks()` 会调用 `ApiService.listTasks()`。
-- 当前请求路径是 `GET /api/tasks`。
-- 请求参数固定为：
-  - `swarm`: 当前选中的 swarm 名称
+- 当前请求路径是 `POST /api/swarms/<swarm_name>/tasks/search`。
+- 路径里的 `<swarm_name>` 来自当前选中的 swarm。
+- JSON body 固定包含：
   - `limit: 500`
   - `page: 1`
 - 后端返回的 `TaskListResponse.items` 会被映射成前端 `TaskItem`。
@@ -35,7 +35,7 @@
 - 如果 `tasksLoaded` 还没有标记为 `true`，页面会使用 `derivedTasks()` 生成临时任务列表。
 - 兜底来源包括：
   - 当前 `activeRun`
-  - `responseFeed` 中 `POST` 且 endpoint 包含 `/run` 或 `/round` 的记录
+  - `responseFeed` 中 `POST` 且 endpoint 包含 `/runs/execute` 或 `/round` 的记录
 - 这意味着在任务接口没有回来之前，页面仍然可能显示部分“推导出来”的任务。
 
 ## 任务字段映射

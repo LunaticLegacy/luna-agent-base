@@ -9,9 +9,10 @@ from ..runtime_info import RuntimeInfoManager
 from ..task_graph import TaskGraph
 from ..cognitive import CognitiveGraph
 from ..policy import ExecutionGraph
+from ..swarm_spec import GlobalVariablesConfig
 from .cognitive_state import CognitiveRuntimeMixin
 from .graph_state import ExecutionGraphStateMixin
-from .registry import RuntimeRegistryMixin
+from .registry import AgentInstancePool, RuntimeRegistryMixin
 
 
 class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin):
@@ -28,9 +29,14 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
         self.workspace_mode = "workspace"
         self.agents = {}
+        self.agent_blueprints = {}
+        self.agent_instance_pool = AgentInstancePool(self)
         self.tools = {}
+        self.apis = {}
+        self.api_sources = {}
         self.tool_capabilities = {}
         self.skills = {}
+        self.global_variables = GlobalVariablesConfig()
         self._execution_graph = None
         self._execution_graph_source_path = None
         self._execution_graph_backup_path = None
@@ -129,8 +135,21 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
                 "hash": "",
                 "updated_at": "",
                 "last_change": None,
+                "api_count": 0,
+                "native_api_count": 0,
+                "package_api_count": 0,
+                "global_variables": {"values": {}, "visibility": {}},
             }
-        return self._runtime_info.get_graph_state(core=self)
+        state = self._runtime_info.get_graph_state(core=self)
+        state["global_variables"] = self.get_global_variables_snapshot()
+        state["api_count"] = len(self.apis)
+        state["native_api_count"] = sum(
+            1 for metadata in self.api_sources.values() if str(metadata.get("origin", "")).strip().lower() == "native"
+        )
+        state["package_api_count"] = sum(
+            1 for metadata in self.api_sources.values() if str(metadata.get("origin", "")).strip().lower() == "package"
+        )
+        return state
 
     def get_graph_runtime_events(self, *, since_revision: int = 0) -> list[Dict[str, Any]]:
         if self._runtime_info is None:
