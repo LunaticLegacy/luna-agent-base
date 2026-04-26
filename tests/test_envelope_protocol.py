@@ -41,8 +41,10 @@ class DummyCore:
     def has_agent_blueprint(self, blueprint_ref: str) -> bool:
         return blueprint_ref in self.agent_blueprints
 
-    def acquire_agent_instance(self, blueprint_ref: str, *, instance_policy: str = "singleton"):
-        if instance_policy == "per_call":
+    def acquire_agent_instance(
+        self, blueprint_ref: str, *, instance_policy: str = "singleton", parallel_context: bool = False
+    ):
+        if instance_policy == "per_call" or parallel_context:
             prototype = self.agent_blueprints[blueprint_ref]
             clone = getattr(prototype, "clone_for_runtime", None)
             if callable(clone):
@@ -465,8 +467,8 @@ class EnvelopeRawSourceCodeTest(unittest.IsolatedAsyncioTestCase):
 
 
 class PromptSanityTest(unittest.TestCase):
-    def test_code_writer_prompt_has_no_transformer(self) -> None:
-        prompt_path = Path(__file__).resolve().parent.parent / "agents" / "deepseek_demo" / "skills" / "code_writer.prompt.md"
+    def test_coder_prompt_has_no_transformer(self) -> None:
+        prompt_path = Path(__file__).resolve().parent.parent / "agents" / "deepseek_demo" / "skills" / "coder.prompt.md"
         text = prompt_path.read_text(encoding="utf-8")
         self.assertNotIn("transformer", text.lower())
 

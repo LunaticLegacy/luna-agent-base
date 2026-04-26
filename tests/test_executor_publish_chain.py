@@ -41,8 +41,10 @@ class DummyCore:
     def has_agent_blueprint(self, blueprint_ref: str) -> bool:
         return blueprint_ref in self.agent_blueprints
 
-    def acquire_agent_instance(self, blueprint_ref: str, *, instance_policy: str = "singleton"):
-        if instance_policy == "per_call":
+    def acquire_agent_instance(
+        self, blueprint_ref: str, *, instance_policy: str = "singleton", parallel_context: bool = False
+    ):
+        if instance_policy == "per_call" or parallel_context:
             prototype = self.agent_blueprints[blueprint_ref]
             clone = getattr(prototype, "clone_for_runtime", None)
             if callable(clone):
