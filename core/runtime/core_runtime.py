@@ -23,6 +23,7 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         agent_name: str,
         agent_config: AgentConfig,
         workspace_root: Optional[Path] = None,
+        limiter: Optional[Any] = None,
     ) -> None:
         self.agent_name = agent_name
         self.agent_config = agent_config
@@ -48,6 +49,8 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self.current_run_id: Optional[str] = None
         self.task_graph: Optional[TaskGraph] = None
         self._task_graph_path: Optional[Path] = None
+        self.limiter = limiter
+        self._tool_scheduler = None
 
     async def init(self) -> None:
         if self._execution_graph is not None:
@@ -194,6 +197,13 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
             },
         )
         return regulation
+
+    def get_tool_scheduler(self) -> Any:
+        """Return or create the ToolScheduler for this core."""
+        if self._tool_scheduler is None:
+            from core.executor_parts.tool_scheduler import ToolScheduler
+            self._tool_scheduler = ToolScheduler(self, self.limiter)
+        return self._tool_scheduler
 
     def cleanup_transient_execution_nodes(self, *, graph: Optional[ExecutionGraph] = None) -> list[int]:
         target_graph = graph or self.get_execution_graph()

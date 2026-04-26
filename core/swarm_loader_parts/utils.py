@@ -395,6 +395,7 @@ def _build_llm_handler(
     blueprint: AgentBlueprint,
     backends: Sequence[LLMBackendConfig],
     default_backend_name: Optional[str],
+    limiter: Optional[Any] = None,
 ) -> LLMFetcher:
     if blueprint.api_key or blueprint.model:
         return LLMFetcher(
@@ -402,6 +403,7 @@ def _build_llm_handler(
             api_key=blueprint.api_key,
             model=blueprint.model,
             provider=blueprint.provider,
+            limiter=limiter,
         )
 
     if not backends:
@@ -414,12 +416,12 @@ def _build_llm_handler(
             raise SwarmLoaderError(
                 f"Agent '{blueprint.agent_id}' references unknown backend '{blueprint.backend_name}'."
             )
-        return LLMFetcher(backends=backends, default_backend=blueprint.backend_name)
+        return LLMFetcher(backends=backends, default_backend=blueprint.backend_name, limiter=limiter)
 
     if default_backend_name and default_backend_name in {backend.name for backend in backends}:
-        return LLMFetcher(backends=backends, default_backend=default_backend_name)
+        return LLMFetcher(backends=backends, default_backend=default_backend_name, limiter=limiter)
 
-    return LLMFetcher(backends=backends)
+    return LLMFetcher(backends=backends, limiter=limiter)
 
 
 def _resolve_workspace_defaults(package_path: Path, manifest: SwarmManifest) -> tuple[str, Path]:

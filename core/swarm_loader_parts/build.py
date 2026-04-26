@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..agent import Agent
 from ..config import AgentConfig
 from ..core import Core
 from ..policy import ExecutionGraph
+from ..runtime.limiter import ConcurrencyLimiter
 from ..skills import SkillAsset
 from .utils import (
     _backend_to_agent_config,
@@ -37,6 +38,28 @@ from ..swarm_spec import (
     load_swarm_manifest,
 )
 from ..toodefl import ToolDefinition
+
+
+def _load_concurrency_config(package_path: Path) -> Dict[str, Any]:
+    """Walk upward from package_path to find config.toml and read [runtime.concurrency]."""
+    current = package_path.resolve()
+    for _ in range(5):
+        config_path = current / "config.toml"
+        if config_path.exists():
+            try:
+                import tomllib
+                with config_path.open("rb") as f:
+                    raw = tomllib.load(f)
+                runtime = raw.get("runtime", {})
+                concurrency = runtime.get("concurrency", {}) if isinstance(runtime, dict) else {}
+                return dict(concurrency) if isinstance(concurrency, dict) else {}
+            except Exception:
+                break
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return {}
 
 
 @dataclass
@@ -135,6 +158,8 @@ def build_core_from_package(
     default_config = manifest.default_llm or _backend_to_agent_config(manifest.llm_backends[0])
     default_workspace_mode, default_workspace_root = _resolve_workspace_defaults(package_path, manifest)
     default_workspace_root.mkdir(parents=True, exist_ok=True)
+    concurrency_config = _load_concurrency_config(package_path)
+    limiter = ConcurrencyLimiter(concurrency_config)
     core = Core(
         agent_name=manifest.swarm_name,
         agent_config=AgentConfig(
@@ -144,6 +169,7 @@ def build_core_from_package(
             provider=default_config.provider,
         ),
         workspace_root=default_workspace_root,
+        limiter=limiter,
     )
     core.workspace_mode = default_workspace_mode
     core.set_runtime_info_dir(package_path / "runtime_info")
@@ -196,7 +222,7 @@ def build_core_from_package(
             skill_by_name=skill_by_name,
             skill_by_path=skill_by_path,
         )
-        llm_handler = _build_llm_handler(blueprint, package_backends, manifest.default_backend)
+        llm_handler = _build_llm_handler(blueprint, package_backends, manifest.default_backend, limiter=limiter)
         workspace_mode, workspace_root = _resolve_workspace_for_agent(package_path, manifest, blueprint)
 
         agent_tools = []
@@ -217,6 +243,7 @@ def build_core_from_package(
             tools=agent_tools if agent_tools else None,
             workspace_mode=workspace_mode,
             workspace_root=workspace_root,
+            tool_execution_mode=blueprint.tool_execution_mode,
         )
         workspace_root.mkdir(parents=True, exist_ok=True)
         print(

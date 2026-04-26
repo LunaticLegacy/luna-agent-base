@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..policy import AgentNode, ToolNode
-from ..results import ExecutionState, NodeExecutionResult
+from ..results import ExecutionState, NodeExecutionResult, ToolRequest
 
 
 class PayloadHelperMixin:
@@ -28,6 +28,7 @@ class PayloadHelperMixin:
         "decision",
         "verdict",
         "graph_edit",
+        "tool_requests",
     }
 
     # ------------------------------------------------------------------
@@ -389,6 +390,33 @@ class PayloadHelperMixin:
                 inner = inner[1:]
             return "\n".join(inner).strip()
         return text.strip()
+
+    def _extract_tool_requests(self, parsed_output: Any) -> Optional[List[ToolRequest]]:
+        """Extract tool_requests from a parsed agent JSON envelope."""
+        if not isinstance(parsed_output, dict):
+            return None
+        raw_requests = parsed_output.get("tool_requests")
+        if not isinstance(raw_requests, list):
+            return None
+        requests: List[ToolRequest] = []
+        for item in raw_requests:
+            if not isinstance(item, dict):
+                continue
+            requests.append(
+                ToolRequest(
+                    id=str(item.get("id", f"req-{len(requests)}")),
+                    tool=str(item.get("tool", "")),
+                    args=dict(item.get("args", {})),
+                    depends_on=list(item.get("depends_on", [])),
+                    required=bool(item.get("required", True)),
+                    on_success=str(item.get("on_success", "continue")),
+                    on_failure=str(item.get("on_failure", "return_to_agent")),
+                    timeout_ms=int(item.get("timeout_ms", 30000)),
+                    resources=list(item.get("resources", [])),
+                    metadata=dict(item.get("metadata", {})),
+                )
+            )
+        return requests if requests else None
 
     def _format_agent_input(self, payload: Any, node: AgentNode) -> str:
         # Envelope mode is handled at the caller site (engine.py) via _build_envelope_agent_input.

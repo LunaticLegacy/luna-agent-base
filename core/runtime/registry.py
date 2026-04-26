@@ -21,15 +21,15 @@ class AgentInstancePool:
         self._quarantined: Set[str] = set()
         self._active_counts: Dict[str, int] = {}
 
-    def acquire(self, blueprint_ref: str, *, instance_policy: str = "singleton") -> AgentLike:
+    def acquire(self, blueprint_ref: str, *, instance_policy: str = "singleton", parallel_context: bool = False) -> AgentLike:
         if blueprint_ref in self._quarantined:
             raise RuntimeError(f"Agent blueprint '{blueprint_ref}' is quarantined.")
         normalized_policy = str(instance_policy or "singleton").strip().lower() or "singleton"
         self._active_counts[blueprint_ref] = self._active_counts.get(blueprint_ref, 0) + 1
-        if normalized_policy == "singleton":
+        if normalized_policy == "singleton" and not parallel_context:
             return self.core.get_agent_blueprint(blueprint_ref)
 
-        if normalized_policy != "per_call":
+        if normalized_policy not in ("singleton", "per_call"):
             raise ValueError(f"Unsupported agent instance policy: {instance_policy}")
 
         prototype = self.core.get_agent_blueprint(blueprint_ref)
@@ -100,12 +100,14 @@ class RuntimeRegistryMixin:
         cognitive_graph: Optional[CognitiveGraph] = None,
         workspace_mode: str = "workspace",
         workspace_root: Optional[Path] = None,
+        tool_execution_mode: str = "internal",
     ) -> Agent:
         handler = llm_handler or LLMFetcher(
             api_url=self.agent_config.api_url,
             api_key=self.agent_config.api_key,
             model=self.agent_config.model,
             provider=self.agent_config.provider,
+            limiter=self.limiter,
         )
         agent = Agent(
             agent_id=agent_id,
@@ -119,6 +121,7 @@ class RuntimeRegistryMixin:
             workspace_mode=workspace_mode,
             workspace_root=workspace_root if workspace_root is not None else self.workspace_root,
             swarm_name=self.agent_name,
+            tool_execution_mode=tool_execution_mode,
         )
         agent.set_run_id(self.current_run_id)
         self.add_agent(agent)
@@ -161,10 +164,12 @@ class RuntimeRegistryMixin:
         blueprint_ref: str,
         *,
         instance_policy: str = "singleton",
+        parallel_context: bool = False,
     ) -> AgentLike:
         return self.agent_instance_pool.acquire(
             blueprint_ref,
             instance_policy=instance_policy,
+            parallel_context=parallel_context,
         )
 
     def release_agent_instance(self, blueprint_ref: str) -> None:

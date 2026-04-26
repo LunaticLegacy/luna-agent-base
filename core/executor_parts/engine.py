@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
@@ -36,9 +38,6 @@ class GraphExecutor(
         swarm_name: Optional[str] = None,
         event_sink: Optional[Callable[[ExecutionEvent], None]] = None,
     ) -> ExecutionState:
-        validation = graph.validate(core)
-        if not validation.is_valid:
-            raise ValueError("; ".join(validation.errors))
         if graph.entry_node_id is None:
             raise ValueError("Graph entry node is not set.")
 
@@ -200,13 +199,18 @@ class GraphExecutor(
                 if isinstance(node, AgentNode):
                     blueprint_ref = node.blueprint_ref
                     acquire_agent_instance = getattr(core, "acquire_agent_instance", None)
+                    parallel_context = state.metadata.get("branch_index") is not None
                     if callable(acquire_agent_instance):
                         agent = acquire_agent_instance(
                             blueprint_ref,
                             instance_policy=node.instance_policy,
+                            parallel_context=parallel_context,
                         )
                     else:
                         agent = core.get_agent(node.agent_id)
+                    # Allow graph node to override agent tool execution mode
+                    if node.metadata.get("tool_execution_mode"):
+                        agent.tool_execution_mode = node.metadata["tool_execution_mode"]
                     state.rounds += 1
                     # Envelope mode: build a rich prompt from the canonical request + previous outputs.
                     if state.is_envelope:
@@ -220,48 +224,115 @@ class GraphExecutor(
                             combined_prompt = f"{combined_prompt}\n\n{cognitive_prompt}"
                         else:
                             combined_prompt = cognitive_prompt
-                    result = await agent.round_call(
-                        rounds=state.rounds,
-                        user_message=agent_input,
-                        additional_prompt=combined_prompt,
-                    )
-                    node_result = self._normalize_agent_node_result(
-                        state,
-                        node,
-                        result,
-                        input_payload=input_payload,
-                    )
-                    output_payload = node_result.output_payload
-                    routing_payload = node_result.routing_payload
 
-                    if state.is_envelope:
-                        # Envelope mode: payload is immutable; append outputs to metadata.
-                        state.metadata.setdefault("outputs", {})
-                        state.metadata["outputs"][str(node.node_id)] = (
-                            node_result.output_payload if node_result.output_payload is not None else node_result.state_payload
-                        )
-                        # Apply metadata patch for node-specific metadata.
-                        if node_result.metadata_patch:
-                            state.metadata.setdefault("node_metadata", {})
-                            state.metadata["node_metadata"][str(node.node_id)] = node_result.metadata_patch
-                        # Apply control patch for routing decisions.
-                        if node_result.control_patch:
-                            state.metadata.setdefault("control", {})
-                            state.metadata["control"][str(node.node_id)] = node_result.control_patch
-                        # Preserve payload immutability.
-                    else:
-                        # Legacy mode: overwrite payload as before.
-                        state.payload = node_result.state_payload
+                    tool_execution_mode = getattr(agent, "tool_execution_mode", "internal")
+                    max_tool_rounds = getattr(agent, "max_tool_rounds", 0)
 
-                    next_node_override = node_result.next_node_override
-                    merge_delta = getattr(core, "merge_agent_cognitive_delta", None)
-                    if callable(merge_delta):
-                        merge_delta(blueprint_ref, getattr(result, "cognitive_graph_delta", None))
-                    else:
-                        core.merge_agent_cognitive_graph(node.agent_id)
-                    release_agent_instance = getattr(core, "release_agent_instance", None)
-                    if callable(release_agent_instance):
-                        release_agent_instance(blueprint_ref)
+                    result = None
+                    node_result = None
+
+                    try:
+                        if tool_execution_mode == "external" and max_tool_rounds > 0:
+                            remaining_input = agent_input
+                            for tool_round in range(max_tool_rounds + 1):
+                                result = await agent.round_call(
+                                    rounds=state.rounds,
+                                    user_message=remaining_input,
+                                    additional_prompt=combined_prompt,
+                                )
+
+                                if not getattr(result, "tool_requests", None):
+                                    node_result = self._normalize_agent_node_result(
+                                        state,
+                                        node,
+                                        result,
+                                        input_payload=input_payload,
+                                    )
+                                    break
+
+                                tool_scheduler_factory = getattr(core, "get_tool_scheduler", None)
+                                if tool_scheduler_factory is None:
+                                    raise RuntimeError(
+                                        "ToolScheduler not available but agent is in external tool mode"
+                                    )
+
+                                tool_scheduler = tool_scheduler_factory()
+                                tool_context = ToolContext(
+                                    node_id=node.node_id,
+                                    rounds=state.rounds,
+                                    workspace_mode=getattr(core, "workspace_mode", "workspace"),
+                                    workspace_root=getattr(core, "workspace_root", None),
+                                    metadata=dict(state.metadata),
+                                    core=core,
+                                    graph=graph,
+                                    capabilities=set(),
+                                )
+
+                                batch_result = await tool_scheduler.execute_batch(
+                                    result.tool_requests,
+                                    node_id=node.node_id,
+                                    agent_id=node.agent_id,
+                                    tool_round=tool_round,
+                                    context=tool_context,
+                                )
+
+                                remaining_input = self._format_tool_batch_result(batch_result)
+                                combined_prompt = (
+                                    "Do not repeat already-executed tools. "
+                                    "Use the tool results provided above."
+                                )
+
+                            if node_result is None:
+                                raise RuntimeError(
+                                    f"Agent exceeded max_tool_rounds ({max_tool_rounds})"
+                                )
+                        else:
+                            result = await agent.round_call(
+                                rounds=state.rounds,
+                                user_message=agent_input,
+                                additional_prompt=combined_prompt,
+                            )
+                            node_result = self._normalize_agent_node_result(
+                                state,
+                                node,
+                                result,
+                                input_payload=input_payload,
+                            )
+
+                        output_payload = node_result.output_payload
+                        routing_payload = node_result.routing_payload
+                        next_node_override = node_result.next_node_override
+
+                        if state.is_envelope:
+                            # Envelope mode: payload is immutable; append outputs to metadata.
+                            state.metadata.setdefault("outputs", {})
+                            state.metadata["outputs"][str(node.node_id)] = (
+                                node_result.output_payload
+                                if node_result.output_payload is not None
+                                else node_result.state_payload
+                            )
+                            # Apply metadata patch for node-specific metadata.
+                            if node_result.metadata_patch:
+                                state.metadata.setdefault("node_metadata", {})
+                                state.metadata["node_metadata"][str(node.node_id)] = node_result.metadata_patch
+                            # Apply control patch for routing decisions.
+                            if node_result.control_patch:
+                                state.metadata.setdefault("control", {})
+                                state.metadata["control"][str(node.node_id)] = node_result.control_patch
+                            # Preserve payload immutability.
+                        else:
+                            # Legacy mode: overwrite payload as before.
+                            state.payload = node_result.state_payload
+
+                        merge_delta = getattr(core, "merge_agent_cognitive_delta", None)
+                        if callable(merge_delta):
+                            merge_delta(blueprint_ref, getattr(result, "cognitive_graph_delta", None))
+                        else:
+                            core.merge_agent_cognitive_graph(node.agent_id)
+                    finally:
+                        release_agent_instance = getattr(core, "release_agent_instance", None)
+                        if callable(release_agent_instance):
+                            release_agent_instance(blueprint_ref)
                 elif isinstance(node, ToolNode):
                     tool = core.get_tool(node.tool_name)
                     get_capabilities = getattr(core, "get_tool_capabilities", None)
@@ -414,124 +485,243 @@ class GraphExecutor(
 
             route_policy = str(node.metadata.get("route_policy", "first")).strip().lower()
             if route_policy == "all":
-                branch_results = []
-                for branch_index, branch_node_id in enumerate(next_targets):
-                    branch_state = state.clone()
-                    branch_state.metadata["branch_index"] = branch_index
-                    branch_state.metadata["branch_source_node_id"] = node.node_id
-                    self._emit(
-                        event_sink,
-                        ExecutionEvent(
-                            run_id=run_id or "",
-                            swarm_name=swarm_name,
-                            event_type="branch.started",
-                            node_id=branch_node_id,
-                            node_name=graph.nodes[branch_node_id].node_name,
-                            node_type=graph.nodes[branch_node_id].__class__.__name__,
-                            branch=str(branch_index),
-                            rounds=branch_state.rounds,
-                            status="running",
-                            data={
-                                "source_node_id": node.node_id,
-                                "branch_index": branch_index,
-                                "state_snapshot": branch_state.snapshot(),
-                            },
-                        ),
-                    )
-                    try:
-                        branch_state = await self._execute_from_node(
-                            graph,
-                            core,
-                            branch_state,
-                            branch_node_id,
-                            run_id=run_id,
-                            swarm_name=swarm_name,
-                            event_sink=event_sink,
-                        )
-                    except Exception as exc:
-                        failure = FailureEvent(
-                            run_id=run_id or "",
-                            swarm_name=swarm_name or "",
-                            graph_revision=self._graph_revision(core),
-                            failure_scope="branch",
-                            failure_kind=self._classify_failure_kind(exc),
-                            node_id=branch_node_id,
-                            node_name=graph.nodes[branch_node_id].node_name,
-                            node_type=graph.nodes[branch_node_id].__class__.__name__,
-                            message=str(exc),
-                            state_snapshot=branch_state.snapshot(),
-                            branch=str(branch_index),
-                        )
-                        regulate_failure = getattr(core, "regulate_failure", None)
-                        regulation = None
-                        if callable(regulate_failure):
+                runtime_config = getattr(core, "runtime_config", {})
+                branch_retry = (
+                    getattr(runtime_config, "branch_retry", {})
+                    if hasattr(runtime_config, "branch_retry")
+                    else {}
+                )
+                if isinstance(branch_retry, dict):
+                    max_retries = branch_retry.get("max_retries", 2)
+                    backoff_ms = branch_retry.get("backoff_ms", 1000)
+                    backoff_multiplier = branch_retry.get("backoff_multiplier", 2.0)
+                else:
+                    max_retries = getattr(branch_retry, "max_retries", 2)
+                    backoff_ms = getattr(branch_retry, "backoff_ms", 1000)
+                    backoff_multiplier = getattr(branch_retry, "backoff_multiplier", 2.0)
+
+                limiter = getattr(core, "limiter", None)
+                max_parallel_branches = getattr(limiter, "max_parallel_branches", 3) if limiter else 3
+                branch_semaphore = asyncio.Semaphore(max_parallel_branches)
+
+                async def _run_branch_with_retry(branch_index: int, branch_node_id: int):
+                    last_error = None
+                    last_rounds = state.rounds
+                    for attempt in range(max_retries + 1):
+                        async with branch_semaphore:
+                            branch_state = state.clone()
+                            branch_state.metadata["branch_index"] = branch_index
+                            branch_state.metadata["branch_source_node_id"] = node.node_id
+
+                            event_type = "branch.retry.started" if attempt > 0 else "branch.started"
+                            self._emit(
+                                event_sink,
+                                ExecutionEvent(
+                                    run_id=run_id or "",
+                                    swarm_name=swarm_name,
+                                    event_type=event_type,
+                                    node_id=branch_node_id,
+                                    node_name=graph.nodes[branch_node_id].node_name,
+                                    node_type=graph.nodes[branch_node_id].__class__.__name__,
+                                    branch=str(branch_index),
+                                    rounds=branch_state.rounds,
+                                    status="running",
+                                    data={
+                                        "source_node_id": node.node_id,
+                                        "branch_index": branch_index,
+                                        "attempt": attempt,
+                                        "state_snapshot": branch_state.snapshot(),
+                                    },
+                                ),
+                            )
+
                             try:
-                                regulation = regulate_failure(failure, graph=graph)
-                            except Exception:
-                                regulation = None
+                                branch_state = await self._execute_from_node(
+                                    graph,
+                                    core,
+                                    branch_state,
+                                    branch_node_id,
+                                    run_id=run_id,
+                                    swarm_name=swarm_name,
+                                    event_sink=event_sink,
+                                )
+                                return {
+                                    "branch_index": branch_index,
+                                    "branch_node_id": branch_node_id,
+                                    "branch_name": graph.nodes[branch_node_id].node_name,
+                                    "status": "success",
+                                    "payload": branch_state.payload,
+                                    "rounds": branch_state.rounds,
+                                    "metadata": dict(branch_state.metadata),
+                                    "trace": list(branch_state.trace),
+                                    "retries": attempt,
+                                }
+                            except Exception as exc:
+                                last_error = exc
+                                last_rounds = branch_state.rounds
+                                if attempt < max_retries:
+                                    backoff = backoff_ms * (backoff_multiplier ** attempt) / 1000.0
+                                    self._emit(
+                                        event_sink,
+                                        ExecutionEvent(
+                                            run_id=run_id or "",
+                                            swarm_name=swarm_name,
+                                            event_type="branch.retry.scheduled",
+                                            node_id=branch_node_id,
+                                            node_name=graph.nodes[branch_node_id].node_name,
+                                            node_type=graph.nodes[branch_node_id].__class__.__name__,
+                                            branch=str(branch_index),
+                                            rounds=branch_state.rounds,
+                                            status="retrying",
+                                            data={
+                                                "source_node_id": node.node_id,
+                                                "branch_index": branch_index,
+                                                "attempt": attempt + 1,
+                                                "max_retries": max_retries,
+                                                "backoff_ms": backoff * 1000,
+                                                "error": str(exc),
+                                                "state_snapshot": branch_state.snapshot(),
+                                            },
+                                        ),
+                                    )
+                                    await asyncio.sleep(backoff)
+                                else:
+                                    failure = FailureEvent(
+                                        run_id=run_id or "",
+                                        swarm_name=swarm_name or "",
+                                        graph_revision=self._graph_revision(core),
+                                        failure_scope="branch",
+                                        failure_kind=self._classify_failure_kind(exc),
+                                        node_id=branch_node_id,
+                                        node_name=graph.nodes[branch_node_id].node_name,
+                                        node_type=graph.nodes[branch_node_id].__class__.__name__,
+                                        message=str(exc),
+                                        state_snapshot=branch_state.snapshot(),
+                                        branch=str(branch_index),
+                                    )
+                                    regulate_failure = getattr(core, "regulate_failure", None)
+                                    regulation = None
+                                    if callable(regulate_failure):
+                                        try:
+                                            regulation = regulate_failure(failure, graph=graph)
+                                        except Exception:
+                                            regulation = None
+                                    self._emit(
+                                        event_sink,
+                                        ExecutionEvent(
+                                            run_id=run_id or "",
+                                            swarm_name=swarm_name,
+                                            event_type="branch.failed",
+                                            node_id=branch_node_id,
+                                            node_name=graph.nodes[branch_node_id].node_name,
+                                            node_type=graph.nodes[branch_node_id].__class__.__name__,
+                                            branch=str(branch_index),
+                                            rounds=branch_state.rounds,
+                                            status="failed",
+                                            data={
+                                                "source_node_id": node.node_id,
+                                                "branch_index": branch_index,
+                                                "error": str(exc),
+                                                "state_snapshot": branch_state.snapshot(),
+                                                "failure": failure.to_dict(),
+                                                "regulation": regulation.to_dict() if regulation is not None else None,
+                                            },
+                                        ),
+                                    )
+
+                    return {
+                        "branch_index": branch_index,
+                        "branch_node_id": branch_node_id,
+                        "branch_name": graph.nodes[branch_node_id].node_name,
+                        "status": "failed",
+                        "error": str(last_error) if last_error else "Unknown error",
+                        "rounds": last_rounds,
+                        "metadata": {},
+                        "trace": [],
+                        "retries_exhausted": True,
+                        "retries": max_retries,
+                    }
+
+                branch_tasks = [
+                    _run_branch_with_retry(branch_index, branch_node_id)
+                    for branch_index, branch_node_id in enumerate(next_targets)
+                ]
+                branch_outcomes = await asyncio.gather(*branch_tasks)
+
+                branch_results = []
+                for outcome in branch_outcomes:
+                    branch_index = outcome["branch_index"]
+                    branch_node_id = outcome["branch_node_id"]
+                    if outcome["status"] == "success":
+                        branch_results.append({
+                            "branch_index": branch_index,
+                            "branch_node_id": branch_node_id,
+                            "branch_name": outcome["branch_name"],
+                            "status": "success",
+                            "payload": outcome["payload"],
+                            "rounds": outcome["rounds"],
+                            "metadata": outcome["metadata"],
+                            "trace": outcome["trace"],
+                        })
+                        state.trace.append(
+                            ExecutionStep(
+                                node_id=branch_node_id,
+                                node_name=graph.nodes[branch_node_id].node_name,
+                                node_type="BranchResult",
+                                input_payload=input_payload,
+                                output_payload=outcome["payload"],
+                                branch=str(branch_index),
+                            ).__dict__
+                        )
                         self._emit(
                             event_sink,
                             ExecutionEvent(
                                 run_id=run_id or "",
                                 swarm_name=swarm_name,
-                                event_type="branch.failed",
+                                event_type="branch.completed",
                                 node_id=branch_node_id,
                                 node_name=graph.nodes[branch_node_id].node_name,
-                                node_type=graph.nodes[branch_node_id].__class__.__name__,
+                                node_type="BranchResult",
                                 branch=str(branch_index),
-                                rounds=branch_state.rounds,
-                                status="failed",
+                                rounds=outcome["rounds"],
+                                status="ok",
                                 data={
                                     "source_node_id": node.node_id,
                                     "branch_index": branch_index,
-                                    "error": str(exc),
-                                    "state_snapshot": branch_state.snapshot(),
-                                    "failure": failure.to_dict(),
-                                    "regulation": regulation.to_dict() if regulation is not None else None,
+                                    "state_snapshot": {
+                                        "payload": outcome["payload"],
+                                        "rounds": outcome["rounds"],
+                                        "metadata": outcome["metadata"],
+                                        "trace": outcome["trace"],
+                                        "branch_results": {},
+                                    },
                                 },
                             ),
                         )
-                        raise
-                    branch_results.append(
-                        {
+                    else:
+                        branch_results.append({
                             "branch_index": branch_index,
                             "branch_node_id": branch_node_id,
-                            "branch_name": graph.nodes[branch_node_id].node_name,
-                            "payload": branch_state.payload,
-                            "rounds": branch_state.rounds,
-                            "metadata": dict(branch_state.metadata),
-                            "trace": list(branch_state.trace),
-                        }
-                    )
-                    state.trace.append(
-                        ExecutionStep(
-                            node_id=branch_node_id,
-                            node_name=graph.nodes[branch_node_id].node_name,
-                            node_type="BranchResult",
-                            input_payload=input_payload,
-                            output_payload=branch_state.payload,
-                            branch=str(branch_index),
-                        ).__dict__
-                    )
-                    self._emit(
-                        event_sink,
-                        ExecutionEvent(
-                            run_id=run_id or "",
-                            swarm_name=swarm_name,
-                            event_type="branch.completed",
-                            node_id=branch_node_id,
-                            node_name=graph.nodes[branch_node_id].node_name,
-                            node_type="BranchResult",
-                            branch=str(branch_index),
-                            rounds=branch_state.rounds,
-                            status="ok",
-                            data={
-                                "source_node_id": node.node_id,
-                                "branch_index": branch_index,
-                                "state_snapshot": branch_state.snapshot(),
-                            },
-                        ),
-                    )
+                            "branch_name": outcome["branch_name"],
+                            "status": "failed",
+                            "error": outcome.get("error"),
+                            "rounds": outcome.get("rounds", state.rounds),
+                            "metadata": outcome.get("metadata", {}),
+                            "trace": outcome.get("trace", []),
+                            "retries_exhausted": True,
+                        })
+                        state.trace.append(
+                            ExecutionStep(
+                                node_id=branch_node_id,
+                                node_name=graph.nodes[branch_node_id].node_name,
+                                node_type="BranchResult",
+                                input_payload=input_payload,
+                                output_payload=None,
+                                status="error",
+                                error=outcome.get("error"),
+                                branch=str(branch_index),
+                            ).__dict__
+                        )
 
                 state.branch_results[str(node.node_id)] = branch_results
                 branch_merge_payload = {
@@ -661,3 +851,29 @@ class GraphExecutor(
         if "agent" in text:
             return "agent_error"
         return "unknown"
+
+    @staticmethod
+    def _format_tool_batch_result(batch_result: Any) -> str:
+        results = []
+        for r in getattr(batch_result, "results", []):
+            results.append({
+                "request_id": getattr(r, "request_id", None),
+                "tool": getattr(r, "tool", None),
+                "status": getattr(r, "status", None),
+                "output": getattr(r, "output", None),
+                "error": getattr(r, "error", None),
+                "duration_ms": getattr(r, "duration_ms", 0),
+            })
+        data = {
+            "type": "tool_batch_result",
+            "node_id": getattr(batch_result, "node_id", None),
+            "agent_id": getattr(batch_result, "agent_id", None),
+            "tool_round": getattr(batch_result, "tool_round", 0),
+            "results": results,
+            "summary": getattr(batch_result, "summary", {}),
+        }
+        return (
+            f"[TOOL BATCH RESULT - Round {getattr(batch_result, 'tool_round', 0)}]\n"
+            f"{json.dumps(data, ensure_ascii=False, indent=2)}\n"
+            "[/TOOL BATCH RESULT]"
+        )

@@ -16,7 +16,7 @@ from .cognitive import (
     extract_cognitive_graph_from_text,
     strip_cognitive_graph_tags,
 )
-from .results import AgentContextSnapshot, AgentRoundResult
+from .results import AgentContextSnapshot, AgentRoundResult, ToolRequest
 
 
 @dataclass
@@ -43,6 +43,7 @@ class Agent:
         workspace_mode: str = "workspace",
         workspace_root: Optional[Path] = None,
         swarm_name: Optional[str] = None,
+        tool_execution_mode: str = "internal",
     ) -> None:
         self.agent_id = agent_id
         self.name = name or agent_id
@@ -57,6 +58,7 @@ class Agent:
         self.workspace_root = Path(workspace_root).resolve() if workspace_root is not None else None
         self.swarm_name = swarm_name
         self.current_run_id: Optional[str] = None
+        self.tool_execution_mode = tool_execution_mode
 
     def append_context(self, role: str, content: str) -> None:
         """Append one message into the agent-local context."""
@@ -98,6 +100,7 @@ class Agent:
             workspace_mode=self.workspace_mode,
             workspace_root=self.workspace_root,
             swarm_name=self.swarm_name,
+            tool_execution_mode=self.tool_execution_mode,
         )
         cloned.set_run_id(self.current_run_id)
         return cloned
@@ -268,13 +271,14 @@ class Agent:
 
         # Prepare tool schemas if tools are bound
         tools_schemas = None
-        if self.tools:
+        if self.tool_execution_mode != "disabled" and self.tools:
             schemas = [t.get_openai_schema() for t in self.tools if getattr(t, "get_openai_schema", None) and t.get_openai_schema()]
             if schemas:
                 tools_schemas = schemas
 
         assistant_message = None
         raw_response = None
+        tool_requests: Optional[List[ToolRequest]] = None
         round_cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}_round_{rounds}")
 
         for tool_round in range(self.max_tool_rounds):
@@ -300,6 +304,22 @@ class Agent:
 
             if not tool_calls:
                 assistant_message = content
+                break
+
+            if self.tool_execution_mode == "external":
+                tool_requests = []
+                for tc in tool_calls:
+                    tool_name = getattr(tc.function, "name", None) if hasattr(tc, "function") else tc.get("function", {}).get("name")
+                    arguments_str = getattr(tc.function, "arguments", "{}") if hasattr(tc, "function") else tc.get("function", {}).get("arguments", "{}")
+                    args = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                    tool_requests.append(ToolRequest(
+                        id=getattr(tc, "id", f"tc-{len(tool_requests)}"),
+                        tool=tool_name,
+                        args=args,
+                        on_success="continue",
+                        on_failure="return_to_agent",
+                    ))
+                assistant_message = content or f"[External tool requests: {len(tool_requests)}]"
                 break
 
             # Execute tool calls and feed results back into context
@@ -340,6 +360,7 @@ class Agent:
             additional_prompt=additional_prompt,
             cognitive_graph_snapshot=self.cognitive_graph.snapshot(),
             cognitive_graph_delta=round_cognitive_graph.snapshot(),
+            tool_requests=tool_requests if self.tool_execution_mode == "external" else None,
         )
 
     def _record_tool_call_in_cognitive_graph(
