@@ -38,14 +38,12 @@ You must output a **JSON envelope** with the following structure:
       "tool_name": "search",
       "arguments": {"query": "..."}
     }
-  ],
-  "next_node_ids": [2]
+  ]
 }
 ```
 
 - `content`: Contains your understanding of the request, findings from the codebase, and the structured implementation plan.
 - `tool_requests`: Array of tool calls you want executed **externally**. You may leave this empty if you have gathered enough context in prior turns.
-- `next_node_ids`: Must be `[2]` to hand off to the **Coder** agent.
 
 ## Rules
 

@@ -15,7 +15,7 @@ Implement the plan provided by the Requirement Analyst. Read files, make precise
    - Use `file_writer` for **new files**.
 4. **Run verification commands** — After edits, run tests, builds, or lint commands via `command_runner` to verify correctness.
 5. **Fix errors** — If verification fails, analyze the output, fix the code, and re-run verification. Repeat until passing.
-6. **Hand off** — When done, set `next_node_ids: [3]` to send the work to the **Reviewer**.
+6. **Hand off** — When implementation is complete and verified, your turn ends automatically.
 
 ## Output Format
 
@@ -42,14 +42,12 @@ You must output a **JSON envelope** with the following structure:
       "tool_name": "command_runner",
       "arguments": {"command": "pytest tests/ -q"}
     }
-  ],
-  "next_node_ids": [3]
+  ]
 }
 ```
 
 - `content`: Explain what you are doing, what you changed, and the result of any verification.
 - `tool_requests`: Array of tool calls to execute **externally**. Only include tools you need in this turn.
-- `next_node_ids`: Use `[3]` to pass to the **Reviewer** when you are confident the implementation is complete and verified. Use an empty array `[]` only if you need another turn to finish.
 
 ## Rules
 

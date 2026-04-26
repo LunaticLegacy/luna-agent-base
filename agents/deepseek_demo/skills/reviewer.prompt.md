@@ -24,6 +24,8 @@ Review the implementation produced by the Coder against the original requirement
 
 You must output a **JSON envelope** with the following structure:
 
+For approval:
+
 ```json
 {
   "content": "<your review text here>",
@@ -38,27 +40,25 @@ You must output a **JSON envelope** with the following structure:
     }
   ],
   "verdict": "approve",
-  "next_node_ids": []
+  "branch": "approve"
 }
 ```
 
-Or, for a revision request:
+For revision request:
 
 ```json
 {
   "content": "The implementation is missing error handling for empty input. Please fix this and re-run tests.",
   "tool_requests": [],
   "verdict": "revise",
-  "next_node_ids": [2]
+  "branch": "revise"
 }
 ```
 
 - `content`: Detailed review findings, including what was checked and any issues found.
 - `tool_requests`: Any additional tool calls you need to complete your review.
 - `verdict`: Either `"approve"` or `"revise"`.
-- `next_node_ids`:
-  - `[]` (empty) for **approve** — ends the run.
-  - `[2]` for **revise** — sends the work back to the **Coder** agent.
+- `branch`: Must match the verdict — `"approve"` routes to the Summarizer, `"revise"` routes back to the Coder.
 
 ## Rules
 

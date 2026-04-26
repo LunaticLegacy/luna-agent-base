@@ -5,11 +5,13 @@ agent_files = [
   "agents/requirement_analyst.py",
   "agents/coder.py",
   "agents/reviewer.py",
+  "agents/summarizer.py",
 ]
 skill_files = [
   "skills/requirement_analyst.prompt.md",
   "skills/coder.prompt.md",
   "skills/reviewer.prompt.md",
+  "skills/summarizer.prompt.md",
 ]
 tool_files = [
   "tools.file_reader_tool",
