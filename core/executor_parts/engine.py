@@ -240,11 +240,14 @@ class GraphExecutor(
                         state.metadata["outputs"][str(node.node_id)] = (
                             node_result.output_payload if node_result.output_payload is not None else node_result.state_payload
                         )
+                        # Apply metadata patch for node-specific metadata.
+                        if node_result.metadata_patch:
+                            state.metadata.setdefault("node_metadata", {})
+                            state.metadata["node_metadata"][str(node.node_id)] = node_result.metadata_patch
                         # Apply control patch for routing decisions.
-                        control_patch = getattr(node_result, "control_patch", None)
-                        if control_patch:
+                        if node_result.control_patch:
                             state.metadata.setdefault("control", {})
-                            state.metadata["control"].update(control_patch)
+                            state.metadata["control"][str(node.node_id)] = node_result.control_patch
                         # Preserve payload immutability.
                     else:
                         # Legacy mode: overwrite payload as before.
@@ -273,7 +276,7 @@ class GraphExecutor(
                         graph=graph,
                         capabilities=capabilities,
                     )
-                    arguments = self._build_tool_arguments(node, state.payload, state.metadata)
+                    arguments = self._build_tool_arguments(node, state)
                     output_payload = await tool.execute(arguments, context=tool_context)
                     node_result = self._normalize_tool_node_result(
                         state,
@@ -364,7 +367,6 @@ class GraphExecutor(
                 )
                 raise
 
-            next_targets = self._resolve_next_targets(graph, node, routing_payload, next_node_override)
             if not next_targets:
                 self._emit(
                     event_sink,

@@ -189,13 +189,39 @@ class PayloadHelperMixin:
             state.metadata["final_report"] = payload
             state.metadata["latest_report"] = payload
 
-    def _build_tool_arguments(self, node: ToolNode, payload: Any, runtime_metadata: Dict[str, Any]) -> Dict[str, Any]:
-        if isinstance(payload, dict):
-            base_arguments = dict(payload)
+    def _get_latest_output_for_tool(self, state: ExecutionState) -> Any:
+        """Return the most recent upstream node output for tool input.
+
+        In Envelope mode, tools should receive the latest upstream agent/tool
+        output as their primary input, not the immutable canonical payload.
+        """
+        outputs = state.metadata.get("outputs")
+        if isinstance(outputs, dict) and outputs:
+            last_key = list(outputs.keys())[-1]
+            last_output = outputs[last_key]
+            if isinstance(last_output, dict):
+                for key in ("content", "final_answer", "final_report", "approved_report", "draft_report"):
+                    if key in last_output:
+                        return last_output[key]
+                return last_output
+            return last_output
+        return state.payload
+
+    def _build_tool_arguments(self, node: ToolNode, state: ExecutionState) -> Dict[str, Any]:
+        if state.is_envelope:
+            latest_output = self._get_latest_output_for_tool(state)
+            base_arguments = {
+                "input": latest_output,
+                "canonical_payload": state.payload,
+                "runtime_metadata": dict(state.metadata),
+            }
         else:
-            base_arguments = {"input": payload}
+            if isinstance(state.payload, dict):
+                base_arguments = dict(state.payload)
+            else:
+                base_arguments = {"input": state.payload}
+            base_arguments.setdefault("runtime_metadata", dict(state.metadata))
         base_arguments.update(node.input_mapping)
-        base_arguments.setdefault("runtime_metadata", dict(runtime_metadata))
         return base_arguments
 
     # ------------------------------------------------------------------
@@ -240,6 +266,13 @@ class PayloadHelperMixin:
                     input_payload=input_payload,
                     fallback_payload=state_payload,
                 )
+        elif state.is_envelope:
+            # Envelope mode: agent returned non-JSON (e.g. raw source code).
+            # Use the raw assistant message as the output payload so downstream
+            # tools/agents receive the actual content, not the result object.
+            state_payload = self._raw_agent_payload(result)
+            output_payload = state_payload
+            routing_payload = state_payload
 
         if not state.is_envelope:
             self._capture_report_payload(state, node, state_payload)
@@ -249,6 +282,8 @@ class PayloadHelperMixin:
             routing_payload=routing_payload,
             state_payload=state_payload,
             next_node_override=next_node_override,
+            metadata_patch=metadata_patch if metadata_patch is not None else {},
+            control_patch=control_patch if control_patch is not None else {},
         )
 
     def _normalize_tool_node_result(
@@ -279,6 +314,8 @@ class PayloadHelperMixin:
             routing_payload=output_payload,
             state_payload=state_payload,
             next_node_override=self._extract_next_node_id(output_payload),
+            metadata_patch={},
+            control_patch={},
         )
 
     def _raw_agent_payload(self, result: Any) -> Any:

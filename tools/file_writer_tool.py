@@ -12,6 +12,34 @@ class FileWriterTool(ToolDefinition):
     def __init__(self) -> None:
         super().__init__(tool_name="file_writer", description="Write text to a file.")
 
+    def _resolve_path(self, arguments: Dict[str, Any]) -> str:
+        """Resolve target path with priority:
+        explicit path > canonical_payload.artifact.path > canonical_payload.artifact.filename > fallback_path.
+        """
+        # Priority 1: explicit path
+        path_value = str(arguments.get("path", "")).strip()
+        if path_value:
+            return path_value
+
+        # Priority 2: canonical_payload artifact
+        canonical = arguments.get("canonical_payload")
+        if isinstance(canonical, dict):
+            artifact = canonical.get("artifact")
+            if isinstance(artifact, dict):
+                for key in ("path", "filename"):
+                    value = str(artifact.get(key, "")).strip()
+                    if value:
+                        return value
+
+        # Priority 3: fallback_path
+        fallback = str(arguments.get("fallback_path", "")).strip()
+        if fallback:
+            return fallback
+
+        raise ValueError(
+            "file_writer requires a non-empty 'path' (or 'fallback_path', or canonical_payload.artifact.path)."
+        )
+
     async def execute(
         self,
         arguments: Dict[str, Any],
@@ -19,9 +47,7 @@ class FileWriterTool(ToolDefinition):
         context: Optional[ToolContext] = None,
     ) -> Any:
         require_tool_capability(context, "file_write", self.tool_name)
-        path_value = str(arguments.get("path", "")).strip()
-        if not path_value:
-            raise ValueError("file_writer requires a non-empty 'path'.")
+        path_value = self._resolve_path(arguments)
         target_path = Path(path_value)
         if self._is_workspace_restricted(context):
             workspace_root = self._resolve_workspace_root(context)

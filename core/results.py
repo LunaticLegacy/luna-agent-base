@@ -35,6 +35,8 @@ class NodeExecutionResult:
     routing_payload: Any
     state_payload: Any
     next_node_override: Optional[int] = None
+    metadata_patch: Dict[str, Any] = field(default_factory=dict)
+    control_patch: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

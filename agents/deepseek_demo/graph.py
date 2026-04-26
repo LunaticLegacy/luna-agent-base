@@ -25,7 +25,9 @@ def build_graph(core):
  'implementation artifact, route directly to the code writer. If the task is '
  'backend/runtime/API-oriented, route directly to the dev video agent. If the task is '
  'simple and research-oriented, you may route directly to the dispatcher. If the '
- 'task is broad, keep the planner in the loop.'),
+ 'task is broad, keep the planner in the loop. '
+ 'If you need to change the graph structure, you must route to a graph_editor tool node; '
+ 'do not output graph_edit in your JSON response — it will be treated as metadata only, not executed.'),
         ),
     )
     graph.add_node(
@@ -46,8 +48,9 @@ def build_graph(core):
             metadata={'join_node_id': 17, 'phase': 'dispatch', 'route_policy': 'all'},
             agent_id='organizer',
             additional_prompt=('Phase: dispatch. Fan out the active branches, but keep the shape adaptive. '
- 'Use graph edits to widen or narrow the tree if the current situation '
- 'requires it. The join point is node 17. Do not include next_node_id, '
+ 'If the current situation requires graph changes, route to a graph_editor tool node. '
+ 'Do not output graph_edit in your JSON response — it will be treated as metadata only, not executed. '
+ 'The join point is node 17. Do not include next_node_id, '
  'next_node_ids, branch, or branches in your response. The runtime will handle '
  'routing automatically.'),
         ),
@@ -237,8 +240,9 @@ def build_graph(core):
             metadata={'phase': 'checkpoint'},
             agent_id='organizer',
             additional_prompt=('Phase: checkpoint. Read the merged branch results, decide whether the '
- 'architecture needs another planning pass, and use graph edits if the tree '
- 'shape should change before the final write. If the task is implementation-oriented, '
+ 'architecture needs another planning pass. If the tree shape should change, '
+ 'route to a graph_editor tool node; do not output graph_edit in your JSON — '
+ 'it is metadata-only and will not be executed. If the task is implementation-oriented, '
  'route directly to the code writer instead of the report writer. If the task is '
  'backend/runtime/API-oriented, route directly to the dev video agent.'),
         ),
@@ -275,7 +279,7 @@ def build_graph(core):
             next_node_ids=[],
             metadata={},
             tool_name='file_writer',
-            input_mapping={'path': 'code/transformer.py'},
+            input_mapping={'fallback_path': 'outputs/generated.py'},
         ),
     )
     graph.add_node(

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+from pathlib import Path
+from typing import Any, Optional
 
 from core.executor import GraphExecutor
+from core.results import ExecutionState
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -17,8 +21,116 @@ from web.utils import to_jsonable
 router = APIRouter()
 
 
+_ARTIFACT_PATH_PATTERNS = [
+    re.compile(r"(?:将该文件命名|命名|文件名)\s*为\s+([^\s,;，。]+)", re.IGNORECASE),
+    re.compile(r"(?:保存为)\s+([^\s,;，。]+)", re.IGNORECASE),
+    re.compile(r"(?:name it|save as)\s+([^\s,;，。]+)", re.IGNORECASE),
+]
+
+
+def extract_artifact_path(text: str) -> Optional[str]:
+    """Scan user text for an explicit filename/path request."""
+    for pattern in _ARTIFACT_PATH_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            candidate = match.group(1).strip()
+            if "." in candidate:
+                return candidate
+    return None
+
+
+def _build_artifact_info(original_request: str) -> Dict[str, Any]:
+    artifact: Dict[str, Any] = {}
+    path = extract_artifact_path(original_request)
+    if path:
+        artifact = {
+            "path": path,
+            "filename": Path(path).name,
+            "type": "python_module" if path.endswith(".py") else "file",
+        }
+    return artifact
+
+
+def normalize_initial_payload(raw: Any) -> Any:
+    """Normalize an HTTP input into the canonical Envelope format.
+
+    Rules:
+    - Already-envelope dicts are returned as-is.
+    - Dicts containing ``text`` use that value as ``original_request``.
+    - Strings become ``original_request`` directly.
+    - Everything else is coerced via ``str()``.
+    """
+    if isinstance(raw, dict):
+        if raw.get("_envelope") is True or "original_request" in raw:
+            return raw
+        text = raw.get("text")
+        if text is not None:
+            return {
+                "_envelope": True,
+                "original_request": text,
+                "artifact": _build_artifact_info(text),
+                "requirements": [],
+                "constraints": [],
+                "attachments": [],
+                "raw_input": raw,
+            }
+        original = str(raw)
+        return {
+            "_envelope": True,
+            "original_request": original,
+            "artifact": _build_artifact_info(original),
+            "requirements": [],
+            "constraints": [],
+            "attachments": [],
+            "raw_input": raw,
+        }
+    if isinstance(raw, str):
+        return {
+            "_envelope": True,
+            "original_request": raw,
+            "artifact": _build_artifact_info(raw),
+            "requirements": [],
+            "constraints": [],
+            "attachments": [],
+            "raw_input": raw,
+        }
+    original = str(raw)
+    return {
+        "_envelope": True,
+        "original_request": original,
+        "artifact": _build_artifact_info(original),
+        "requirements": [],
+        "constraints": [],
+        "attachments": [],
+        "raw_input": raw,
+    }
+
+
 def _get_swarm_or_404(request: Request, swarm_name: str):
     return get_runtime_registry(request).get_swarm(swarm_name)
+
+
+def resolve_final_output(state: ExecutionState) -> Any:
+    """Return the human-facing final output for a completed run.
+
+    Legacy mode simply returns ``state.payload``.
+    Envelope mode walks ``metadata.outputs`` and extracts the most
+    meaningful field from the last node output.
+    """
+    if not state.is_envelope:
+        return state.payload
+    outputs = state.metadata.get("outputs")
+    if isinstance(outputs, dict) and outputs:
+        last_key = list(outputs.keys())[-1]
+        last_output = outputs[last_key]
+        if isinstance(last_output, dict):
+            for key in ("final_answer", "final_report", "approved_report", "draft_report", "content"):
+                value = last_output.get(key)
+                if value is not None:
+                    return value
+            return last_output
+        return last_output
+    return state.payload
 
 
 def _get_runs_registry(request: Request) -> RunRegistry:
@@ -58,7 +170,7 @@ async def _execute_swarm_run(request: Request, swarm_name: str, *, use_backgroun
         raise ApiError(f"Swarm '{swarm_name}' has no agent graph attached.")
 
     request_data = await parse_json_body(request)
-    payload = request_data.get("input")
+    payload = normalize_initial_payload(request_data.get("input"))
     rounds = int(request_data.get("rounds", 0))
     meta_mode = bool(request_data.get("meta_mode", False))
     runs_registry = _get_runs_registry(request)
@@ -101,7 +213,7 @@ async def _execute_swarm_run(request: Request, swarm_name: str, *, use_backgroun
         "success": True,
         "swarm": swarm_name,
         "rounds": state.rounds,
-        "output": to_jsonable(state.payload),
+        "output": to_jsonable(resolve_final_output(state)),
         "trace": to_jsonable(state.trace),
         "metadata": to_jsonable(state.metadata),
     }

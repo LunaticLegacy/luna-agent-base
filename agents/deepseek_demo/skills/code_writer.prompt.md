@@ -27,4 +27,4 @@ Implementation checklist:
 Output contract:
 - Return the complete Python file content only
 - The file should be directly writable by `file_writer`
-- The output should already be ready to save as `code/transformer.py` or the path given by the graph
+- The target filename and path are determined by the canonical request, Target Artifact, or downstream file_writer node. If no path is specified, output pure source code and the runtime will decide the save location.

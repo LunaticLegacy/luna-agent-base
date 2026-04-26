@@ -69,17 +69,20 @@ class RoutingHelperMixin:
         # Envelope mode: control decisions live in metadata["control"], not payload.
         control = metadata.get("control") if isinstance(metadata, dict) else None
         if isinstance(control, dict):
-            next_node_ids = control.get("next_node_ids")
+            # Per-node control takes precedence; fall back to flat control for backward compatibility.
+            node_control = control.get(str(node.node_id))
+            effective_control = node_control if isinstance(node_control, dict) else control
+            next_node_ids = effective_control.get("next_node_ids")
             if isinstance(next_node_ids, list) and next_node_ids:
                 return [int(item) for item in next_node_ids]
 
-            branch = control.get("branch")
+            branch = effective_control.get("branch")
             if branch is not None:
                 matched = self._match_branch_targets(graph, node.node_id, branch)
                 if matched:
                     return matched
 
-            branches = control.get("branches")
+            branches = effective_control.get("branches")
             if isinstance(branches, list) and branches:
                 resolved: List[int] = []
                 for item in branches:
