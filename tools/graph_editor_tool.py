@@ -95,9 +95,9 @@ class GraphEditorTool(ToolDefinition):
                     node_name=node_name,
                     agent_id=agent_id,
                     additional_prompt=additional_prompt,
-                    next_node_ids=next_node_ids,
                     metadata=lifecycle,
                 )
+                node.next_node_ids = next_node_ids
                 target_graph.add_node(node)
                 if replace_existing and "incoming_edges" in locals():
                     for edge in incoming_edges:
