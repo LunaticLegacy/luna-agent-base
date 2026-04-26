@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -51,6 +52,8 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self._task_graph_path: Optional[Path] = None
         self.limiter = limiter
         self._tool_scheduler = None
+        self._stop_events: Dict[str, threading.Event] = {}
+        self._stop_types: Dict[str, str] = {}
 
     async def init(self) -> None:
         if self._execution_graph is not None:
@@ -204,6 +207,35 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
             from core.executor_parts.tool_scheduler import ToolScheduler
             self._tool_scheduler = ToolScheduler(self, self.limiter)
         return self._tool_scheduler
+
+    def register_stop_event(self, run_id: str) -> threading.Event:
+        """Register a stop event for a run. Returns the event object."""
+        event = threading.Event()
+        self._stop_events[run_id] = event
+        return event
+
+    def request_stop(self, run_id: str, stop_type: str) -> bool:
+        """Request a stop for the given run. stop_type is 'soft' or 'hard'."""
+        event = self._stop_events.get(run_id)
+        if event is not None:
+            self._stop_types[run_id] = stop_type
+            event.set()
+            return True
+        return False
+
+    def check_stop(self, run_id: Optional[str]) -> Optional[str]:
+        """Check if a stop has been requested for the run. Returns 'soft', 'hard', or None."""
+        if run_id is None:
+            return None
+        event = self._stop_events.get(run_id)
+        if event is not None and event.is_set():
+            return self._stop_types.get(run_id)
+        return None
+
+    def clear_stop(self, run_id: str) -> None:
+        """Clear the stop event for a run."""
+        self._stop_events.pop(run_id, None)
+        self._stop_types.pop(run_id, None)
 
     def cleanup_transient_execution_nodes(self, *, graph: Optional[ExecutionGraph] = None) -> list[int]:
         target_graph = graph or self.get_execution_graph()

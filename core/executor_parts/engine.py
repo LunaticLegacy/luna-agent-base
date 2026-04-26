@@ -46,6 +46,11 @@ class GraphExecutor(
         if callable(set_current_run_id):
             set_current_run_id(effective_run_id)
 
+        # Register stop event for this run
+        register_stop = getattr(core, "register_stop_event", None)
+        if callable(register_stop):
+            register_stop(effective_run_id)
+
         state = ExecutionState(payload=initial_payload, rounds=rounds)
         self._emit(
             event_sink,
@@ -108,21 +113,41 @@ class GraphExecutor(
                 )
                 raise
 
-            self._emit(
-                event_sink,
-                ExecutionEvent(
-                    run_id=effective_run_id,
-                    swarm_name=swarm_name,
-                    event_type="run.completed",
-                    rounds=result.rounds,
-                    status="completed",
-                    data={
-                        "state_snapshot": result.snapshot(),
-                    },
-                ),
-            )
+            stop_type = getattr(core, "check_stop", lambda _: None)(effective_run_id) if core else None
+            if stop_type:
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=effective_run_id,
+                        swarm_name=swarm_name,
+                        event_type="run.stopped",
+                        rounds=result.rounds,
+                        status="stopped",
+                        data={
+                            "stop_type": stop_type,
+                            "state_snapshot": result.snapshot(),
+                        },
+                    ),
+                )
+            else:
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=effective_run_id,
+                        swarm_name=swarm_name,
+                        event_type="run.completed",
+                        rounds=result.rounds,
+                        status="completed",
+                        data={
+                            "state_snapshot": result.snapshot(),
+                        },
+                    ),
+                )
             return result
         finally:
+            clear_stop = getattr(core, "clear_stop", None)
+            if callable(clear_stop):
+                clear_stop(effective_run_id)
             cleanup = getattr(core, "cleanup_transient_execution_nodes", None)
             if callable(cleanup):
                 try:
@@ -142,6 +167,23 @@ class GraphExecutor(
         event_sink: Optional[Callable[[ExecutionEvent], None]] = None,
     ) -> ExecutionState:
         while current_node_id is not None:
+            # Hard stop: abort immediately at the start of each loop iteration
+            stop_type = getattr(core, "check_stop", lambda _: None)(run_id) if core else None
+            if stop_type == "hard":
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=run_id or "",
+                        swarm_name=swarm_name,
+                        event_type="run.stopped",
+                        node_id=current_node_id,
+                        rounds=state.rounds,
+                        status="stopped",
+                        data={"stop_type": "hard", "reason": "hard stop requested"},
+                    ),
+                )
+                return state
+
             node = graph.nodes[current_node_id]
             skip_target, skip_reason = self._node_skip_target(graph, node)
             if skip_reason is not None:
@@ -456,6 +498,25 @@ class GraphExecutor(
                             "output_payload": output_payload,
                             "state_snapshot": state.snapshot(),
                         },
+                    ),
+                )
+                return state
+
+            # Soft stop: after current node completes, do not proceed to next node
+            stop_type = getattr(core, "check_stop", lambda _: None)(run_id) if core else None
+            if stop_type == "soft":
+                self._emit(
+                    event_sink,
+                    ExecutionEvent(
+                        run_id=run_id or "",
+                        swarm_name=swarm_name,
+                        event_type="run.stopped",
+                        node_id=node.node_id,
+                        node_name=node.node_name,
+                        node_type=node.__class__.__name__,
+                        rounds=state.rounds,
+                        status="stopped",
+                        data={"stop_type": "soft", "reason": "soft stop requested after node completion"},
                     ),
                 )
                 return state

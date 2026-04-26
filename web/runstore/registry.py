@@ -19,6 +19,7 @@ class RunRegistry:
 
     def __init__(self) -> None:
         self._runs: Dict[str, RunRecord] = {}
+        self._run_cores: Dict[str, Any] = {}
         self._lock = threading.RLock()
 
     def launch_run(
@@ -41,6 +42,7 @@ class RunRegistry:
                 record.bind_storage_dir(Path(storage_root) / "runs" / run_id)
         with self._lock:
             self._runs[run_id] = record
+            self._run_cores[run_id] = core
 
         thread = threading.Thread(
             target=self._worker,
@@ -97,6 +99,21 @@ class RunRegistry:
                 if not record._done and (swarm_name is None or record.swarm_name == swarm_name)
             ]
 
+    def stop_run(self, run_id: str, stop_type: str = "soft") -> Optional[RunRecord]:
+        """Request a stop for an active run."""
+        record = self.get_run(run_id)
+        if record is None:
+            return None
+        if record._done:
+            return None
+        record.stop(stop_type)
+        core = self._run_cores.get(run_id)
+        if core is not None:
+            request_stop = getattr(core, "request_stop", None)
+            if callable(request_stop):
+                request_stop(run_id, stop_type)
+        return record
+
     def _worker(
         self,
         *,
@@ -150,3 +167,6 @@ class RunRegistry:
                         },
                     )
                 )
+        finally:
+            with self._lock:
+                self._run_cores.pop(record.run_id, None)
