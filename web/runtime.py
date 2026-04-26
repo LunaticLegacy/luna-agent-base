@@ -46,12 +46,16 @@ class RuntimeRegistry:
             swarm.core.task_graph.save(self._task_graph_path(swarm_name))
 
     def reload_all(self) -> None:
-        """Reload every discovered swarm package from disk."""
+        """Reload every discovered swarm package from disk.
+
+        Successfully loaded swarms are updated/added. Swarms that fail to
+        reload are kept in their previous state rather than being removed.
+        """
         if self.root_config is None:
             raise SwarmLoaderError("Root config is not available.")
         swarms = load_all_swarms(self.root_config.swarm_root)
-        self.swarms = {swarm.manifest.swarm_name: swarm for swarm in swarms}
-        for swarm in self.swarms.values():
+        for swarm in swarms:
+            self.swarms[swarm.manifest.swarm_name] = swarm
             self._load_task_graph(swarm)
         self.load_error = None
 

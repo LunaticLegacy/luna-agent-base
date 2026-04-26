@@ -273,16 +273,31 @@ def build_core_from_package(
 
 
 def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -> List[LoadedSwarm]:
-    """Discover and load every swarm package in the given root."""
+    """Discover and load every swarm package in the given root.
+
+    Individual package load failures are logged and skipped so that
+    successfully-loaded swarms remain available.
+    """
     package_paths = discover_swarm_packages(root)
     print(
         f"[angelus] discovered swarm packages: root={root} count={len(package_paths)}",
         flush=True,
     )
-    manifest_entries = [load_swarm_manifest(package_path) for package_path in package_paths]
+
+    valid_package_paths: List[Path] = []
+    manifest_entries: List[Tuple[Path, SwarmManifest]] = []
+    for package_path in package_paths:
+        try:
+            manifest_entries.append(load_swarm_manifest(package_path))
+            valid_package_paths.append(package_path)
+        except Exception as exc:
+            print(
+                f"[angelus] failed to load manifest: package={package_path} error={exc}",
+                flush=True,
+            )
 
     if preinstall_tool_requirements:
-        requirements = collect_tool_requirement_files(package_paths, manifest_entries)
+        requirements = collect_tool_requirement_files(valid_package_paths, manifest_entries)
         if requirements:
             print(
                 f"[angelus] preinstalling tool requirements: files={len(requirements)}",
@@ -290,7 +305,7 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -
             )
         install_tool_requirements(requirements)
 
-    api_requirements = collect_api_requirement_files(package_paths, manifest_entries)
+    api_requirements = collect_api_requirement_files(valid_package_paths, manifest_entries)
     if preinstall_tool_requirements and api_requirements:
         print(
             f"[angelus] preinstalling api requirements: files={len(api_requirements)}",
@@ -299,16 +314,25 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -
         install_api_requirements(api_requirements)
 
     swarms: List[LoadedSwarm] = []
-    for package_path, (manifest_path, manifest) in zip(package_paths, manifest_entries):
-        swarms.append(
-            build_core_from_package(
-                package_path,
-                manifest=manifest,
-                manifest_path=manifest_path,
+    for package_path, (manifest_path, manifest) in zip(valid_package_paths, manifest_entries):
+        try:
+            swarms.append(
+                build_core_from_package(
+                    package_path,
+                    manifest=manifest,
+                    manifest_path=manifest_path,
+                )
             )
-        )
+        except Exception as exc:
+            print(
+                f"[angelus] failed to build swarm: name={manifest.swarm_name} error={exc}",
+                flush=True,
+            )
+
+    failed_count = len(package_paths) - len(swarms)
     print(
-        f"[angelus] swarm loading complete: loaded={len(swarms)}",
+        f"[angelus] swarm loading complete: discovered={len(package_paths)} "
+        f"loaded={len(swarms)} failed={failed_count}",
         flush=True,
     )
     return swarms
