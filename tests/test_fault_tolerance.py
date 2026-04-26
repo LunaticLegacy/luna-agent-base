@@ -46,21 +46,15 @@ class FaultToleranceTest(unittest.TestCase):
     def test_architecture_regulator_quarantines_node_with_fallback(self) -> None:
         graph = ExecutionGraph("demo")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="flaky",
                 agent_id="quarantined",
-                next_node_ids=[2],
-                metadata={"failure_policy": {"fallback_node_id": 2}},
-            )
+                metadata={"failure_policy": {"fallback_node_id": 2}})
         )
         graph.add_node(
-            AgentNode(
-                node_id=2,
+            AgentNode(node_id=2,
                 node_name="fallback",
-                agent_id="healthy",
-                next_node_ids=[],
-            )
+                agent_id="healthy")
         )
 
         regulator = ArchitectureRegulator()
@@ -87,26 +81,20 @@ class FaultToleranceTest(unittest.TestCase):
     def test_executor_skips_quarantined_node_and_continues(self) -> None:
         graph = ExecutionGraph("demo")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="quarantined",
                 agent_id="quarantined",
-                next_node_ids=[2],
                 metadata={
                     "fault_tolerance": {"quarantined": True, "fallback_node_id": 2, "last_failure_message": "quarantined"},
                     "runtime_transient": True,
                     "persistence": "transient",
                     "lifetime_policy": "run",
-                },
-            )
+                })
         )
         graph.add_node(
-            AgentNode(
-                node_id=2,
+            AgentNode(node_id=2,
                 node_name="healthy",
-                agent_id="healthy",
-                next_node_ids=[],
-            )
+                agent_id="healthy")
         )
         graph.set_entry(1)
         graph.set_exit(2)

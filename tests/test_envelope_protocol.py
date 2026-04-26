@@ -142,20 +142,14 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
         envelope = normalize_initial_payload("build me a thing")
         graph = ExecutionGraph("immutable")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="orchestrator",
-                agent_id="orchestrator",
-                next_node_ids=[2],
-            )
+                agent_id="orchestrator")
         )
         graph.add_node(
-            AgentNode(
-                node_id=2,
+            AgentNode(node_id=2,
                 node_name="organizer",
-                agent_id="organizer",
-                next_node_ids=[],
-            )
+                agent_id="organizer")
         )
         graph.add_edge(1, 2, label="next")
         graph.set_entry(1)
@@ -176,20 +170,14 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
         envelope = normalize_initial_payload("build me a thing")
         graph = ExecutionGraph("outputs")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="orchestrator",
-                agent_id="orchestrator",
-                next_node_ids=[2],
-            )
+                agent_id="orchestrator")
         )
         graph.add_node(
-            AgentNode(
-                node_id=2,
+            AgentNode(node_id=2,
                 node_name="organizer",
-                agent_id="organizer",
-                next_node_ids=[],
-            )
+                agent_id="organizer")
         )
         graph.add_edge(1, 2, label="next")
         graph.set_entry(1)
@@ -212,36 +200,24 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
         envelope = normalize_initial_payload("build me a thing")
         graph = ExecutionGraph("routing")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="orchestrator",
-                agent_id="orchestrator",
-                next_node_ids=[2],
-            )
+                agent_id="orchestrator")
         )
         graph.add_node(
-            AgentNode(
-                node_id=2,
+            AgentNode(node_id=2,
                 node_name="organizer",
-                agent_id="organizer",
-                next_node_ids=[22, 24],
-            )
+                agent_id="organizer")
         )
         graph.add_node(
-            AgentNode(
-                node_id=22,
+            AgentNode(node_id=22,
                 node_name="code_writer",
-                agent_id="code_writer",
-                next_node_ids=[],
-            )
+                agent_id="code_writer")
         )
         graph.add_node(
-            AgentNode(
-                node_id=24,
+            AgentNode(node_id=24,
                 node_name="dev",
-                agent_id="dev",
-                next_node_ids=[],
-            )
+                agent_id="dev")
         )
         graph.add_edge(1, 2, label="next")
         graph.add_edge(2, 22, label="implement")
@@ -278,12 +254,9 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
         envelope = normalize_initial_payload("build me a thing")
         graph = ExecutionGraph("tool-input")
         graph.add_node(
-            AgentNode(
-                node_id=22,
+            AgentNode(node_id=22,
                 node_name="code_writer",
-                agent_id="code_writer",
-                next_node_ids=[23],
-            )
+                agent_id="code_writer")
         )
         graph.add_node(
             ToolNode(
@@ -320,12 +293,9 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
         )
         graph = ExecutionGraph("agent-input")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="orchestrator",
-                agent_id="orchestrator",
-                next_node_ids=[],
-            )
+                agent_id="orchestrator")
         )
         graph.set_entry(1)
         graph.set_exit(1)
@@ -427,12 +397,9 @@ class EnvelopeRawSourceCodeTest(unittest.IsolatedAsyncioTestCase):
         envelope = normalize_initial_payload("为我做一个agent循环框架。将该文件命名为 frame.py。")
         graph = ExecutionGraph("raw-source")
         graph.add_node(
-            AgentNode(
-                node_id=22,
+            AgentNode(node_id=22,
                 node_name="code_writer",
-                agent_id="code_writer",
-                next_node_ids=[23],
-            )
+                agent_id="code_writer")
         )
         graph.add_node(
             ToolNode(

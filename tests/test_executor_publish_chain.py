@@ -67,9 +67,9 @@ class DummyCore:
 
 def build_publish_graph() -> ExecutionGraph:
     graph = ExecutionGraph("publish")
-    graph.add_node(AgentNode(node_id=18, node_name="writer", agent_id="writer", next_node_ids=[19]))
-    graph.add_node(AgentNode(node_id=19, node_name="reviewer", agent_id="reviewer", next_node_ids=[20, 18]))
-    graph.add_node(AgentNode(node_id=20, node_name="publisher", agent_id="publisher", next_node_ids=[]))
+    graph.add_node(AgentNode(node_id=18, node_name="writer", agent_id="writer"))
+    graph.add_node(AgentNode(node_id=19, node_name="reviewer", agent_id="reviewer"))
+    graph.add_node(AgentNode(node_id=20, node_name="publisher", agent_id="publisher"))
     graph.add_edge(18, 19, label="review", priority=10)
     graph.add_edge(19, 20, label="approve", condition="approve", priority=20)
     graph.add_edge(19, 18, label="revise", condition="revise", priority=10)
@@ -126,7 +126,7 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
                 return {"written": True}
 
         graph = ExecutionGraph("publish-final-answer")
-        graph.add_node(AgentNode(node_id=1, node_name="publisher", agent_id="publisher", next_node_ids=[2]))
+        graph.add_node(AgentNode(node_id=1, node_name="publisher", agent_id="publisher"))
         graph.add_node(ToolNode(node_id=2, node_name="file_writer", tool_name="file_writer", next_node_ids=[]))
         graph.add_edge(1, 2)
         graph.set_entry(1)
@@ -149,9 +149,9 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_cannot_route_to_non_outgoing_node(self) -> None:
         graph = ExecutionGraph("route-policy")
-        graph.add_node(AgentNode(node_id=1, node_name="router", agent_id="router", next_node_ids=[2]))
-        graph.add_node(AgentNode(node_id=2, node_name="allowed", agent_id="allowed", next_node_ids=[]))
-        graph.add_node(AgentNode(node_id=3, node_name="blocked", agent_id="blocked", next_node_ids=[]))
+        graph.add_node(AgentNode(node_id=1, node_name="router", agent_id="router"))
+        graph.add_node(AgentNode(node_id=2, node_name="allowed", agent_id="allowed"))
+        graph.add_node(AgentNode(node_id=3, node_name="blocked", agent_id="blocked"))
         graph.add_edge(1, 2)
         graph.set_entry(1)
         graph.set_exit(2)
@@ -178,13 +178,10 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         graph = ExecutionGraph("per-call")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="writer",
                 blueprint_ref="writer",
-                instance_policy="per_call",
-                next_node_ids=[],
-            )
+                instance_policy="per_call")
         )
         graph.set_entry(1)
         graph.set_exit(1)

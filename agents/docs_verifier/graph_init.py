@@ -6,74 +6,56 @@ def build_graph(core):
 
     # Node 1: orchestrator - 制定核对计划并分解任务
     graph.add_node(
-        AgentNode(
-            node_id=1,
+        AgentNode(node_id=1,
             node_name='orchestrator',
-            next_node_ids=[2, 3, 4],
             metadata={'route_policy': 'all', 'join_node_id': 5},
             agent_id='orchestrator',
-            additional_prompt=None,
-        ),
+            additional_prompt=None),
     )
 
     # Node 2: backend_verifier - 核对后端文档与代码一致性
     graph.add_node(
-        AgentNode(
-            node_id=2,
+        AgentNode(node_id=2,
             node_name='backend_verifier',
-            next_node_ids=[5],
             metadata={},
             agent_id='backend_verifier',
-            additional_prompt=None,
-        ),
+            additional_prompt=None),
     )
 
     # Node 3: frontend_verifier - 核对前端文档与代码一致性
     graph.add_node(
-        AgentNode(
-            node_id=3,
+        AgentNode(node_id=3,
             node_name='frontend_verifier',
-            next_node_ids=[5],
             metadata={},
             agent_id='frontend_verifier',
-            additional_prompt=None,
-        ),
+            additional_prompt=None),
     )
 
     # Node 4: structure_verifier - 核对结构/API/元数据文档与代码一致性
     graph.add_node(
-        AgentNode(
-            node_id=4,
+        AgentNode(node_id=4,
             node_name='structure_verifier',
-            next_node_ids=[5],
             metadata={},
             agent_id='structure_verifier',
-            additional_prompt=None,
-        ),
+            additional_prompt=None),
     )
 
     # Node 5: reviewer - 汇总审核所有核对结果
     graph.add_node(
-        AgentNode(
-            node_id=5,
+        AgentNode(node_id=5,
             node_name='reviewer',
-            next_node_ids=[6],
             metadata={},
             agent_id='reviewer',
-            additional_prompt=None,
-        ),
+            additional_prompt=None),
     )
 
     # Node 6: publisher - 生成最终核对报告
     graph.add_node(
-        AgentNode(
-            node_id=6,
+        AgentNode(node_id=6,
             node_name='publisher',
-            next_node_ids=[7],
             metadata={},
             agent_id='publisher',
-            additional_prompt=None,
-        ),
+            additional_prompt=None),
     )
 
     # Node 7: file_writer - 将报告写入 outputs/docs_verifier_report.txt

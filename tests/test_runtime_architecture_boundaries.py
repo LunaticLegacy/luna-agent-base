@@ -22,7 +22,7 @@ def _build_graph() -> ExecutionGraph:
 
 def _build_agent_graph() -> ExecutionGraph:
     graph = ExecutionGraph("agent-boundary-test")
-    graph.add_node(AgentNode(node_id=1, node_name="writer", blueprint_ref="writer", next_node_ids=[2]))
+    graph.add_node(AgentNode(node_id=1, node_name="writer", blueprint_ref="writer"))
     graph.add_node(AgentNode(node_id=2, node_name="publisher", blueprint_ref="publisher"))
     graph.add_edge(1, 2)
     graph.set_entry(1)
