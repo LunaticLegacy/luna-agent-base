@@ -356,24 +356,13 @@ max_tool_rounds exceeded  → abort_node
 
 ---
 
-## 9. Agent 输出格式（JSON Envelope）
+## 9. Agent 输出格式（OpenAI Function Calling）
 
 ### 9.1 需要工具的 Agent
 
-必须输出合法 JSON：
+Agent 通过 **OpenAI function-calling** 接口请求工具。Runtime 将绑定的工具 schema 注入到 LLM 请求中，LLM 返回 `tool_calls`，Runtime 解析并调度执行。
 
-```json
-{
-  "content": "...",
-  "tool_requests": [...],
-  "next_node_ids": [20]
-}
-```
-
-解析规则：
-- 如果 `assistant_message` 可被解析为 JSON 且含 `tool_requests` 字段，视为 envelope。
-- 如果解析失败，视为纯文本输出，`tool_requests = []`。
-- `content` 可为空字符串（纯工具调用场景）。
+无需输出 JSON envelope。Agent 直接表达意图，工具调用由 function-calling 机制处理。
 
 ### 9.2 不需要工具的 Agent
 
@@ -381,15 +370,15 @@ max_tool_rounds exceeded  → abort_node
 
 ### 9.3 现有 Agent 迁移
 
-| Agent | 当前输出 | 是否需要 JSON envelope | 原因 |
+| Agent | 当前输出 | 是否使用 function calling | 原因 |
 |---|---|---|---|
-| `orchestrator` | JSON（已有） | 是 | 已结构化，兼容 |
-| `organizer` | JSON（已有） | 是 | 已结构化，兼容 |
+| `orchestrator` | 自由文本 | 是 | 需要调用工具进行编排 |
+| `organizer` | 自由文本 | 是 | 需要调用工具进行组织 |
 | `code_writer` | 纯文本代码 | **是** | 需要调用 `file_writer` |
 | `writer` | Markdown 报告 | 否 | 不需要工具 |
 | `researcher` | 自由文本 | 是 | 需要调用 `web_search` |
 | `publisher` | 自由文本 | 否 | 不需要工具 |
-| `reviewer` | JSON | 是 | 已结构化，兼容 |
+| `reviewer` | 自由文本 | 是 | 需要调用工具进行验证 |
 
 ---
 

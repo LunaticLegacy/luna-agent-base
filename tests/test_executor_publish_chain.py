@@ -61,7 +61,7 @@ class DummyCore:
         if snapshot:
             self.swarm_cognitive_graph = CognitiveGraph.from_dict(snapshot)
 
-    def get_cognitive_graph_export(self, query=None, max_nodes=20) -> str:
+    def get_cognitive_graph_export(self, query=None, max_nodes=None) -> str:
         return ""
 
 
@@ -93,12 +93,11 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(build_publish_graph(), core, "mission")
 
-        # Envelope mode: agent receives full context, not just the previous output
+        # Without envelope mode, agent receives the raw payload directly
         publisher_input = core.agents["publisher"].user_messages[0]
-        self.assertIn(draft, publisher_input)
+        self.assertEqual(publisher_input, "mission")
         self.assertEqual(state.metadata["control"]["19"]["verdict"], "approve")
         self.assertEqual(state.metadata["approved_report"], draft)
-        # draft_report is no longer auto-inferred from generic "content" in envelope mode
         self.assertEqual(state.metadata["outputs"]["18"]["content"], draft)
 
     async def test_reviewer_revise_can_send_revision_payload_back_to_writer(self) -> None:
@@ -115,11 +114,11 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(build_publish_graph(), core, "mission")
 
-        # Envelope mode: agents receive full context including all previous outputs
+        # Without envelope mode, agents receive the raw payload directly
         writer_input = core.agents["writer"].user_messages[1]
-        self.assertIn("Please tighten evidence.", writer_input)
+        self.assertEqual(writer_input, "mission")
         publisher_input = core.agents["publisher"].user_messages[0]
-        self.assertIn("REVISED DRAFT", publisher_input)
+        self.assertEqual(publisher_input, "mission")
         self.assertEqual(state.metadata["approved_report"], "REVISED DRAFT")
 
     async def test_publisher_final_answer_becomes_file_writer_payload(self) -> None:
@@ -196,7 +195,7 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(graph, core, "mission")
 
-        # Envelope mode: payload is immutable; agent output lives in metadata.outputs
+        # Payload is immutable; agent output lives in metadata.outputs
         self.assertEqual(state.payload, "mission")
         self.assertEqual(state.metadata["outputs"]["1"]["content"], "draft")
         self.assertEqual(prototype.clone_count, 1)

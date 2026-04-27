@@ -143,7 +143,7 @@ class ContextGraph:
         self,
         seed_ids: List[str],
         max_hops: int = 2,
-        max_nodes: int = 50,
+        max_nodes: Optional[int] = None,
         min_relevance: float = 0.1,
     ) -> "ContextGraph":
         if not seed_ids:
@@ -181,7 +181,7 @@ class ContextGraph:
                 entry_id,
             ),
         )
-        if len(ordered_ids) > max_nodes:
+        if max_nodes is not None and len(ordered_ids) > max_nodes:
             ordered_ids = ordered_ids[:max_nodes]
 
         subgraph = ContextGraph(graph_id=f"{self.graph_id}_sub")
@@ -380,7 +380,7 @@ class ContextGraph:
         query: Optional[str] = None,
         seed_ids: Optional[List[str]] = None,
         purpose: str = "",
-        max_nodes: int = 20,
+        max_nodes: Optional[int] = None,
         max_hops: int = 2,
     ) -> tuple["ContextGraph", List[str]]:
         if seed_ids:
@@ -395,7 +395,8 @@ class ContextGraph:
             )
             descriptor_roots = list(descriptor.root_node_ids)
         else:
-            descriptor_roots = list(cognitive_graph.nodes.keys())[:max_nodes]
+            all_ids = list(cognitive_graph.nodes.keys())
+            descriptor_roots = all_ids[:max_nodes] if max_nodes is not None else all_ids
             subgraph = cognitive_graph.query_subgraph(descriptor_roots, max_hops=max_hops, max_nodes=max_nodes)
 
         context_graph = cls(graph_id=f"{cognitive_graph.graph_id}_context")

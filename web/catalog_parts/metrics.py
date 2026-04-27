@@ -107,11 +107,8 @@ def build_metrics_catalog(
                 input_text = data.get("input_payload")
                 if input_text is None:
                     state_snapshot = data.get("state_snapshot", {})
-                    payload = state_snapshot.get("payload", {}) if isinstance(state_snapshot, dict) else {}
-                    if isinstance(payload, dict):
-                        input_text = payload.get("original_request") or payload
-                    else:
-                        input_text = payload
+                    payload = state_snapshot.get("payload") if isinstance(state_snapshot, dict) else None
+                    input_text = payload
                 bucket["token_usage"] += 45 + (_metric_text_size(input_text) // 10)
                 node_id = event.get("node_id")
                 if node_id is not None:

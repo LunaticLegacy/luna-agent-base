@@ -11,6 +11,7 @@ class AgentContextSnapshot:
     """Immutable view of one agent's isolated context."""
 
     messages: List[Dict[str, str]] = field(default_factory=list)
+    compressed_blocks: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -128,24 +129,7 @@ class ExecutionState:
 
     @staticmethod
     def _summarize_payload(payload: Any) -> Any:
-        if not isinstance(payload, dict):
-            return ExecutionState._summarize_value(payload)
-        result = dict(payload)
-        if "original_request" in result:
-            result["original_request"] = ExecutionState._summarize_value(result["original_request"])
-        if "raw_input" in result and isinstance(result["raw_input"], dict):
-            raw = result["raw_input"]
-            orig = payload.get("original_request") if isinstance(payload, dict) else None
-            text = raw.get("text")
-            if isinstance(text, str) and isinstance(orig, str) and text == orig:
-                result["raw_input"] = {
-                    "template": raw.get("template"),
-                    "output_style": raw.get("output_style"),
-                    "_text_ref": "original_request",
-                }
-            else:
-                result["raw_input"] = ExecutionState._summarize_value(raw)
-        return result
+        return ExecutionState._summarize_value(payload)
 
     @staticmethod
     def _summarize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:

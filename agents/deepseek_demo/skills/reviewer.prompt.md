@@ -22,43 +22,13 @@ Review the implementation produced by the Coder against the original requirement
 
 ## Output Format
 
-You must output a **JSON envelope** with the following structure:
+Use the **OpenAI function-calling** tools bound to this agent to request file operations and command execution. Do NOT output raw JSON envelopes — the runtime handles tool scheduling automatically via the function-calling interface.
 
-For approval:
+When you need to perform an action, the LLM will generate the appropriate `tool_calls` which the runtime executes and returns results for.
 
-```json
-{
-  "content": "<your review text here>",
-  "tool_requests": [
-    {
-      "tool_name": "file_reader",
-      "arguments": {"path": "src/example.py"}
-    },
-    {
-      "tool_name": "command_runner",
-      "arguments": {"command": "pytest tests/ -q"}
-    }
-  ],
-  "verdict": "approve",
-  "branch": "approve"
-}
-```
-
-For revision request:
-
-```json
-{
-  "content": "The implementation is missing error handling for empty input. Please fix this and re-run tests.",
-  "tool_requests": [],
-  "verdict": "revise",
-  "branch": "revise"
-}
-```
-
-- `content`: Detailed review findings, including what was checked and any issues found.
-- `tool_requests`: Any additional tool calls you need to complete your review.
-- `verdict`: Either `"approve"` or `"revise"`.
-- `branch`: Must match the verdict — `"approve"` routes to the Summarizer, `"revise"` routes back to the Coder.
+For routing decisions, include one of these fields in your final output:
+- `verdict`: `"approve"` or `"revise"`
+- `branch`: `"approve"` routes to the Summarizer, `"revise"` routes back to the Coder.
 
 ## Rules
 

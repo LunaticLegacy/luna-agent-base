@@ -62,80 +62,50 @@ class DummyCore:
 
 
 class NormalizeInitialPayloadTest(unittest.TestCase):
-    def test_string_becomes_envelope(self) -> None:
+    def test_string_passed_through(self) -> None:
         result = normalize_initial_payload("hello world")
-        self.assertTrue(result.get("_envelope"))
-        self.assertEqual(result["original_request"], "hello world")
-        self.assertEqual(result["raw_input"], "hello world")
+        self.assertEqual(result, "hello world")
 
-    def test_dict_with_text_becomes_envelope(self) -> None:
+    def test_dict_passed_through(self) -> None:
         raw = {"template": "summary", "text": "do something", "output_style": "markdown"}
         result = normalize_initial_payload(raw)
-        self.assertTrue(result.get("_envelope"))
-        self.assertEqual(result["original_request"], "do something")
-        self.assertEqual(result["raw_input"], raw)
+        self.assertIs(result, raw)
 
-    def test_existing_envelope_preserved(self) -> None:
-        envelope = {
-            "_envelope": True,
-            "original_request": "keep me",
-            "artifact": {"path": "x.py"},
-        }
-        result = normalize_initial_payload(envelope)
-        self.assertIs(result, envelope)
-
-    def test_envelope_with_original_request_preserved(self) -> None:
-        envelope = {
-            "original_request": "keep me too",
-            "artifact": {},
-        }
-        result = normalize_initial_payload(envelope)
-        self.assertIs(result, envelope)
-
-    def test_dict_without_text_becomes_envelope(self) -> None:
-        raw = {"foo": "bar"}
-        result = normalize_initial_payload(raw)
-        self.assertTrue(result.get("_envelope"))
-        self.assertEqual(result["original_request"], str(raw))
-        self.assertEqual(result["raw_input"], raw)
-
-    def test_int_becomes_envelope(self) -> None:
+    def test_int_coerced_to_str(self) -> None:
         result = normalize_initial_payload(42)
-        self.assertTrue(result.get("_envelope"))
-        self.assertEqual(result["original_request"], "42")
-        self.assertEqual(result["raw_input"], 42)
+        self.assertEqual(result, "42")
 
 
 class ResolveFinalOutputTest(unittest.TestCase):
-    def test_envelope_with_no_outputs_returns_payload(self) -> None:
-        state = ExecutionState(payload={"_envelope": True, "original_request": "req"})
-        self.assertEqual(resolve_final_output(state), {"_envelope": True, "original_request": "req"})
+    def test_no_outputs_returns_payload(self) -> None:
+        state = ExecutionState(payload="raw request")
+        self.assertEqual(resolve_final_output(state), "raw request")
 
-    def test_envelope_returns_last_output_content(self) -> None:
+    def test_returns_last_output_content(self) -> None:
         state = ExecutionState(
-            payload={"_envelope": True, "original_request": "req"},
+            payload="raw request",
             metadata={"outputs": {"1": {"content": "hello"}}},
         )
         self.assertEqual(resolve_final_output(state), "hello")
 
-    def test_envelope_returns_last_output_final_answer(self) -> None:
+    def test_returns_last_output_final_answer(self) -> None:
         state = ExecutionState(
-            payload={"_envelope": True, "original_request": "req"},
+            payload="raw request",
             metadata={"outputs": {"1": {"final_answer": "answer"}}},
         )
         self.assertEqual(resolve_final_output(state), "answer")
 
-    def test_envelope_returns_last_output_dict_when_no_priority_key(self) -> None:
+    def test_returns_last_output_dict_when_no_priority_key(self) -> None:
         state = ExecutionState(
-            payload={"_envelope": True, "original_request": "req"},
+            payload="raw request",
             metadata={"outputs": {"1": {"written": True, "path": "x.py"}}},
         )
         self.assertEqual(resolve_final_output(state), {"written": True, "path": "x.py"})
 
 
-class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
-    async def test_envelope_payload_immutable(self) -> None:
-        envelope = normalize_initial_payload("build me a thing")
+class GraphExecutionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_payload_is_immutable(self) -> None:
+        payload = "build me a thing"
         graph = ExecutionGraph("immutable")
         graph.add_node(
             AgentNode(node_id=1,
@@ -158,12 +128,11 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        state = await GraphExecutor().execute(graph, core, envelope)
-        self.assertEqual(state.payload["original_request"], "build me a thing")
-        self.assertTrue(state.payload.get("_envelope"))
+        state = await GraphExecutor().execute(graph, core, payload)
+        self.assertEqual(state.payload, "build me a thing")
 
     async def test_agent_outputs_saved_to_metadata_outputs(self) -> None:
-        envelope = normalize_initial_payload("build me a thing")
+        payload = "build me a thing"
         graph = ExecutionGraph("outputs")
         graph.add_node(
             AgentNode(node_id=1,
@@ -186,14 +155,14 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        state = await GraphExecutor().execute(graph, core, envelope)
+        state = await GraphExecutor().execute(graph, core, payload)
         self.assertIn("1", state.metadata["outputs"])
         self.assertIn("2", state.metadata["outputs"])
         self.assertEqual(state.metadata["outputs"]["1"]["content"], "brief")
         self.assertEqual(state.metadata["outputs"]["2"]["plan"], "do it")
 
     async def test_agent_control_patch_routes_via_metadata(self) -> None:
-        envelope = normalize_initial_payload("build me a thing")
+        payload = "build me a thing"
         graph = ExecutionGraph("routing")
         graph.add_node(
             AgentNode(node_id=1,
@@ -230,7 +199,7 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        state = await GraphExecutor().execute(graph, core, envelope)
+        state = await GraphExecutor().execute(graph, core, payload)
         # organizer's control patch should be in metadata
         self.assertEqual(state.metadata["control"]["2"]["next_node_ids"], [22])
         # code_writer should have run, dev should not
@@ -238,7 +207,7 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("24", state.metadata.get("outputs", {}))
         self.assertEqual(state.metadata["outputs"]["22"]["content"], "code")
 
-    async def test_tool_uses_upstream_output_not_original_request(self) -> None:
+    async def test_tool_uses_upstream_output_not_payload(self) -> None:
         class CaptureTool:
             def __init__(self) -> None:
                 self.arguments = None
@@ -247,7 +216,7 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
                 self.arguments = arguments
                 return {"written": True}
 
-        envelope = normalize_initial_payload("build me a thing")
+        payload = "build me a thing"
         graph = ExecutionGraph("tool-input")
         graph.add_node(
             AgentNode(node_id=22,
@@ -275,18 +244,16 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
             tools={"file_writer": capture},
         )
 
-        state = await GraphExecutor().execute(graph, core, envelope)
+        state = await GraphExecutor().execute(graph, core, payload)
         self.assertIn("22", state.metadata["outputs"])
         self.assertIn("23", state.metadata["outputs"])
-        # Tool should receive the upstream agent output, not the envelope
+        # Tool should receive the upstream agent output, not the payload
         self.assertEqual(capture.arguments["input"], "GENERATED_CODE")
         self.assertEqual(capture.arguments["path"], "outputs/generated.py")
-        self.assertEqual(capture.arguments["canonical_payload"], envelope)
+        self.assertEqual(capture.arguments["payload"], payload)
 
-    async def test_envelope_agent_input_contains_original_request(self) -> None:
-        envelope = normalize_initial_payload(
-            {"template": "summary", "text": "build a loop framework", "output_style": "markdown"}
-        )
+    async def test_agent_input_is_raw_payload(self) -> None:
+        payload = {"template": "summary", "text": "build a loop framework", "output_style": "markdown"}
         graph = ExecutionGraph("agent-input")
         graph.add_node(
             AgentNode(node_id=1,
@@ -302,9 +269,9 @@ class EnvelopeGraphExecutionTest(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        await GraphExecutor().execute(graph, core, envelope)
+        await GraphExecutor().execute(graph, core, payload)
         user_msg = core.agents["orchestrator"].user_messages[0]
-        self.assertIn("Original Request", user_msg)
+        # Agent should receive the JSON-serialized payload directly
         self.assertIn("build a loop framework", user_msg)
 
 
@@ -334,38 +301,15 @@ class ExtractArtifactPathTest(unittest.TestCase):
         self.assertEqual(extract_artifact_path("save as src/main.py"), "src/main.py")
 
 
-class NormalizeInitialPayloadArtifactTest(unittest.TestCase):
-    def test_text_with_filename_populates_artifact(self) -> None:
-        raw = {"text": "为我做一个agent系统框架。将该文件命名为 frame.py。"}
-        result = normalize_initial_payload(raw)
-        self.assertEqual(result["artifact"]["path"], "frame.py")
-        self.assertEqual(result["artifact"]["filename"], "frame.py")
-        self.assertEqual(result["artifact"]["type"], "python_module")
-
-    def test_string_with_filename_populates_artifact(self) -> None:
-        result = normalize_initial_payload("生成代码，保存为 output.txt")
-        self.assertEqual(result["artifact"]["path"], "output.txt")
-        self.assertEqual(result["artifact"]["type"], "file")
-
-    def test_no_filename_leaves_empty_artifact(self) -> None:
-        result = normalize_initial_payload("hello world")
-        self.assertEqual(result["artifact"], {})
-
-
 class FileWriterPathResolutionTest(unittest.TestCase):
     def test_explicit_path_wins(self) -> None:
         tool = FileWriterTool()
-        path = tool._resolve_path({"path": "a.py", "fallback_path": "b.py", "canonical_payload": {"artifact": {"path": "c.py"}}})
+        path = tool._resolve_path({"path": "a.py", "fallback_path": "b.py", "payload": {"hint": "c.py"}})
         self.assertEqual(path, "a.py")
 
-    def test_canonical_payload_artifact_path_second(self) -> None:
+    def test_payload_hint_second(self) -> None:
         tool = FileWriterTool()
-        path = tool._resolve_path({"fallback_path": "b.py", "canonical_payload": {"artifact": {"path": "c.py"}}})
-        self.assertEqual(path, "c.py")
-
-    def test_canonical_payload_artifact_filename_third(self) -> None:
-        tool = FileWriterTool()
-        path = tool._resolve_path({"fallback_path": "b.py", "canonical_payload": {"artifact": {"filename": "c.py"}}})
+        path = tool._resolve_path({"fallback_path": "b.py", "payload": {"path": "c.py"}})
         self.assertEqual(path, "c.py")
 
     def test_fallback_path_last(self) -> None:
@@ -379,7 +323,7 @@ class FileWriterPathResolutionTest(unittest.TestCase):
             tool._resolve_path({})
 
 
-class EnvelopeRawSourceCodeTest(unittest.IsolatedAsyncioTestCase):
+class RawSourceCodeTest(unittest.IsolatedAsyncioTestCase):
     async def test_file_writer_receives_source_code_not_result_object(self) -> None:
         """Simulate code_writer outputting raw Python source (not JSON)."""
         class CaptureTool:
@@ -390,7 +334,7 @@ class EnvelopeRawSourceCodeTest(unittest.IsolatedAsyncioTestCase):
                 self.arguments = arguments
                 return {"written": True, "path": arguments.get("path", arguments.get("fallback_path"))}
 
-        envelope = normalize_initial_payload("为我做一个agent循环框架。将该文件命名为 frame.py。")
+        payload = "为我做一个agent循环框架。将该文件命名为 frame.py。"
         graph = ExecutionGraph("raw-source")
         graph.add_node(
             AgentNode(node_id=22,
@@ -419,12 +363,10 @@ class EnvelopeRawSourceCodeTest(unittest.IsolatedAsyncioTestCase):
             tools={"file_writer": capture},
         )
 
-        state = await GraphExecutor().execute(graph, core, envelope)
+        state = await GraphExecutor().execute(graph, core, payload)
 
         # The tool should receive the actual source code string, not AgentRoundResult repr
         self.assertEqual(capture.arguments["input"], source_code)
-        # Path should come from the envelope artifact, not fallback_path
-        self.assertEqual(capture.arguments["fallback_path"], "outputs/generated.py")
         # Verify the output stored in metadata is also the string, not an object
         self.assertEqual(state.metadata["outputs"]["22"], source_code)
 

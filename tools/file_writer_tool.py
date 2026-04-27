@@ -14,17 +14,24 @@ class FileWriterTool(ToolDefinition):
 
     def _resolve_path(self, arguments: Dict[str, Any]) -> str:
         """Resolve target path with priority:
-        explicit path > canonical_payload.artifact.path > canonical_payload.artifact.filename > fallback_path.
+        explicit path > payload path hint > fallback_path.
         """
         # Priority 1: explicit path
         path_value = str(arguments.get("path", "")).strip()
         if path_value:
             return path_value
 
-        # Priority 2: canonical_payload artifact
-        canonical = arguments.get("canonical_payload")
-        if isinstance(canonical, dict):
-            artifact = canonical.get("artifact")
+        # Priority 2: payload path hint
+        payload = arguments.get("payload")
+        if payload is None:
+            payload = arguments.get("canonical_payload")
+        if isinstance(payload, dict):
+            for key in ("path", "filename"):
+                value = str(payload.get(key, "")).strip()
+                if value:
+                    return value
+            # Legacy artifact support (envelope mode)
+            artifact = payload.get("artifact")
             if isinstance(artifact, dict):
                 for key in ("path", "filename"):
                     value = str(artifact.get(key, "")).strip()
@@ -37,7 +44,7 @@ class FileWriterTool(ToolDefinition):
             return fallback
 
         raise ValueError(
-            "file_writer requires a non-empty 'path' (or 'fallback_path', or canonical_payload.artifact.path)."
+            "file_writer requires a non-empty 'path' (or 'fallback_path')."
         )
 
     async def execute(

@@ -208,11 +208,8 @@ def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str
                 input_payload = data.get("input_payload")
                 if input_payload is None:
                     state_snapshot = data.get("state_snapshot", {})
-                    payload = state_snapshot.get("payload", {}) if isinstance(state_snapshot, dict) else {}
-                    if isinstance(payload, dict):
-                        input_payload = payload.get("original_request") or payload
-                    else:
-                        input_payload = payload
+                    payload = state_snapshot.get("payload") if isinstance(state_snapshot, dict) else None
+                    input_payload = payload
                 entry["last_input"] = input_payload or entry["last_input"]
                 entry["last_status"] = "running"
                 if isinstance(event.get("timestamp"), (int, float)):

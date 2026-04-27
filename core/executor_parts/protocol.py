@@ -60,62 +60,6 @@ class ExecutionProtocolMixin:
                 control[key] = parsed_output[key]
         return control
 
-    def _build_envelope_agent_input(self, state: ExecutionState, node: AgentNode) -> str:
-        """Build a rich user message in envelope mode.
-
-        The agent receives:
-        1. The canonical original_request (immutable)
-        2. Requirements / constraints / artifact from the envelope
-        3. Summaries of previous node outputs (so the agent has full context)
-        4. The node's additional_prompt
-        """
-        request = state.payload
-        parts: List[str] = []
-
-        # 1. Canonical request
-        if isinstance(request, dict):
-            orig = request.get("original_request")
-            if orig:
-                parts.append(f"## Original Request\n{orig}")
-            artifact = request.get("artifact")
-            if artifact:
-                parts.append(f"## Target Artifact\n{artifact}")
-            reqs = request.get("requirements")
-            if reqs:
-                parts.append(f"## Requirements\n{json.dumps(reqs, ensure_ascii=False, indent=2)}")
-            constraints = request.get("constraints")
-            if constraints:
-                parts.append(f"## Constraints\n{json.dumps(constraints, ensure_ascii=False, indent=2)}")
-            attachments = request.get("attachments")
-            if attachments:
-                parts.append(f"## Attachments\n{json.dumps(attachments, ensure_ascii=False, indent=2)}")
-            # Fallback: if none of the canonical envelope fields were present,
-            # serialize the whole dict so the agent still sees the request.
-            if not parts:
-                parts.append(f"## Request\n{json.dumps(request, ensure_ascii=False, indent=2)}")
-        else:
-            parts.append(f"## Request\n{request}")
-
-        # 2. Previous node outputs (chronological)
-        outputs = state.metadata.get("outputs")
-        if isinstance(outputs, dict) and outputs:
-            parts.append("## Previous Node Outputs")
-            for node_id, output in outputs.items():
-                if isinstance(output, dict) and "content" in output:
-                    text = str(output["content"])[:1200]
-                    parts.append(f"### Node {node_id}\n{text}")
-                elif isinstance(output, str):
-                    parts.append(f"### Node {node_id}\n{output[:1200]}")
-                else:
-                    text = json.dumps(output, ensure_ascii=False, indent=2)[:1200]
-                    parts.append(f"### Node {node_id}\n{text}")
-
-        # 3. Additional prompt from the graph node
-        if node.additional_prompt:
-            parts.append(f"## Additional Instructions\n{node.additional_prompt}")
-
-        return "\n\n".join(parts)
-
     # ------------------------------------------------------------------
     # Report-field helpers
     # ------------------------------------------------------------------
@@ -137,7 +81,7 @@ class ExecutionProtocolMixin:
             value = state.metadata.get(key)
             if self._has_content(value):
                 return value
-        # Envelope mode: reports may be stored in outputs.
+        # Reports may be stored in outputs.
         # Prefer the most recent *content* output, skipping reviewer/control
         # payloads that carry verdicts/branches but not actual report content.
         outputs = state.metadata.get("outputs")
@@ -260,11 +204,7 @@ class ExecutionProtocolMixin:
     # ------------------------------------------------------------------
 
     def _get_latest_output_for_tool(self, state: ExecutionState) -> Any:
-        """Return the most recent upstream node output for tool input.
-
-        In Envelope mode, tools should receive the latest upstream agent/tool
-        output as their primary input, not the immutable canonical payload.
-        """
+        """Return the most recent upstream node output for tool input."""
         outputs = state.metadata.get("outputs")
         if isinstance(outputs, dict) and outputs:
             last_key = list(outputs.keys())[-1]
@@ -281,7 +221,7 @@ class ExecutionProtocolMixin:
         latest_output = self._get_latest_output_for_tool(state)
         base_arguments = {
             "input": latest_output,
-            "canonical_payload": state.payload,
+            "payload": state.payload,
             "runtime_metadata": dict(state.metadata),
         }
         base_arguments.update(node.input_mapping)
@@ -369,27 +309,6 @@ class ExecutionProtocolMixin:
             control_patch={},
         )
 
-    def _extract_tool_requests(self, parsed_output: Dict[str, Any]) -> List[Any]:
-        """Parse JSON envelope tool_requests into structured objects."""
-        from ..results import ToolRequest
-
-        raw_requests = parsed_output.get("tool_requests", [])
-        if not isinstance(raw_requests, list):
-            return []
-        requests: List[Any] = []
-        for idx, req in enumerate(raw_requests):
-            if isinstance(req, dict):
-                requests.append(
-                    ToolRequest(
-                        id=req.get("id") or f"tool_req_{idx}",
-                        tool=req.get("tool_name") or req.get("tool") or "",
-                        args=req.get("arguments") or req.get("args") or {},
-                    )
-                )
-            elif hasattr(req, "tool") and hasattr(req, "args"):
-                requests.append(req)
-        return requests
-
     # ------------------------------------------------------------------
     # Routing helpers
     # ------------------------------------------------------------------
@@ -452,7 +371,6 @@ class ExecutionProtocolMixin:
             else:
                 return [next_node_override]
 
-        # Envelope mode: control decisions live in metadata["control"], not payload.
         control = metadata.get("control") if isinstance(metadata, dict) else None
         if isinstance(control, dict):
             # Per-node control takes precedence; fall back to flat control for backward compatibility.

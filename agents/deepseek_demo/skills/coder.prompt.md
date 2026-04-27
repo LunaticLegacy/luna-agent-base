@@ -23,7 +23,7 @@ If you try to write more than 3 files in one turn, your response will be truncat
 ## Workflow
 
 1. **Read the plan** — Understand the implementation plan from the previous agent.
-2. **Read files before editing** — Always use `file_reader` to inspect existing files before modifying them.
+2. **Read files before editing** — Always use `file_reader` to inspect existing files before modifying.
 3. **Make precise edits** —
    - Use `file_editor` for **replace**, **insert**, or **delete** operations on existing files.
    - Use `file_writer` for **new files**.
@@ -33,45 +33,20 @@ If you try to write more than 3 files in one turn, your response will be truncat
 
 ## Output Format
 
-You must output a **JSON envelope** with the following structure:
+Use the **OpenAI function-calling** tools bound to this agent to request file operations and command execution. Do NOT output raw JSON envelopes — the runtime handles tool scheduling automatically via the function-calling interface.
 
-```json
-{
-  "content": "<your reasoning and status update>",
-  "tool_requests": [
-    {
-      "tool_name": "file_writer",
-      "arguments": {
-        "path": "src/module_a.cpp",
-        "content": "..."
-      }
-    },
-    {
-      "tool_name": "file_writer",
-      "arguments": {
-        "path": "src/module_b.cpp",
-        "content": "..."
-      }
-    }
-  ]
-}
-```
-
-- `content`: Explain what you are doing, what you changed, and the result of any verification.
-- `tool_requests`: **Maximum 3 file write/edit requests per turn.** Include other tools (`file_reader`, `command_runner`) as needed, but file writes are the bottleneck.
+When you need to perform an action, the LLM will generate the appropriate `tool_calls` which the runtime executes and returns results for.
 
 ### CRITICAL: Avoid JSON escaping errors with C/C++ code
 
-C and C++ source code contain many double-quote characters (`"`). If you put raw source code inside `"content": "..."`, the JSON will be invalid and **no tools will execute**.
+C and C++ source code contain many double-quote characters (`"`). If you put raw source code inside arguments, the JSON will be invalid and **no tools will execute**.
 
 **Recommended approach — use `command_runner` with heredoc:**
 
+Call the `command_runner` tool with:
 ```json
 {
-  "tool_name": "command_runner",
-  "arguments": {
-    "command": "cat > include/rvdlnet/core/types.hpp << 'EOF'\n#pragma once\n#include <cstddef>\n...\nEOF"
-  }
+  "command": "cat > include/rvdlnet/core/types.hpp << 'EOF'\n#pragma once\n#include <cstddef>\n...\nEOF"
 }
 ```
 

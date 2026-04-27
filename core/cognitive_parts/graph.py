@@ -74,7 +74,7 @@ class CognitiveGraph:
         self,
         seed_ids: List[str],
         max_hops: int = 2,
-        max_nodes: int = 50,
+        max_nodes: Optional[int] = None,
         allowed_relations: Optional[List[CognitiveRelationType]] = None,
     ) -> "CognitiveGraph":
         if not seed_ids:
@@ -100,7 +100,7 @@ class CognitiveGraph:
                 break
 
         seeds = set(seed_ids)
-        if len(visited) > max_nodes:
+        if max_nodes is not None and len(visited) > max_nodes:
             node_degrees = {nid: len(self.outgoing_edges(nid)) + len(self.incoming_edges(nid)) for nid in visited}
             sorted_nodes = sorted(visited, key=lambda nid: (0 if nid in seeds else 1, -node_degrees.get(nid, 0), nid))
             visited = set(sorted_nodes[:max_nodes])
@@ -125,14 +125,16 @@ class CognitiveGraph:
         visibility: str = "shared",
         expected_next_information: str = "",
         priority: int = 0,
-        max_nodes: int = 20,
+        max_nodes: Optional[int] = None,
         max_hops: int = 2,
     ) -> Tuple[CognitiveSubgraphDescriptor, "CognitiveGraph"]:
         roots = [sid for sid in (seed_ids or []) if sid in self.nodes]
         if not roots and query:
-            roots = self._score_nodes_by_query(query)[:max_nodes]
+            scored = self._score_nodes_by_query(query)
+            roots = scored[:max_nodes] if max_nodes is not None else scored
         if not roots:
-            roots = list(self.nodes.keys())[:max_nodes]
+            all_ids = list(self.nodes.keys())
+            roots = all_ids[:max_nodes] if max_nodes is not None else all_ids
 
         subgraph = self.query_subgraph(roots, max_hops=max_hops, max_nodes=max_nodes)
         frontier = [
@@ -204,17 +206,19 @@ class CognitiveGraph:
         self,
         query: Optional[str] = None,
         seed_ids: Optional[List[str]] = None,
-        max_nodes: int = 20,
+        max_nodes: Optional[int] = None,
         max_hops: int = 2,
     ) -> str:
         if seed_ids:
             graph = self.query_subgraph(seed_ids, max_hops=max_hops, max_nodes=max_nodes)
         elif query:
-            seed_ids = self._score_nodes_by_query(query)[:max_nodes]
+            scored = self._score_nodes_by_query(query)
+            seed_ids = scored[:max_nodes] if max_nodes is not None else scored
             graph = self.query_subgraph(seed_ids, max_hops=max_hops, max_nodes=max_nodes)
         else:
-            all_ids = list(self.nodes.keys())[:max_nodes]
-            graph = self.query_subgraph(all_ids, max_hops=max_hops, max_nodes=max_nodes)
+            all_ids = list(self.nodes.keys())
+            seed_ids = all_ids[:max_nodes] if max_nodes is not None else all_ids
+            graph = self.query_subgraph(seed_ids, max_hops=max_hops, max_nodes=max_nodes)
 
         lines: List[str] = [f"Cognitive Graph (id={graph.graph_id}, nodes={len(graph.nodes)}, edges={len(graph.edges)}):"]
         for node in graph.nodes.values():

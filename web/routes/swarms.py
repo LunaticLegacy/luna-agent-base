@@ -39,71 +39,19 @@ def extract_artifact_path(text: str) -> Optional[str]:
     return None
 
 
-def _build_artifact_info(original_request: str) -> Dict[str, Any]:
-    artifact: Dict[str, Any] = {}
-    path = extract_artifact_path(original_request)
-    if path:
-        artifact = {
-            "path": path,
-            "filename": Path(path).name,
-            "type": "python_module" if path.endswith(".py") else "file",
-        }
-    return artifact
-
-
 def normalize_initial_payload(raw: Any) -> Any:
-    """Normalize an HTTP input into the canonical Envelope format.
+    """Normalize an HTTP input into a runtime payload.
 
     Rules:
-    - Already-envelope dicts are returned as-is.
-    - Dicts containing ``text`` use that value as ``original_request``.
-    - Strings become ``original_request`` directly.
+    - Dicts are passed through.
+    - Strings are passed through.
     - Everything else is coerced via ``str()``.
     """
     if isinstance(raw, dict):
-        if raw.get("_envelope") is True or "original_request" in raw:
-            return raw
-        text = raw.get("text")
-        if text is not None:
-            return {
-                "_envelope": True,
-                "original_request": text,
-                "artifact": _build_artifact_info(text),
-                "requirements": [],
-                "constraints": [],
-                "attachments": [],
-                "raw_input": raw,
-            }
-        original = str(raw)
-        return {
-            "_envelope": True,
-            "original_request": original,
-            "artifact": _build_artifact_info(original),
-            "requirements": [],
-            "constraints": [],
-            "attachments": [],
-            "raw_input": raw,
-        }
+        return raw
     if isinstance(raw, str):
-        return {
-            "_envelope": True,
-            "original_request": raw,
-            "artifact": _build_artifact_info(raw),
-            "requirements": [],
-            "constraints": [],
-            "attachments": [],
-            "raw_input": raw,
-        }
-    original = str(raw)
-    return {
-        "_envelope": True,
-        "original_request": original,
-        "artifact": _build_artifact_info(original),
-        "requirements": [],
-        "constraints": [],
-        "attachments": [],
-        "raw_input": raw,
-    }
+        return raw
+    return str(raw)
 
 
 def _get_swarm_or_404(request: Request, swarm_name: str):
@@ -157,6 +105,7 @@ def _serialize_execution_graph_with_state(swarm) -> dict:
         raise ApiError(f"Swarm '{swarm.manifest.swarm_name}' has no execution graph attached.")
     payload = serialize_graph_snapshot(graph)
     payload["graph_kind"] = getattr(graph, "graph_kind", "execution")
+    payload.update(swarm.core.get_graph_runtime_state())
     return payload
 
 

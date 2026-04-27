@@ -49,7 +49,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                     agent_id=node.agent_id,
                     query=f"{node.node_name} {node.additional_prompt or ''}",
                     purpose=f"Support execution node {node.node_name}",
-                    max_nodes=12,
+                    max_nodes=None,
                 )
             else:
                 cg_export = core.get_cognitive_graph_export(max_nodes=12)
@@ -290,8 +290,8 @@ class GraphExecutor(ExecutionProtocolMixin):
                     if node.metadata.get("tool_execution_mode"):
                         agent.tool_execution_mode = node.metadata["tool_execution_mode"]
                     state.rounds += 1
-                    # Build a rich prompt from the canonical request + previous outputs.
-                    agent_input = self._build_envelope_agent_input(state, node)
+                    # Pass the payload directly as agent input.
+                    agent_input = state.payload if isinstance(state.payload, str) else json.dumps(state.payload, ensure_ascii=False) if state.payload is not None else ""
                     cognitive_prompt = self._inject_cognitive_context(core, node)
                     combined_prompt = node.additional_prompt
                     if cognitive_prompt:
@@ -316,20 +316,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                                     additional_prompt=combined_prompt,
                                 )
 
-                                # P0/P1: fallback to JSON envelope tool_requests when
-                                # OpenAI function-calling tool_calls are empty.
                                 tool_requests = getattr(result, "tool_requests", None) or []
-                                if not tool_requests:
-                                    parsed = self._parse_structured_agent_output(
-                                        getattr(result, "assistant_message", None)
-                                    )
-                                    if isinstance(parsed, dict) and isinstance(
-                                        parsed.get("tool_requests"), list
-                                    ):
-                                        envelope_requests = self._extract_tool_requests(parsed)
-                                        if envelope_requests:
-                                            tool_requests = envelope_requests
-
                                 if not tool_requests:
                                     node_result = self._normalize_agent_node_result(
                                         state,

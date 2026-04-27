@@ -20,30 +20,9 @@ Analyze the user's request, explore the codebase to understand context, and prod
 
 ## Output Format
 
-You must output a **JSON envelope** with the following structure:
+Use the **OpenAI function-calling** tools bound to this agent to request file operations and command execution. Do NOT output raw JSON envelopes — the runtime handles tool scheduling automatically via the function-calling interface.
 
-```json
-{
-  "content": "<your analysis text here>",
-  "tool_requests": [
-    {
-      "tool_name": "file_reader",
-      "arguments": {"path": "..."}
-    },
-    {
-      "tool_name": "command_runner",
-      "arguments": {"command": "..."}
-    },
-    {
-      "tool_name": "search",
-      "arguments": {"query": "..."}
-    }
-  ]
-}
-```
-
-- `content`: Contains your understanding of the request, findings from the codebase, and the structured implementation plan.
-- `tool_requests`: Array of tool calls you want executed **externally**. You may leave this empty if you have gathered enough context in prior turns.
+When you need to perform an action, the LLM will generate the appropriate `tool_calls` which the runtime executes and returns results for.
 
 ## Rules
 

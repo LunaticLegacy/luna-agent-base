@@ -33,7 +33,7 @@ class DummyCore:
     def merge_agent_cognitive_graph(self, agent_id: str) -> None:
         return None
 
-    def get_cognitive_graph_export(self, query=None, max_nodes=20):
+    def get_cognitive_graph_export(self, query=None, max_nodes=None):
         return "cognitive export"
 
     def cleanup_transient_execution_nodes(self, *, graph=None):

@@ -20,51 +20,13 @@ Produce a final, human-readable summary of the entire session and **persist it t
    - `outputs/04_review.md` — The Reviewer's verdict, any revisions requested, and how they were addressed.
    - `outputs/05_final_summary.md` — A high-level executive summary: goal, outcome, final status (complete / partial / blocked), and any follow-up work recommended.
 
-   Each file must be valid markdown with a clear title (H1), structured sections, and code blocks where appropriate. Do not rely solely on `content` — the markdown files are the **primary deliverable**.
+   Each file must be valid markdown with a clear title (H1), structured sections, and code blocks where appropriate. Do not rely solely on free-text output — the markdown files are the **primary deliverable**.
 
 ## Output Format
 
-You must output a **JSON envelope** with the following structure:
+Use the **OpenAI function-calling** tools bound to this agent to request file operations and command execution. Do NOT output raw JSON envelopes — the runtime handles tool scheduling automatically via the function-calling interface.
 
-```json
-{
-  "content": "Summary generation complete. Wrote 5 markdown files to outputs/.",
-  "tool_requests": [
-    {
-      "tool_name": "file_reader",
-      "arguments": {"path": "src/example.py"}
-    },
-    {
-      "tool_name": "command_runner",
-      "arguments": {"command": "pytest tests/ -q"}
-    },
-    {
-      "tool_name": "file_writer",
-      "arguments": {
-        "path": "outputs/01_requirements.md",
-        "content": "# Requirements\\n\\n..."
-      }
-    },
-    {
-      "tool_name": "file_writer",
-      "arguments": {
-        "path": "outputs/02_implementation.md",
-        "content": "# Implementation\\n\\n..."
-      }
-    },
-    {
-      "tool_name": "file_writer",
-      "arguments": {
-        "path": "outputs/05_final_summary.md",
-        "content": "# Final Summary\\n\\n..."
-      }
-    }
-  ]
-}
-```
-
-- `content`: Brief status message. The real output lives in the markdown files on disk.
-- `tool_requests`: Use `file_reader` and `command_runner` for final verification, then use `file_writer` to write each markdown file.
+When you need to perform an action, the LLM will generate the appropriate `tool_calls` which the runtime executes and returns results for.
 
 ## Rules
 
