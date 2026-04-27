@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional
 from ..config import AgentConfig
 from ..fault_tolerance import ArchitectureRegulation, ArchitectureRegulator, FailureEvent
 from ..runtime_info import RuntimeInfoManager
-from ..task_graph import TaskGraph
 from ..cognitive import CognitiveGraph
 from ..policy import ExecutionGraph
 from ..swarm_spec import GlobalVariablesConfig
@@ -48,8 +47,6 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
         self.active_thought_subgraphs = {}
         self.current_run_id: Optional[str] = None
-        self.task_graph: Optional[TaskGraph] = None
-        self._task_graph_path: Optional[Path] = None
         self.limiter = limiter
         self._tool_scheduler = None
         self._stop_events: Dict[str, threading.Event] = {}
@@ -71,23 +68,6 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
 
     def get_runtime_info_dir(self) -> Optional[Path]:
         return self._runtime_info_dir
-
-    def set_task_graph(self, task_graph: TaskGraph, *, persist_path: Optional[Path] = None) -> None:
-        self.task_graph = task_graph
-        self._task_graph_path = persist_path
-        self._record_runtime_change(
-            action="set_task_graph",
-            subject_kind="task_graph",
-            subject_id=task_graph.graph_id,
-            detail={"task_count": len(task_graph.tasks)},
-        )
-
-    def persist_task_graph(self) -> None:
-        if self.task_graph is not None and self._task_graph_path is not None:
-            self.task_graph.save(self._task_graph_path)
-
-    def get_task_graph(self) -> Optional[TaskGraph]:
-        return self.task_graph
 
     def _record_runtime_change(
         self,

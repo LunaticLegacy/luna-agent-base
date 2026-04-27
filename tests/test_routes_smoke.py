@@ -78,6 +78,13 @@ class DummyGraph:
             }
             self.edges = [SimpleNamespace(from_node_id=1, to_node_id=2, label="next", condition=None, priority=0)]
 
+    def outgoing_edges(self, node_id: int):
+        return sorted(
+            [edge for edge in self.edges if edge.from_node_id == node_id],
+            key=lambda edge: edge.priority,
+            reverse=True,
+        )
+
     async def run(self, core, initial_payload, rounds=0, **kwargs):
         return SimpleNamespace(
             rounds=rounds or 1,
@@ -238,19 +245,6 @@ class DummyRunRegistry:
         return list(self._runs.values())
 
 
-class DummyTask:
-    def snapshot(self):
-        return {"task_id": "task-1", "swarm_name": "demo", "status": "pending", "metadata": {}}
-
-
-class DummyTaskStore:
-    def list_tasks(self, **kwargs):
-        return {"items": [DummyTask().snapshot()], "page": 1, "limit": 20, "total": 1}
-
-    def get_graph_snapshot(self, swarm_name: str):
-        return {"graph_id": f"tasks_{swarm_name}", "summary": {"nodes": 1, "edges": 0}}
-
-
 class DummyRuntimeRegistry:
     def __init__(self, config_path: Path) -> None:
         self.swarms = {"demo": DummySwarm()}
@@ -276,8 +270,7 @@ class RouteSmokeTest(unittest.TestCase):
 
         self._runtime_patch = patch("web.app_factory.RuntimeRegistry.from_config_path", return_value=self.runtime)
         self._content_patch = patch("web.app_factory.ContentStore.from_runtime_registry", return_value=SimpleNamespace())
-        self._tasks_patch = patch("web.app_factory.TaskStore.from_runtime_registry", return_value=DummyTaskStore())
-        for patcher in (self._runtime_patch, self._content_patch, self._tasks_patch):
+        for patcher in (self._runtime_patch, self._content_patch):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -318,13 +311,6 @@ class RouteSmokeTest(unittest.TestCase):
         self.assertEqual(thought["thought_graph"]["graph_id"], "thought-demo")
         self.assertEqual(thought["thought_graph"]["nodes"][0]["node_type"], "fact")
         self.assertIn("active_subgraphs", thought["thought_graph"])
-
-        task_graph_response = self.client.get("/api/swarms/demo/task-graph")
-        self.assertEqual(task_graph_response.status_code, 200)
-        task_graph = task_graph_response.json()
-        self.assertTrue(task_graph["success"])
-        self.assertEqual(task_graph["graph"]["graph_id"], "tasks_demo")
-        self.assertIn("summary", task_graph["graph"])
 
         run_response = self.client.post("/api/swarms/demo/runs/execute", json={"input": {"hello": "world"}, "rounds": 2})
         self.assertEqual(run_response.status_code, 200)

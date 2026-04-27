@@ -119,7 +119,10 @@ class FaultToleranceTest(unittest.TestCase):
         self.assertIn("node.skipped", event_types)
         self.assertIn("node.started", event_types)
         self.assertIn("node.completed", event_types)
-        self.assertEqual(state.payload, "round-1:{'task': 'demo'}")
+        # Envelope mode: payload is not overwritten by agent output; outputs live in metadata
+        self.assertEqual(state.payload, {"task": "demo"})
+        outputs = state.metadata.get("outputs", {})
+        self.assertIn(str(2), outputs)
         self.assertNotIn(1, graph.nodes)
         self.assertIn(2, graph.nodes)
 

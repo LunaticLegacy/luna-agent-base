@@ -113,12 +113,9 @@ def _get_swarm_or_404(request: Request, swarm_name: str):
 def resolve_final_output(state: ExecutionState) -> Any:
     """Return the human-facing final output for a completed run.
 
-    Legacy mode simply returns ``state.payload``.
-    Envelope mode walks ``metadata.outputs`` and extracts the most
-    meaningful field from the last node output.
+    Walks ``metadata.outputs`` and extracts the most meaningful field
+    from the last node output.
     """
-    if not state.is_envelope:
-        return state.payload
     outputs = state.metadata.get("outputs")
     if isinstance(outputs, dict) and outputs:
         last_key = list(outputs.keys())[-1]

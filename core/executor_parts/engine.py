@@ -10,22 +10,58 @@ from ..fault_tolerance import FailureEvent
 from ..policy import AgentNode, ExecutionGraph, ExecutionStep, ToolNode
 from ..results import ExecutionEvent, ExecutionState
 from ..toodefl import ToolContext
-from .cognitive import CognitiveContextMixin
-from .events import ExecutionEventMixin
-from .payloads import PayloadHelperMixin
-from .routing import RoutingHelperMixin
+from .protocol import ExecutionProtocolMixin
 
 if TYPE_CHECKING:
     from ..core import Core
 
 
-class GraphExecutor(
-    ExecutionEventMixin,
-    PayloadHelperMixin,
-    RoutingHelperMixin,
-    CognitiveContextMixin,
-):
+class GraphExecutor(ExecutionProtocolMixin):
     """Execute an execution graph against a runtime core."""
+
+    # ------------------------------------------------------------------
+    # Event emission (inlined from former ExecutionEventMixin)
+    # ------------------------------------------------------------------
+    def _emit(
+        self,
+        event_sink: Optional[Callable[[ExecutionEvent], None]],
+        event: ExecutionEvent,
+    ) -> None:
+        if event_sink is not None:
+            event_sink(event)
+
+    # ------------------------------------------------------------------
+    # Cognitive context injection (inlined from former CognitiveContextMixin)
+    # ------------------------------------------------------------------
+    def _inject_cognitive_context(self, core: "Core", node: AgentNode) -> Optional[str]:
+        global_context = ""
+        try:
+            build_globals = getattr(core, "build_global_context_export", None)
+            if callable(build_globals):
+                global_context = build_globals(agent_id=node.agent_id)
+        except Exception:
+            global_context = ""
+
+        try:
+            build_context = getattr(core, "build_thought_context_export", None)
+            if callable(build_context):
+                cg_export = build_context(
+                    agent_id=node.agent_id,
+                    query=f"{node.node_name} {node.additional_prompt or ''}",
+                    purpose=f"Support execution node {node.node_name}",
+                    max_nodes=12,
+                )
+            else:
+                cg_export = core.get_cognitive_graph_export(max_nodes=12)
+        except Exception:
+            return global_context or None
+        if global_context and cg_export:
+            return f"{global_context}\n\n{cg_export}"
+        if global_context:
+            return global_context
+        if not cg_export or cg_export.endswith("nodes=0, edges=0):"):
+            return None
+        return cg_export
 
     async def execute(
         self,
@@ -254,11 +290,8 @@ class GraphExecutor(
                     if node.metadata.get("tool_execution_mode"):
                         agent.tool_execution_mode = node.metadata["tool_execution_mode"]
                     state.rounds += 1
-                    # Envelope mode: build a rich prompt from the canonical request + previous outputs.
-                    if state.is_envelope:
-                        agent_input = self._build_envelope_agent_input(state, node)
-                    else:
-                        agent_input = self._format_agent_input(state.payload, node)
+                    # Build a rich prompt from the canonical request + previous outputs.
+                    agent_input = self._build_envelope_agent_input(state, node)
                     cognitive_prompt = self._inject_cognitive_context(core, node)
                     combined_prompt = node.additional_prompt
                     if cognitive_prompt:
@@ -283,7 +316,21 @@ class GraphExecutor(
                                     additional_prompt=combined_prompt,
                                 )
 
-                                if not getattr(result, "tool_requests", None):
+                                # P0/P1: fallback to JSON envelope tool_requests when
+                                # OpenAI function-calling tool_calls are empty.
+                                tool_requests = getattr(result, "tool_requests", None) or []
+                                if not tool_requests:
+                                    parsed = self._parse_structured_agent_output(
+                                        getattr(result, "assistant_message", None)
+                                    )
+                                    if isinstance(parsed, dict) and isinstance(
+                                        parsed.get("tool_requests"), list
+                                    ):
+                                        envelope_requests = self._extract_tool_requests(parsed)
+                                        if envelope_requests:
+                                            tool_requests = envelope_requests
+
+                                if not tool_requests:
                                     node_result = self._normalize_agent_node_result(
                                         state,
                                         node,
@@ -311,7 +358,7 @@ class GraphExecutor(
                                 )
 
                                 batch_result = await tool_scheduler.execute_batch(
-                                    result.tool_requests,
+                                    tool_requests,
                                     node_id=node.node_id,
                                     agent_id=node.agent_id,
                                     tool_round=tool_round,
@@ -345,26 +392,21 @@ class GraphExecutor(
                         routing_payload = node_result.routing_payload
                         next_node_override = node_result.next_node_override
 
-                        if state.is_envelope:
-                            # Envelope mode: payload is immutable; append outputs to metadata.
-                            state.metadata.setdefault("outputs", {})
-                            state.metadata["outputs"][str(node.node_id)] = (
-                                node_result.output_payload
-                                if node_result.output_payload is not None
-                                else node_result.state_payload
-                            )
-                            # Apply metadata patch for node-specific metadata.
-                            if node_result.metadata_patch:
-                                state.metadata.setdefault("node_metadata", {})
-                                state.metadata["node_metadata"][str(node.node_id)] = node_result.metadata_patch
-                            # Apply control patch for routing decisions.
-                            if node_result.control_patch:
-                                state.metadata.setdefault("control", {})
-                                state.metadata["control"][str(node.node_id)] = node_result.control_patch
-                            # Preserve payload immutability.
-                        else:
-                            # Legacy mode: overwrite payload as before.
-                            state.payload = node_result.state_payload
+                        # Payload is immutable; append outputs to metadata.
+                        state.metadata.setdefault("outputs", {})
+                        state.metadata["outputs"][str(node.node_id)] = (
+                            node_result.output_payload
+                            if node_result.output_payload is not None
+                            else node_result.state_payload
+                        )
+                        # Apply metadata patch for node-specific metadata.
+                        if node_result.metadata_patch:
+                            state.metadata.setdefault("node_metadata", {})
+                            state.metadata["node_metadata"][str(node.node_id)] = node_result.metadata_patch
+                        # Apply control patch for routing decisions.
+                        if node_result.control_patch:
+                            state.metadata.setdefault("control", {})
+                            state.metadata["control"][str(node.node_id)] = node_result.control_patch
 
                         merge_delta = getattr(core, "merge_agent_cognitive_delta", None)
                         if callable(merge_delta):
@@ -398,13 +440,9 @@ class GraphExecutor(
                     )
                     routing_payload = node_result.routing_payload
 
-                    if state.is_envelope:
-                        # Envelope mode: preserve the full tool output in metadata.
-                        state.metadata.setdefault("outputs", {})
-                        state.metadata["outputs"][str(node.node_id)] = node_result.output_payload
-                        # Do not overwrite the immutable canonical payload.
-                    else:
-                        state.payload = node_result.state_payload
+                    # Preserve the full tool output in metadata.
+                    state.metadata.setdefault("outputs", {})
+                    state.metadata["outputs"][str(node.node_id)] = node_result.output_payload
 
                     next_node_override = node_result.next_node_override
                 else:
@@ -470,7 +508,6 @@ class GraphExecutor(
                         rounds=state.rounds,
                         status="failed",
                         data={
-                            "input_payload": input_payload,
                             "error": str(exc),
                             "state_snapshot": state.snapshot(),
                             "failure": failure.to_dict(),
@@ -494,8 +531,6 @@ class GraphExecutor(
                         rounds=state.rounds,
                         status="ok",
                         data={
-                            "input_payload": input_payload,
-                            "output_payload": output_payload,
                             "state_snapshot": state.snapshot(),
                         },
                     ),
@@ -535,8 +570,6 @@ class GraphExecutor(
                         rounds=state.rounds,
                         status="ok",
                         data={
-                            "input_payload": input_payload,
-                            "output_payload": output_payload,
                             "state_snapshot": state.snapshot(),
                         },
                     ),
@@ -750,10 +783,10 @@ class GraphExecutor(
                                     "source_node_id": node.node_id,
                                     "branch_index": branch_index,
                                     "state_snapshot": {
-                                        "payload": outcome["payload"],
+                                        "payload": ExecutionState._summarize_payload(outcome["payload"]),
                                         "rounds": outcome["rounds"],
-                                        "metadata": outcome["metadata"],
-                                        "trace": outcome["trace"],
+                                        "metadata": ExecutionState._summarize_metadata(outcome["metadata"]),
+                                        "trace": [ExecutionState._summarize_step(s) for s in outcome["trace"]],
                                         "branch_results": {},
                                     },
                                 },
@@ -790,11 +823,8 @@ class GraphExecutor(
                     "source_node_id": node.node_id,
                     "branches": branch_results,
                 }
-                if state.is_envelope:
-                    state.metadata.setdefault("outputs", {})
-                    state.metadata["outputs"][str(node.node_id)] = branch_merge_payload
-                else:
-                    state.payload = branch_merge_payload
+                state.metadata.setdefault("outputs", {})
+                state.metadata["outputs"][str(node.node_id)] = branch_merge_payload
                 state.rounds = max([state.rounds] + [branch_result["rounds"] for branch_result in branch_results])
                 join_node_id = node.metadata.get("join_node_id")
                 if join_node_id is None:
@@ -834,8 +864,6 @@ class GraphExecutor(
                         rounds=state.rounds,
                         status="ok",
                         data={
-                            "input_payload": input_payload,
-                            "output_payload": output_payload,
                             "state_snapshot": state.snapshot(),
                         },
                     ),

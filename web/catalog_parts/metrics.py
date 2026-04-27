@@ -104,7 +104,15 @@ def build_metrics_catalog(
                 bucket["token_usage"] += 70 + (_metric_text_size(data.get("error")) // 4)
             elif event_type == "node.started":
                 bucket["started"] += 1
-                bucket["token_usage"] += 45 + (_metric_text_size(data.get("input_payload")) // 10)
+                input_text = data.get("input_payload")
+                if input_text is None:
+                    state_snapshot = data.get("state_snapshot", {})
+                    payload = state_snapshot.get("payload", {}) if isinstance(state_snapshot, dict) else {}
+                    if isinstance(payload, dict):
+                        input_text = payload.get("original_request") or payload
+                    else:
+                        input_text = payload
+                bucket["token_usage"] += 45 + (_metric_text_size(input_text) // 10)
                 node_id = event.get("node_id")
                 if node_id is not None:
                     try:
@@ -113,7 +121,13 @@ def build_metrics_catalog(
                         pass
             elif event_type == "node.completed":
                 bucket["completed"] += 1
-                bucket["token_usage"] += 110 + (_metric_text_size(data.get("output_payload")) // 8)
+                output_text = data.get("output_payload")
+                if output_text is None:
+                    state_snapshot = data.get("state_snapshot", {})
+                    metadata = state_snapshot.get("metadata", {}) if isinstance(state_snapshot, dict) else {}
+                    outputs = metadata.get("outputs", {}) if isinstance(metadata, dict) else {}
+                    output_text = outputs.get(str(node_id)) if node_id is not None else None
+                bucket["token_usage"] += 110 + (_metric_text_size(output_text) // 8)
                 node_id = event.get("node_id")
                 if node_id is not None:
                     try:

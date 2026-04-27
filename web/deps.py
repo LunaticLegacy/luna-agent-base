@@ -22,13 +22,6 @@ def get_content_store(request: Request):
     return store
 
 
-def get_task_store(request: Request):
-    store = getattr(request.app.state, "angelus_tasks", None)
-    if store is None:
-        raise ApiError("Task store is not initialized.")
-    return store
-
-
 def parse_int(raw: Any, default: int) -> int:
     try:
         return int(raw)

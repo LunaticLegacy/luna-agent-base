@@ -91,6 +91,12 @@ class ExecutionState:
     trace: List[Dict[str, Any]] = field(default_factory=list)
     branch_results: Dict[str, Any] = field(default_factory=dict)
 
+    # Summary thresholds for lightweight snapshots
+    _MAX_STRING_SUMMARY = 500
+    _MAX_PREVIEW = 200
+    _MAX_LIST_ITEMS = 10
+    _MAX_DICT_KEYS = 50
+
     def clone(self) -> "ExecutionState":
         """Create a detached copy of the execution state."""
         return ExecutionState(
@@ -101,27 +107,92 @@ class ExecutionState:
             branch_results=copy.deepcopy(self.branch_results),
         )
 
-    @property
-    def is_envelope(self) -> bool:
-        """True when the state uses the immutable envelope model.
-
-        Envelope mode is auto-detected from the initial payload shape:
-        a dict that contains either an ``original_request`` key or the
-        ``_envelope`` sentinel.
-        """
-        return isinstance(self.payload, dict) and (
-            "original_request" in self.payload or self.payload.get("_envelope") is True
-        )
-
     def snapshot(self) -> Dict[str, Any]:
-        """Create a lightweight runtime snapshot for tracing and live streaming."""
+        """Create a lightweight runtime snapshot for tracing and live streaming.
+
+        Large string fields (original_request, raw_input.text, outputs,
+        trace payloads) are replaced with summaries to avoid recursive
+        payload bloat in events and persistence.
+        """
         return {
-            "payload": copy.deepcopy(self.payload),
+            "payload": self._summarize_payload(self.payload),
             "rounds": self.rounds,
-            "metadata": copy.deepcopy(self.metadata),
-            "trace": [dict(item) for item in self.trace],
+            "metadata": self._summarize_metadata(self.metadata),
+            "trace": [self._summarize_step(s) for s in self.trace],
             "branch_results": copy.deepcopy(self.branch_results),
         }
+
+    # ------------------------------------------------------------------
+    # Lightweight snapshot helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _summarize_payload(payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return ExecutionState._summarize_value(payload)
+        result = dict(payload)
+        if "original_request" in result:
+            result["original_request"] = ExecutionState._summarize_value(result["original_request"])
+        if "raw_input" in result and isinstance(result["raw_input"], dict):
+            raw = result["raw_input"]
+            orig = payload.get("original_request") if isinstance(payload, dict) else None
+            text = raw.get("text")
+            if isinstance(text, str) and isinstance(orig, str) and text == orig:
+                result["raw_input"] = {
+                    "template": raw.get("template"),
+                    "output_style": raw.get("output_style"),
+                    "_text_ref": "original_request",
+                }
+            else:
+                result["raw_input"] = ExecutionState._summarize_value(raw)
+        return result
+
+    @staticmethod
+    def _summarize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+        result = dict(metadata)
+        if "outputs" in result and isinstance(result["outputs"], dict):
+            result["outputs"] = {
+                k: ExecutionState._summarize_value(v) for k, v in result["outputs"].items()
+            }
+        return result
+
+    @staticmethod
+    def _summarize_step(step: Dict[str, Any]) -> Dict[str, Any]:
+        result = dict(step)
+        if "input_payload" in result:
+            result["input_payload"] = ExecutionState._summarize_value(result["input_payload"])
+        if "output_payload" in result:
+            result["output_payload"] = ExecutionState._summarize_value(result["output_payload"])
+        return result
+
+    @staticmethod
+    def _summarize_value(value: Any) -> Any:
+        if isinstance(value, str):
+            if len(value) > ExecutionState._MAX_STRING_SUMMARY:
+                return {
+                    "_type": "str",
+                    "_length": len(value),
+                    "_preview": value[: ExecutionState._MAX_PREVIEW],
+                }
+            return value
+        if isinstance(value, list):
+            if len(value) > ExecutionState._MAX_LIST_ITEMS:
+                return {
+                    "_type": "list",
+                    "_length": len(value),
+                    "_items": [ExecutionState._summarize_value(v) for v in value[: ExecutionState._MAX_LIST_ITEMS]],
+                }
+            return [ExecutionState._summarize_value(v) for v in value]
+        if isinstance(value, dict):
+            if len(value) > ExecutionState._MAX_DICT_KEYS:
+                summarized = {
+                    k: ExecutionState._summarize_value(v)
+                    for k, v in list(value.items())[: ExecutionState._MAX_DICT_KEYS]
+                }
+                summarized["_truncated_keys"] = len(value) - ExecutionState._MAX_DICT_KEYS
+                return summarized
+            return {k: ExecutionState._summarize_value(v) for k, v in value.items()}
+        return value
 
 
 @dataclass

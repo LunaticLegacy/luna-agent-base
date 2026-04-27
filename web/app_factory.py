@@ -7,10 +7,9 @@ from fastapi import FastAPI
 from core.swarm_loader import SwarmLoaderError
 from web.content_store import ContentStore
 from web.runtime import RuntimeRegistry
-from web.task_store import TaskStore
 
 from .errors import register_error_handlers
-from .routes import catalog_router, content_router, health_router, runs_router, settings_router, swarms_router, tasks_router
+from .routes import catalog_router, content_router, health_router, runs_router, settings_router, swarms_router
 from .security import install_api_security
 
 
@@ -34,17 +33,11 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
         data_dir=config_path.parent / "data",
         runtime_registry=runtime_registry,
     )
-    app.state.angelus_tasks = TaskStore.from_runtime_registry(
-        data_dir=config_path.parent / "data",
-        runtime_registry=runtime_registry,
-    )
-
     register_error_handlers(app)
     app.include_router(health_router, prefix="/api")
     app.include_router(catalog_router, prefix="/api")
     app.include_router(content_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
-    app.include_router(tasks_router, prefix="/api")
     app.include_router(swarms_router, prefix="/api/swarms")
     app.include_router(runs_router, prefix="/api/runs")
 

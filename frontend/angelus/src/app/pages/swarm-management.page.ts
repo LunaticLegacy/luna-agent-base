@@ -1,15 +1,15 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
 import { THOUGHT_NODE_LEGEND_ENTRIES, THOUGHT_RELATION_LEGEND_ENTRIES } from '../thought-graph.taxonomy';
-import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent } from '../shared';
+import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent, ModalComponent } from '../shared';
 
 @Component({
   selector: 'app-swarm-management-page',
   standalone: true,
-  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent, StatCardGridComponent, TabBarComponent, PanelCardComponent, EmptyStateComponent],
+  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent, StatCardGridComponent, TabBarComponent, PanelCardComponent, EmptyStateComponent, ModalComponent],
   template: `
     <div class="page">
       <!-- Header (kept inline due to custom status badge inline with title) -->
@@ -41,6 +41,14 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
               </div>
             }
           </div>
+          @if (state.canStopRun()) {
+            <button class="btn btn-danger" (click)="state.stopRun('soft')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">
+              停止运行
+            </button>
+            <button class="btn btn-danger" (click)="state.stopRun('hard')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">
+              强制停止
+            </button>
+          }
           <button class="btn btn-secondary" (click)="state.activeRun() && state.startRun()" [disabled]="!state.activeRun()">
             重新启动结构
           </button>
@@ -192,7 +200,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     </td>
                     <td>{{ state.activeRun()?.started_at || '刚刚' }}</td>
                     <td>
-                      <button class="btn btn-sm" (click)="state.startRun()">启动结构</button>
+                      @if (state.canStopRun()) {
+                        <button class="btn btn-sm btn-danger" (click)="state.stopRun('soft')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">停止</button>
+                        <button class="btn btn-sm btn-danger" (click)="state.stopRun('hard')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">强制停止</button>
+                      } @else {
+                        <button class="btn btn-sm" (click)="state.startRun()">启动结构</button>
+                      }
                     </td>
                   </tr>
                 } @else {
@@ -318,20 +331,39 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                 </div>
                 <div class="trace-event-list">
                   @for (event of state.selectedExecutionTrace()?.events ?? []; track $index) {
-                    <div class="trace-event-item">
+                    <div class="trace-event-item compact" (click)="selectedEvent.set(event)">
                       <div class="trace-event-head">
                         <div class="trace-event-head-left">
                           <span class="trace-event-index mono">#{{ $index + 1 }}</span>
                           <span class="trace-event-title">{{ traceEventLabel(event) }}</span>
+                          <span class="trace-event-meta">{{ traceEventMeta(event) }}</span>
                         </div>
-                        <button class="btn btn-sm btn-ghost" (click)="copyEvent(event)">复制</button>
+                        <div class="trace-event-actions">
+                          <span class="trace-event-badge pill {{ traceEventStatus(event) }}">{{ traceEventStatus(event) }}</span>
+                          <button class="btn btn-sm btn-ghost" (click)="$event.stopPropagation(); copyEvent(event)">复制</button>
+                        </div>
                       </div>
-                      <pre class="trace-event-body">{{ event | json }}</pre>
                     </div>
                   } @empty {
                     <app-empty-state message="当前没有事件可展示。"></app-empty-state>
                   }
                 </div>
+
+                <app-modal
+                  [open]="!!selectedEvent()"
+                  [title]="'事件详情 #' + selectedEventIndex()"
+                  (close)="selectedEvent.set(null)">
+                  @if (selectedEvent(); as ev) {
+                    <div class="trace-modal-body">
+                      <div class="trace-modal-meta">
+                        <span class="trace-modal-meta-item">类型: {{ ev['event_type'] || ev['type'] || '—' }}</span>
+                        <span class="trace-modal-meta-item">节点: {{ ev['node_name'] || ev['node_id'] || '—' }}</span>
+                        <span class="trace-modal-meta-item">状态: {{ ev['status'] || '—' }}</span>
+                      </div>
+                      <pre class="trace-event-body-full">{{ ev | json }}</pre>
+                    </div>
+                  }
+                </app-modal>
               </app-panel-card>
             </div>
           </div>
@@ -1095,6 +1127,29 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       font-size: 13px;
       font-weight: 600;
     }
+    .trace-event-item.compact {
+      cursor: pointer;
+      transition: background 0.15s;
+      padding: 8px 12px;
+    }
+    .trace-event-item.compact:hover {
+      background: rgba(139,92,246,0.08);
+    }
+    .trace-event-meta {
+      color: #64748b;
+      font-size: 12px;
+    }
+    .trace-event-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .trace-event-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      text-transform: capitalize;
+    }
     .trace-event-body {
       margin: 0;
       color: #cbd5e1;
@@ -1102,6 +1157,34 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+    .trace-modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .trace-modal-meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .trace-modal-meta-item {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .trace-event-body-full {
+      margin: 0;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0B0F19;
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 60vh;
+      overflow-y: auto;
     }
     .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
@@ -1177,6 +1260,13 @@ export class SwarmManagementPageComponent {
   readonly tabs = ['概览', 'Agent 图', '执行轨迹', '思维图谱', 'Agents', '任务', '知识', '记忆', '设置'];
   readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
   readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
+  readonly selectedEvent = signal<any>(null);
+  readonly selectedEventIndex = computed(() => {
+    const events = this.state.selectedExecutionTrace()?.events ?? [];
+    const ev = this.selectedEvent();
+    const idx = events.indexOf(ev);
+    return idx >= 0 ? String(idx + 1) : '';
+  });
 
   async loadSwarm(): Promise<void> {
     const source = window.prompt('输入要加载的 Swarm 路径或名称');
@@ -1198,12 +1288,40 @@ export class SwarmManagementPageComponent {
   traceEventLabel(event: unknown): string {
     if (event && typeof event === 'object') {
       const record = event as Record<string, unknown>;
-      const label = record['type'] ?? record['event'] ?? record['kind'];
+      const label = record['event_type'] ?? record['type'] ?? record['event'] ?? record['kind'];
       if (typeof label === 'string' && label.trim()) {
         return label;
       }
     }
     return 'event';
+  }
+
+  traceEventMeta(event: unknown): string {
+    if (!event || typeof event !== 'object') return '';
+    const record = event as Record<string, unknown>;
+    const parts: string[] = [];
+    const ts = record['timestamp'];
+    if (typeof ts === 'number') {
+      parts.push(new Date(ts * 1000).toLocaleTimeString('zh-CN'));
+    } else if (typeof ts === 'string') {
+      parts.push(ts);
+    }
+    const nodeName = record['node_name'];
+    if (typeof nodeName === 'string') {
+      parts.push(nodeName);
+    }
+    return parts.join(' · ');
+  }
+
+  traceEventStatus(event: unknown): string {
+    if (!event || typeof event !== 'object') return 'info';
+    const record = event as Record<string, unknown>;
+    const status = String(record['status'] || '').toLowerCase();
+    if (status === 'running') return 'running';
+    if (status === 'ok' || status === 'completed' || status === 'success') return 'success';
+    if (status === 'failed' || status === 'error') return 'error';
+    if (status === 'skipped') return 'warn';
+    return 'info';
   }
 
   async copyEvent(event: unknown): Promise<void> {

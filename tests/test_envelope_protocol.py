@@ -107,10 +107,6 @@ class NormalizeInitialPayloadTest(unittest.TestCase):
 
 
 class ResolveFinalOutputTest(unittest.TestCase):
-    def test_legacy_returns_payload(self) -> None:
-        state = ExecutionState(payload="legacy")
-        self.assertEqual(resolve_final_output(state), "legacy")
-
     def test_envelope_with_no_outputs_returns_payload(self) -> None:
         state = ExecutionState(payload={"_envelope": True, "original_request": "req"})
         self.assertEqual(resolve_final_output(state), {"_envelope": True, "original_request": "req"})

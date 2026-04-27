@@ -3,7 +3,6 @@ from .catalog import router as catalog_router
 from .content import router as content_router
 from .settings import router as settings_router
 from .swarms import router as swarms_router
-from .tasks import router as tasks_router
 from .runs import router as runs_router
 
 __all__ = [
@@ -12,6 +11,5 @@ __all__ = [
     "content_router",
     "settings_router",
     "swarms_router",
-    "tasks_router",
     "runs_router",
 ]

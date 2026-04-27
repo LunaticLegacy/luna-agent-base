@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 from ..cognitive import CognitiveGraph, CognitiveNodeType, CognitiveSubgraphDescriptor, merge_cognitive_graphs
 from ..context_graph import ContextEntry, ContextEntryType, ContextGraph, ContextReference, ContextRelation
-from ..task_graph import TaskGraph
 
 
 class CognitiveRuntimeMixin:

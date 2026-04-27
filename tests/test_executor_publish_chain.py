@@ -93,10 +93,13 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(build_publish_graph(), core, "mission")
 
-        self.assertEqual(core.agents["publisher"].user_messages, [draft])
-        self.assertEqual(state.metadata["verdict"], "approve")
+        # Envelope mode: agent receives full context, not just the previous output
+        publisher_input = core.agents["publisher"].user_messages[0]
+        self.assertIn(draft, publisher_input)
+        self.assertEqual(state.metadata["control"]["19"]["verdict"], "approve")
         self.assertEqual(state.metadata["approved_report"], draft)
-        self.assertEqual(state.metadata["draft_report"], draft)
+        # draft_report is no longer auto-inferred from generic "content" in envelope mode
+        self.assertEqual(state.metadata["outputs"]["18"]["content"], draft)
 
     async def test_reviewer_revise_can_send_revision_payload_back_to_writer(self) -> None:
         core = DummyCore(
@@ -112,8 +115,11 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(build_publish_graph(), core, "mission")
 
-        self.assertEqual(core.agents["writer"].user_messages[1], "Please tighten evidence.")
-        self.assertEqual(core.agents["publisher"].user_messages, ["REVISED DRAFT"])
+        # Envelope mode: agents receive full context including all previous outputs
+        writer_input = core.agents["writer"].user_messages[1]
+        self.assertIn("Please tighten evidence.", writer_input)
+        publisher_input = core.agents["publisher"].user_messages[0]
+        self.assertIn("REVISED DRAFT", publisher_input)
         self.assertEqual(state.metadata["approved_report"], "REVISED DRAFT")
 
     async def test_publisher_final_answer_becomes_file_writer_payload(self) -> None:
@@ -190,7 +196,9 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(graph, core, "mission")
 
-        self.assertEqual(state.payload, "draft")
+        # Envelope mode: payload is immutable; agent output lives in metadata.outputs
+        self.assertEqual(state.payload, "mission")
+        self.assertEqual(state.metadata["outputs"]["1"]["content"], "draft")
         self.assertEqual(prototype.clone_count, 1)
 
 
