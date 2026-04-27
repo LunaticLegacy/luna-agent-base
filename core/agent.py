@@ -38,7 +38,6 @@ class Agent:
         name: Optional[str] = None,
         tools: Optional[List[Any]] = None,
         core: Optional[Any] = None,
-        max_tool_rounds: int = 5,
         cognitive_graph: Optional[CognitiveGraph] = None,
         workspace_mode: str = "workspace",
         workspace_root: Optional[Path] = None,
@@ -52,7 +51,6 @@ class Agent:
         self._context = AgentContext()
         self.tools = tools or []
         self.core = core
-        self.max_tool_rounds = max_tool_rounds
         self.cognitive_graph = cognitive_graph or CognitiveGraph(graph_id=f"agent_{agent_id}")
         self.workspace_mode = workspace_mode
         self.workspace_root = Path(workspace_root).resolve() if workspace_root is not None else None
@@ -95,7 +93,6 @@ class Agent:
             name=self.name,
             tools=list(self.tools),
             core=self.core,
-            max_tool_rounds=self.max_tool_rounds,
             cognitive_graph=CognitiveGraph(graph_id=f"agent_{self.agent_id}"),
             workspace_mode=self.workspace_mode,
             workspace_root=self.workspace_root,
@@ -281,7 +278,8 @@ class Agent:
         tool_requests: Optional[List[ToolRequest]] = None
         round_cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}_round_{rounds}")
 
-        for tool_round in range(self.max_tool_rounds):
+        tool_round = 0
+        while True:
             raw_response = await self.llm_handler.fetch(
                 msg=user_message if tool_round == 0 else "",
                 system_prompt=system_prompt or None,
@@ -330,9 +328,10 @@ class Agent:
 
             # Refresh prev_messages for the next LLM call
             prev_messages = [LLMContext(role=item["role"], content=item["content"]) for item in self._context.messages]
+            tool_round += 1
 
         if assistant_message is None:
-            assistant_message = content or "[Agent reached max tool rounds without final response]"
+            assistant_message = content or "[Agent did not produce a final response]"
 
         self._context.metadata["last_round"] = rounds
         self._context.metadata["turns"] = len(self._context.messages)

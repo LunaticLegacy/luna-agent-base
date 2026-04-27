@@ -301,15 +301,15 @@ class GraphExecutor(ExecutionProtocolMixin):
                             combined_prompt = cognitive_prompt
 
                     tool_execution_mode = getattr(agent, "tool_execution_mode", "internal")
-                    max_tool_rounds = getattr(agent, "max_tool_rounds", 0)
 
                     result = None
                     node_result = None
 
                     try:
-                        if tool_execution_mode == "external" and max_tool_rounds > 0:
+                        if tool_execution_mode == "external":
                             remaining_input = agent_input
-                            for tool_round in range(max_tool_rounds + 1):
+                            tool_round = 0
+                            while True:
                                 result = await agent.round_call(
                                     rounds=state.rounds,
                                     user_message=remaining_input,
@@ -346,6 +346,12 @@ class GraphExecutor(ExecutionProtocolMixin):
                                     )
 
                                 tool_scheduler = tool_scheduler_factory()
+                                get_capabilities = getattr(core, "get_tool_capabilities", None)
+                                tool_caps: set = set()
+                                for t in getattr(agent, "tools", []) or []:
+                                    tname = getattr(t, "tool_name", None)
+                                    if tname and callable(get_capabilities):
+                                        tool_caps.update(get_capabilities(tname) or set())
                                 tool_context = ToolContext(
                                     node_id=node.node_id,
                                     rounds=state.rounds,
@@ -354,7 +360,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                                     metadata=dict(state.metadata),
                                     core=core,
                                     graph=graph,
-                                    capabilities=set(),
+                                    capabilities=tool_caps,
                                 )
 
                                 batch_result = await tool_scheduler.execute_batch(
@@ -370,11 +376,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                                     "Do not repeat already-executed tools. "
                                     "Use the tool results provided above."
                                 )
-
-                            if node_result is None:
-                                raise RuntimeError(
-                                    f"Agent exceeded max_tool_rounds ({max_tool_rounds})"
-                                )
+                                tool_round += 1
                         else:
                             result = await agent.round_call(
                                 rounds=state.rounds,
