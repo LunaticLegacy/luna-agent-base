@@ -101,6 +101,7 @@ class RuntimeRegistryMixin:
         workspace_mode: str = "workspace",
         workspace_root: Optional[Path] = None,
         tool_execution_mode: str = "internal",
+        agent_class: type = Agent,
     ) -> Agent:
         handler = llm_handler or LLMFetcher(
             api_url=self.agent_config.api_url,
@@ -109,14 +110,13 @@ class RuntimeRegistryMixin:
             provider=self.agent_config.provider,
             limiter=self.limiter,
         )
-        agent = Agent(
+        agent = agent_class(
             agent_id=agent_id,
             llm_handler=handler,
             character_prompt=character_prompt,
             name=name,
             tools=tools,
             core=self,
-            max_tool_rounds=5,
             cognitive_graph=cognitive_graph,
             workspace_mode=workspace_mode,
             workspace_root=workspace_root if workspace_root is not None else self.workspace_root,

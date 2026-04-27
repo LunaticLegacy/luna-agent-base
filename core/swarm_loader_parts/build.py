@@ -235,6 +235,17 @@ def build_core_from_package(
                     flush=True,
                 )
 
+        agent_class = Agent
+        if blueprint.source_file:
+            import sys
+            from pathlib import Path as _Path
+            _src = _Path(blueprint.source_file)
+            _mod_name = f"angelus_swarm_{_src.parent.name}_{_src.stem}"
+            _mod = sys.modules.get(_mod_name)
+            if _mod is not None:
+                _ac = getattr(_mod, "AGENT_CLASS", None)
+                if isinstance(_ac, type):
+                    agent_class = _ac
         core.create_agent(
             agent_id=blueprint.agent_id,
             character_prompt=prompt,
@@ -244,6 +255,7 @@ def build_core_from_package(
             workspace_mode=workspace_mode,
             workspace_root=workspace_root,
             tool_execution_mode=blueprint.tool_execution_mode,
+            agent_class=agent_class,
         )
         workspace_root.mkdir(parents=True, exist_ok=True)
         print(
