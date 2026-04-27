@@ -377,10 +377,11 @@ class ExecutionProtocolMixin:
         if not isinstance(raw_requests, list):
             return []
         requests: List[Any] = []
-        for req in raw_requests:
+        for idx, req in enumerate(raw_requests):
             if isinstance(req, dict):
                 requests.append(
                     ToolRequest(
+                        id=req.get("id") or f"tool_req_{idx}",
                         tool=req.get("tool_name") or req.get("tool") or "",
                         args=req.get("arguments") or req.get("args") or {},
                     )
