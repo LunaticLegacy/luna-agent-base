@@ -1,0 +1,19 @@
+[swarm]
+name = "demo_1"
+graph_file = "graph.py"
+agent_files = ["agents/hello_writer.py"]
+tool_files = ["tools.file_writer_tool"]
+
+[tool_capabilities]
+file_writer = ["file_write"]
+
+[llm.default]
+name = "dummy"
+provider = "openai"
+api_url = "http://localhost:9999"
+api_key = "dummy"
+model = "dummy"
+
+[workspace]
+default_mode = "workspace"
+default_root = "."
