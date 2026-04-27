@@ -60,6 +60,31 @@ You must output a **JSON envelope** with the following structure:
 - `content`: Explain what you are doing, what you changed, and the result of any verification.
 - `tool_requests`: **Maximum 3 file write/edit requests per turn.** Include other tools (`file_reader`, `command_runner`) as needed, but file writes are the bottleneck.
 
+### CRITICAL: Avoid JSON escaping errors with C/C++ code
+
+C and C++ source code contain many double-quote characters (`"`). If you put raw source code inside `"content": "..."`, the JSON will be invalid and **no tools will execute**.
+
+**Recommended approach — use `command_runner` with heredoc:**
+
+```json
+{
+  "tool_name": "command_runner",
+  "arguments": {
+    "command": "cat > include/rvdlnet/core/types.hpp << 'EOF'\n#pragma once\n#include <cstddef>\n...\nEOF"
+  }
+}
+```
+
+- Use `<< 'EOF'` (single-quoted delimiter) so the shell does NOT interpret `$` or backticks inside the code.
+- Escape literal backslashes in the shell command as `\\`.
+- Each line of the file content should be separated by `\n` in the JSON string.
+
+**If you must use `file_writer`:**
+- Every `"` inside `"content"` MUST be escaped as `\"`.
+- Every `\` inside `"content"` MUST be escaped as `\\`.
+- Newlines should be literal `\n` escape sequences (do NOT use actual newlines inside the JSON string value).
+- **If the file is large or contains many quotes, use `command_runner` with heredoc instead.**
+
 ## Rules
 
 - Never edit a file you have not read in the current or a recent turn.
