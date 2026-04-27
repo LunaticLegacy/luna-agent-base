@@ -8,7 +8,7 @@ import { CommonModule } from '@angular/common';
   template: `
     @if (open) {
       <div class="modal-overlay" (click)="onOverlayClick()">
-        <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal modal--{{ size }}" (click)="$event.stopPropagation()">
           <div class="modal-header">
             <div>
               <h3>{{ title }}</h3>
@@ -52,6 +52,8 @@ import { CommonModule } from '@angular/common';
       flex-direction: column;
       overflow: hidden;
     }
+    .modal--wide { max-width: 1200px; }
+    .modal--full { max-width: 95vw; max-height: 95vh; }
     .modal-header {
       display: flex;
       justify-content: space-between;
@@ -92,6 +94,9 @@ import { CommonModule } from '@angular/common';
       flex: 1;
       overflow-y: auto;
       padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
     .modal-footer {
       display: flex;
@@ -108,6 +113,7 @@ export class ModalComponent {
   @Input() subtitle?: string;
   @Input() hasFooter = false;
   @Input() closeOnOverlay = true;
+  @Input() size: 'normal' | 'wide' | 'full' = 'normal';
 
   @Output() close = new EventEmitter<void>();
 

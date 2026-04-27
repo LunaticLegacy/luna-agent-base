@@ -4,12 +4,13 @@ import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
 import { THOUGHT_NODE_LEGEND_ENTRIES, THOUGHT_RELATION_LEGEND_ENTRIES } from '../thought-graph.taxonomy';
+import { JsonViewerComponent } from '../json-viewer.component';
 import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent, ModalComponent } from '../shared';
 
 @Component({
   selector: 'app-swarm-management-page',
   standalone: true,
-  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent, StatCardGridComponent, TabBarComponent, PanelCardComponent, EmptyStateComponent, ModalComponent],
+  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent, StatCardGridComponent, TabBarComponent, PanelCardComponent, EmptyStateComponent, ModalComponent, JsonViewerComponent],
   template: `
     <div class="page">
       <!-- Header (kept inline due to custom status badge inline with title) -->
@@ -352,6 +353,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                 <app-modal
                   [open]="!!selectedEvent()"
                   [title]="'事件详情 #' + selectedEventIndex()"
+                  size="wide"
                   (close)="selectedEvent.set(null)">
                   @if (selectedEvent(); as ev) {
                     <div class="trace-modal-body">
@@ -360,7 +362,29 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                         <span class="trace-modal-meta-item">节点: {{ ev['node_name'] || ev['node_id'] || '—' }}</span>
                         <span class="trace-modal-meta-item">状态: {{ ev['status'] || '—' }}</span>
                       </div>
-                      <pre class="trace-event-body-full">{{ ev | json }}</pre>
+                      <div class="event-detail-tabs">
+                        <button
+                          class="event-detail-tab"
+                          [class.active]="eventDetailTab() === 'structured'"
+                          (click)="eventDetailTab.set('structured')">
+                          结构化视图
+                        </button>
+                        <button
+                          class="event-detail-tab"
+                          [class.active]="eventDetailTab() === 'raw'"
+                          (click)="eventDetailTab.set('raw')">
+                          原始信息
+                        </button>
+                      </div>
+                      <div class="event-detail-content">
+                        @if (eventDetailTab() === 'structured') {
+                          <div class="trace-modal-col-body">
+                            <app-json-viewer [value]="ev"></app-json-viewer>
+                          </div>
+                        } @else {
+                          <pre class="trace-event-body-full">{{ ev | json }}</pre>
+                        }
+                      </div>
                     </div>
                   }
                 </app-modal>
@@ -1162,15 +1186,62 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       display: flex;
       flex-direction: column;
       gap: 12px;
+      min-height: 0;
+      flex: 1;
     }
     .trace-modal-meta {
       display: flex;
       gap: 16px;
       flex-wrap: wrap;
+      flex-shrink: 0;
     }
     .trace-modal-meta-item {
       font-size: 12px;
       color: #94a3b8;
+    }
+    .event-detail-tabs {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(148,163,184,0.08);
+      padding: 0 12px;
+    }
+    .event-detail-tab {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .event-detail-tab:hover {
+      color: #e2e8f0;
+    }
+    .event-detail-tab.active {
+      color: #f8fafc;
+      border-bottom-color: #8B5CF6;
+    }
+    .event-detail-content {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      background: #0B0F19;
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 10px;
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+    }
+    .trace-modal-col-body {
+      flex: 1;
+      overflow: auto;
+      padding: 10px;
+      min-height: 0;
+      min-width: 0;
     }
     .trace-event-body-full {
       margin: 0;
@@ -1179,12 +1250,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
-      background: #0B0F19;
-      border: 1px solid rgba(148,163,184,0.08);
-      border-radius: 8px;
-      padding: 12px;
-      max-height: 60vh;
-      overflow-y: auto;
+      background: transparent;
+      padding: 10px;
+      overflow: auto;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
     }
     .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
@@ -1261,6 +1332,7 @@ export class SwarmManagementPageComponent {
   readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
   readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
   readonly selectedEvent = signal<any>(null);
+  readonly eventDetailTab = signal<'structured' | 'raw'>('structured');
   readonly selectedEventIndex = computed(() => {
     const events = this.state.selectedExecutionTrace()?.events ?? [];
     const ev = this.selectedEvent();
