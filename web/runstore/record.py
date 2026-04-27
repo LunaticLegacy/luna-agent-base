@@ -88,6 +88,13 @@ class RunRecord:
                 self.final_state = to_jsonable(data["state_snapshot"])
                 self.current_state = dict(self.final_state)
             self._done = True
+        elif event_type == "run.stopped":
+            self.status = "stopped"
+            self.finished_at = self.finished_at or _utc_now_iso()
+            if data.get("state_snapshot") is not None:
+                self.final_state = to_jsonable(data["state_snapshot"])
+                self.current_state = dict(self.final_state)
+            self._done = True
         elif event_type == "run.failed":
             self.status = "failed"
             self.finished_at = self.finished_at or _utc_now_iso()
