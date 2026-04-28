@@ -2134,7 +2134,7 @@ this.loadLogs(),
 
   async stopRun(stopType: 'soft' | 'hard' = 'soft'): Promise<void> {
     const run = this.activeRun();
-    if (!run) { this.error.set(makeUserError('没有正在运行的任务可停止。')); return; }
+    if (!run) { return; }
     this.loading.set(true); this.error.set(null);
     this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${run.run_id}`, 'STOP', '', 'info', { stopType });
     try {
