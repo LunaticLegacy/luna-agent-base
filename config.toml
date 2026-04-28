@@ -20,3 +20,10 @@ max_retries = 2
 backoff_ms = 1000
 backoff_multiplier = 2.0
 retry_policy = "full_branch"
+
+[app.memory_graph]
+enabled = true
+max_context_nodes = 6
+pack_keep_recent = 2
+enable_usage_trace = true
+enable_candidate_memory = true
