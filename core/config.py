@@ -29,3 +29,14 @@ class RuntimeConfig:
         "backoff_multiplier": 2.0,
         "retry_policy": "full_branch",
     })
+
+
+@dataclass
+class MemoryGraphConfig:
+    """Angelus Memory Graph alpha module configuration."""
+
+    enabled: bool = True
+    max_context_nodes: int = 6
+    pack_keep_recent: int = 2
+    enable_usage_trace: bool = True
+    enable_candidate_memory: bool = True

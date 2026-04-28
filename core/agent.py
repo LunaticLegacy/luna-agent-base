@@ -18,6 +18,7 @@ from .cognitive import (
     strip_cognitive_graph_tags,
 )
 from .results import AgentContextSnapshot, AgentRoundResult, ToolRequest
+from .memory.runtime import AgentMemoryRuntime
 
 
 @dataclass
@@ -194,6 +195,7 @@ class Agent:
         workspace_root: Optional[Path] = None,
         swarm_name: Optional[str] = None,
         tool_execution_mode: str = "internal",
+        memory_runtime: Optional[AgentMemoryRuntime] = None,
     ) -> None:
         self.agent_id = agent_id
         self.name = name or agent_id
@@ -211,6 +213,7 @@ class Agent:
         self.swarm_name = swarm_name
         self.current_run_id: Optional[str] = None
         self.tool_execution_mode = tool_execution_mode
+        self.memory_runtime = memory_runtime
 
     def append_context(self, role: str, content: str) -> None:
         """Append one message into the agent-local context."""
@@ -252,6 +255,7 @@ class Agent:
             workspace_root=self.workspace_root,
             swarm_name=self.swarm_name,
             tool_execution_mode=self.tool_execution_mode,
+            memory_runtime=self.memory_runtime,
         )
         cloned.set_run_id(self.current_run_id)
         return cloned
@@ -427,8 +431,27 @@ class Agent:
         """
         self.append_context("user", user_message)
         system_prompt = self._build_system_prompt(additional_prompt)
-        context_messages = self._context.build_messages()
-        prev_messages = [LLMContext(role=msg["role"], content=msg["content"]) for msg in context_messages[:-1]]
+
+        # Memory runtime hook: build context plan before the round
+        memory_plan = None
+        runtime_prev_messages: Optional[List[LLMContext]] = None
+        if self.memory_runtime is not None and self.memory_runtime.config.enabled:
+            memory_plan = await self.memory_runtime.before_round(
+                agent_id=self.agent_id,
+                swarm_name=self.swarm_name or "",
+                run_id=self.current_run_id,
+                user_message=user_message,
+            )
+            runtime_prev_messages = [
+                LLMContext(role=m["role"], content=m["content"])
+                for m in memory_plan.prompt_messages
+            ]
+
+        if runtime_prev_messages is not None:
+            prev_messages = runtime_prev_messages
+        else:
+            context_messages = self._context.build_messages()
+            prev_messages = [LLMContext(role=msg["role"], content=msg["content"]) for msg in context_messages[:-1]]
 
         # Prepare tool schemas if tools are bound
         tools_schemas = None
@@ -452,6 +475,8 @@ class Agent:
             ],
             "tools": tools_schemas,
         }
+        if memory_plan is not None:
+            llm_input["memory_context_plan"] = memory_plan.to_dict()
 
         tool_round = 0
         while True:
@@ -474,6 +499,16 @@ class Agent:
                     elif isinstance(tc, dict):
                         tool_names.append(tc.get("function", {}).get("name", "?"))
                 self.append_context("assistant", f"[Calling tools: {tool_names}]")
+
+            # Ensure the user message is included in runtime history for subsequent fetches
+            if tool_round == 0 and runtime_prev_messages is not None:
+                runtime_prev_messages.append(LLMContext(role="user", content=user_message))
+
+            if runtime_prev_messages is not None:
+                if content:
+                    runtime_prev_messages.append(LLMContext(role="assistant", content=content))
+                elif tool_calls:
+                    runtime_prev_messages.append(LLMContext(role="assistant", content=f"[Calling tools: {tool_names}]"))
 
             if not tool_calls:
                 assistant_message = content
@@ -499,11 +534,16 @@ class Agent:
             for tc in tool_calls:
                 result = await self._execute_tool_call(tc)
                 self.append_context("tool", result)
+                if runtime_prev_messages is not None:
+                    runtime_prev_messages.append(LLMContext(role="tool", content=result))
                 self._record_tool_call_in_cognitive_graph(tc, result, round_cognitive_graph)
 
             # Refresh prev_messages for the next LLM call
-            context_messages = self._context.build_messages()
-            prev_messages = [LLMContext(role=msg["role"], content=msg["content"]) for msg in context_messages]
+            if runtime_prev_messages is not None:
+                prev_messages = runtime_prev_messages
+            else:
+                context_messages = self._context.build_messages()
+                prev_messages = [LLMContext(role=msg["role"], content=msg["content"]) for msg in context_messages]
             tool_round += 1
 
         if assistant_message is None:
@@ -528,6 +568,17 @@ class Agent:
         self._merge_cognitive_graphs(self.cognitive_graph, round_cognitive_graph)
         if round_cognitive_graph.nodes or round_cognitive_graph.edges:
             self.persist_private_thought_snapshot()
+
+        # Memory runtime hook: finalize after the round
+        if memory_plan is not None and self.memory_runtime is not None:
+            await self.memory_runtime.after_round(
+                agent_id=self.agent_id,
+                swarm_name=self.swarm_name or "",
+                run_id=self.current_run_id,
+                user_message=user_message,
+                assistant_message=assistant_message or "",
+                context_plan=memory_plan,
+            )
 
         return AgentRoundResult(
             rounds=rounds,
