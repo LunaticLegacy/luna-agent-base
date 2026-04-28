@@ -28,6 +28,11 @@
 - [动态图编辑协议](./dynamic_graph_protocol.md)
   - 动态改图机制、已知问题与修复优先级
 
+## 事件与协议
+
+- [事件流协议](./event_stream_protocol.md)
+  - SSE 事件类型、通用结构、`llm_input` 字段语义、`state_snapshot` 说明
+
 ## 使用建议
 
 - 如果你想先看“接口怎么用”，先看 `api_structure.md`

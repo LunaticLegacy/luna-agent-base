@@ -108,6 +108,11 @@ This page is the consolidated English documentation entry point for Angelus.
 - [Dynamic Graph Editing Protocol](./dynamic_graph_protocol.md)
   - Dynamic graph mutation mechanism, known issues, and fix priorities
 
+## Events and Protocol
+
+- [Event Stream Protocol](../event_stream_protocol.md)
+  - SSE event types, common structure, `llm_input` field semantics, `state_snapshot` notes
+
 ## Suggested Reading Order
 
 - If you want to see the API shape first, start with `api_structure.md`

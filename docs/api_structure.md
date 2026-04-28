@@ -234,6 +234,37 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 
 这个接口不会等待图执行结束，而是返回一个 `run_id` 供后续查询和订阅。
 
+### 3.13 `POST /api/swarms/<swarm_name>/runs/stop`
+
+对指定 swarm 的所有活跃 run 发起停止请求。
+
+请求体：
+
+```json
+{
+  "stop_type": "soft"
+}
+```
+
+- `stop_type`：`soft`（允许当前节点完成后停止）或 `hard`（立即终止）
+
+返回示例：
+
+```json
+{
+  "success": true,
+  "stopped": 2
+}
+```
+
+说明：
+
+- 该接口会遍历该 swarm 下所有 `active_run_ids`，对每个 run 调用 `registry.stop_run()`
+- 如果没有活跃 run，返回 `{"success": true, "stopped": 0}`
+- 前端 stop 按钮在两种场景下都会调用此接口：
+  - 当没有 `activeRun` 时，直接调用 swarm-level stop
+  - 当有 `activeRun` 时，优先按 `run_id` 停止，失败时回退到 swarm-level stop
+
 ### 3.11 `GET /api/runs/<run_id>`
 
 查询一个异步 run session 的当前状态。
