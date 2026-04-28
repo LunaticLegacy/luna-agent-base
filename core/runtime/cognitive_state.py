@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 from ..cognitive import CognitiveGraph, CognitiveNodeType, CognitiveSubgraphDescriptor, merge_cognitive_graphs
 from ..context_graph import ContextEntry, ContextEntryType, ContextGraph, ContextReference, ContextRelation
-from ..task_graph import TaskGraph
 
 
 class CognitiveRuntimeMixin:
@@ -45,7 +44,7 @@ class CognitiveRuntimeMixin:
             return
         merge_cognitive_graphs(self.swarm_cognitive_graph, delta_graph)
 
-    def get_cognitive_graph_export(self, query: Optional[str] = None, max_nodes: int = 20) -> str:
+    def get_cognitive_graph_export(self, query: Optional[str] = None, max_nodes: Optional[int] = None) -> str:
         return self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=max_nodes)
 
     def schedule_thought_subgraph(
@@ -56,7 +55,7 @@ class CognitiveRuntimeMixin:
         seed_ids: Optional[List[str]] = None,
         purpose: str = "",
         expected_next_information: str = "",
-        max_nodes: int = 16,
+        max_nodes: Optional[int] = None,
     ) -> tuple[CognitiveSubgraphDescriptor, CognitiveGraph]:
         if agent_id:
             for existing in self.active_thought_subgraphs.values():
@@ -148,7 +147,7 @@ class CognitiveRuntimeMixin:
         agent_id: str,
         query: Optional[str] = None,
         purpose: str = "",
-        max_nodes: int = 16,
+        max_nodes: Optional[int] = None,
     ) -> str:
         public_graph = self._public_thought_graph()
         main_graph = self.build_context_graph_export(
@@ -200,7 +199,7 @@ class CognitiveRuntimeMixin:
         agent_id: str,
         query: Optional[str] = None,
         purpose: str = "",
-        max_nodes: int = 16,
+        max_nodes: Optional[int] = None,
     ) -> str:
         public_graph = self._public_thought_graph()
         descriptor, subgraph = public_graph.describe_subgraph(

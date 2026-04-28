@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, Input, forwardRef } from '@angular/core';
+import { parse } from 'marked';
 import { formatPrimitive, isPlainObject, jsonKind, normalizeJsonValue, summarizeJsonValue } from './json-utils';
 
 interface JsonEntry {
@@ -37,7 +38,11 @@ interface JsonEntry {
       } @else {
         <div class="json-leaf">
           <span class="json-kind">{{ currentKind() }}</span>
-          <span class="json-primitive">{{ primitiveText() }}</span>
+          @if (currentKind() === 'string' && isMarkdownLike()) {
+            <span class="json-primitive markdown-body" [innerHTML]="markdownHtml()"></span>
+          } @else {
+            <span class="json-primitive">{{ primitiveText() }}</span>
+          }
         </div>
       }
     </section>
@@ -90,5 +95,17 @@ export class JsonViewerComponent {
 
   primitiveText(): string {
     return formatPrimitive(this._value);
+  }
+
+  isMarkdownLike(): boolean {
+    if (typeof this._value !== 'string') return false;
+    const s = this._value;
+    // Heuristic: contains markdown syntax
+    return /[#*_\[\]`!\-~>]/.test(s) && s.length > 1;
+  }
+
+  markdownHtml(): string {
+    if (typeof this._value !== 'string') return '';
+    return parse(this._value, { async: false, gfm: true }) as string;
   }
 }

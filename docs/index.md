@@ -5,7 +5,7 @@
 ## 总览
 
 - [API 结构说明](./api_structure.md)
-  - 当前 Flask API 的总体结构、路由、错误处理和运行时绑定关系
+  - 当前 FastAPI 的总体结构、路由、错误处理和运行时绑定关系
 - [Metadata Reference](./metadata_reference.md)
   - 图节点、运行态、Agent、Tool、Skill 的 metadata 约定
 - [英文文档索引](./en/README.md)
@@ -27,6 +27,16 @@
   - 当前 swarm / agent / skill / tool / graph 的目录与结构约定
 - [动态图编辑协议](./dynamic_graph_protocol.md)
   - 动态改图机制、已知问题与修复优先级
+
+## 事件与协议
+
+- [事件流协议](./event_stream_protocol.md)
+  - SSE 事件类型、通用结构、`llm_input` 字段语义、`state_snapshot` 说明
+
+## 记忆子系统
+
+- [Angelus Memory Graph (alpha)](./memory_graph.md)
+  -  episode 历史图、上下文压缩、关键记忆提取与使用追踪
 
 ## 使用建议
 

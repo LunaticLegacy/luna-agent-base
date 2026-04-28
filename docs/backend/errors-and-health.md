@@ -4,7 +4,7 @@
 
 - 健康检查与就绪检查接口
 - `web/errors.py` 里的错误类型
-- Flask 如何把异常统一转成 JSON 响应
+- FastAPI 如何把异常统一转成 JSON 响应
 
 相关代码：
 
@@ -138,9 +138,9 @@
 - 状态码是 `409`
 - 适合“状态冲突”类问题，比如重复加载 swarm、仍有 active run 时卸载/重载
 
-## Flask 异常如何转成 JSON
+## FastAPI 异常如何转成 JSON
 
-`register_error_handlers(app)` 会给 Flask 注册一组统一处理器。
+`register_error_handlers(app)` 会给 FastAPI 注册一组统一处理器。
 
 ### 1. `ApiError`
 
@@ -198,7 +198,7 @@
   - 返回 `500`
   - `error` 为 `str(exc)`
 
-这层兜底的意义是：即使某个路由没有显式抛 `ApiError`，只要异常落到 Flask 全局处理器里，响应仍然会保持 JSON 结构。
+这层兜底的意义是：即使某个路由没有显式抛 `ApiError`，只要异常落到 FastAPI 全局处理器里，响应仍然会保持 JSON 结构。
 
 ## 现有路由里的实际用法
 
@@ -244,4 +244,4 @@
 
 - 先看路由里是不是显式抛了 `ApiError` / `NotFoundError` / `ConflictError`
 - 再看是不是底层 `KeyError` / `ValueError` / `SwarmLoaderError`
-- 最后看 Flask 全局兜底有没有把它转成标准 JSON
+- 最后看 FastAPI 全局兜底有没有把它转成标准 JSON

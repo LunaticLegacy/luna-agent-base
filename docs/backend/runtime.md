@@ -10,7 +10,7 @@
 - 运行中的任务：`runs: RunRegistry`
 - 启动阶段的错误信息：`load_error`
 
-它本身不负责持久化，也不负责业务执行；它只是把“哪些 swarm 已经加载好”“哪些 run 还在活跃”这两件事管理起来，再供 Flask 路由层调用。
+它本身不负责持久化，也不负责业务执行；它只是把“哪些 swarm 已经加载好”“哪些 run 还在活跃”这两件事管理起来，再供 FastAPI 路由层调用。
 
 ## 初始化流程
 
@@ -468,6 +468,6 @@ auto_reconnect = true
 2. 在 `core/swarm_spec.py` 中扩展对应 dataclass
 3. 在 `web/routes/settings.py` 里同步读写接口
 4. 在 `web/app_factory.py` 中保持 settings blueprint 注册
-5. 必要时将读到的配置注入 `RuntimeRegistry` 或 `Flask.extensions`
+5. 必要时将读到的配置注入 `RuntimeRegistry` 或 `app.state`
 
 当前实现有意保持后端配置最小化，以降低部署复杂度。

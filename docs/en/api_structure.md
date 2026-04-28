@@ -1,6 +1,6 @@
 # Current API Structure
 
-This document summarizes the Flask API shape, response structure, and its relationship with the `core/` runtime.
+This document summarizes the FastAPI shape, response structure, and its relationship with the `core/` runtime.
 
 ## 1. Overall Positioning
 
@@ -28,7 +28,7 @@ At startup it:
 
 - reads `config.toml`
 - scans `agents/` for swarm packages
-- creates the Flask app
+- creates the FastAPI app
 - registers health and swarm routes
 
 ## 3. Routes

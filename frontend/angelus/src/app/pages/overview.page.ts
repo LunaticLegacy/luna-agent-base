@@ -60,6 +60,14 @@ import { EmptyStateComponent, PageHeaderComponent, PanelCardComponent, StatCardG
                 <button class="btn btn-secondary" (click)="state.startRun()" [disabled]="state.loading() || !state.selectedSwarm()">
                   启动结构
                 </button>
+                @if (state.canStopRun()) {
+                  <button class="btn btn-danger btn-sm" (click)="state.stopRun('soft')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">
+                    停止
+                  </button>
+                  <button class="btn btn-danger btn-sm" (click)="state.stopRun('hard')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">
+                    强制停止
+                  </button>
+                }
               </div>
             </div>
 
@@ -144,6 +152,14 @@ import { EmptyStateComponent, PageHeaderComponent, PanelCardComponent, StatCardG
               <button class="btn btn-primary" (click)="state.startRun()" [disabled]="state.loading() || !state.selectedSwarm()">
                 启动结构
               </button>
+              @if (state.canStopRun()) {
+                <button class="btn btn-danger" (click)="state.stopRun('soft')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">
+                  停止运行
+                </button>
+                <button class="btn btn-danger" (click)="state.stopRun('hard')" [disabled]="state.loading() || state.activeRun()?.status !== 'running'">
+                  强制停止
+                </button>
+              }
             </div>
           </div>
 

@@ -287,17 +287,58 @@ flowchart TD
 
 ### 7.4 当前会出现的事件类型
 
-从 `core/executor.py` 和 `web/runs.py` 的实现看，后台运行里会看到这些事件：
+从 `core/executor_parts/engine.py` 和 `web/runs.py` 的实现看，后台运行里会看到这些事件：
 
 - `run.started`
 - `node.started`
 - `node.completed`
 - `node.failed`
+- `node.skipped`
 - `branch.started`
 - `branch.completed`
 - `branch.failed`
+- `branch.retry`
+- `run.stopped`
 - `run.completed`
 - `run.failed`
+
+更完整的事件字段语义见：
+
+- [docs/event_stream_protocol.md](/run/media/luna/数据和游戏/Codes/Python/angelus/docs/event_stream_protocol.md)
+
+### 7.5 `node.completed` 中的 `llm_input`
+
+当完成节点是 `AgentNode` 时，`node.completed` 事件的 `data` 中会额外携带 `llm_input` 字段，完整记录该节点实际发送给 LLM 的输入：
+
+```json
+{
+  "system": "...",
+  "user": "...",
+  "prev_messages": [{"role": "...", "content": "..."}],
+  "tools": [{...}]
+}
+```
+
+这是调试 agent 行为、复现问题和审计的关键数据来源。`prev_messages` 反映的是 `ManagedAgentContext` 实际送入 LLM 的上下文，包含 active window 的完整消息和 compressed blocks 的摘要。
+
+### 7.6 `state_snapshot` 中不再包含完整 `trace`
+
+为避免 O(n²) 的序列化/解析成本，`state_snapshot` 已移除完整的 `trace` 数组，改为只保留轻量的 `trace_summary`：
+
+```json
+{
+  "length": 5,
+  "last_node_id": 7,
+  "last_node_name": "writer",
+  "last_status": "ok"
+}
+```
+
+需要完整 trace 的消费方应：
+
+- 在客户端自行累积事件
+- 通过 `GET /api/runs/<run_id>` 读取完整事件列表
+- 通过 `GET /api/swarms/<swarm>/execution-traces/latest` 获取轨迹快照
 
 ## 8. 路径不一致和已知偏差
 

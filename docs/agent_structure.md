@@ -9,7 +9,7 @@
 - `core/`：运行时与编排内核，负责 agent、tool、skill、graph 的注册、校验和执行。
 - `agents/`：业务 swarm 包目录，每个子目录代表一个可加载的 swarm。
 - `tools/`：默认工具实现，供 swarm 直接复用，也可以被单独引用。
-- `web/`：HTTP 接入层，用 Flask 暴露运行时接口。
+- `web/`：HTTP 接入层，用 FastAPI 暴露运行时接口。
 
 ## 2. Swarm 包结构
 
@@ -62,6 +62,8 @@ agents/deepseek_demo/
 - `backend_name`
 
 当前这些文件本质上是**agent blueprint**，即配置描述，不包含行为逻辑。
+
+**Envelope 模式已移除**：agent 不再接收 JSON envelope 包装。`state.payload` 会直接作为 `user_message` 传入 agent，无论原始输入是字符串还是字典。这意味着 agent prompt 和工具文档里都不应再出现 `_envelope` 字段或 envelope 相关的解析逻辑。
 
 ### 2.3 `skills/*.prompt.md` 与 `skills/*.prompt.toml`
 
@@ -254,11 +256,53 @@ agents/deepseek_demo/
   - `ExecutionState` 会在每次 `graph.run()` 时新建
   - `RunRecord` 只负责后台 run 的事件和快照，不会回灌到模型
 - agent 级运行态
-  - `Agent._context.messages` 会保留历史消息
+  - `Agent._context` 现在是 `ManagedAgentContext`，会保留历史消息、压缩块和归档
   - `Agent._context.metadata` 会保留 `last_round`、`turns`
   - `Agent.cognitive_graph` 会持续累积工具调用和推理痕迹
 
-为了防止上一轮内容污染下一轮，当前路由层会在 swarm run 开始前调用 `core.reset_runtime_state()`，把这些可变状态清空后再执行图。
+### 8.1 层级上下文压缩
+
+`ManagedAgentContext` 取代了旧的扁平 `AgentContext`，采用三层结构管理对话历史：
+
+- **Active window**：最近 6 条完整消息，直接参与 LLM 调用
+- **Compressed blocks**：当 active messages 超过 10 条时，最老的 4 条被压缩成 `ContextBlock`，保留摘要和关键词
+- **Archive**：压缩后的原始消息仍完整保存，可通过 `recall_context` 工具按需检索
+
+压缩块包含：
+
+- `block_id`
+- `round_range`
+- `summary`
+- `keywords`
+- `participants`
+- `messages`（原始完整消息，存入 archive）
+
+`build_messages()` 的组装顺序：
+
+1. 所有 compressed blocks 的摘要以轻量 `system` hint 形式注入
+2. Active window 的完整消息按原顺序追加
+
+这意味着 LLM 始终看到最近的完整对话，以及更早对话的摘要，而不是无限制增长的消息列表。
+
+### 8.2 `recall_context` 工具
+
+每个 agent 自动绑定 `recall_context` 工具，允许 LLM 主动搜索 archive 中的历史块：
+
+- 输入：自然语言查询字符串
+- 行为：按关键词匹配 compressed blocks，返回最相关的完整归档消息
+- 用途：当 LLM 需要引用较早的详细内容时，不必在每次调用中携带全部历史
+
+这改变了传统的“被动截断”模型，改为“主动召回”模型：系统默认只给摘要，LLM 在需要时可以请求完整内容。
+
+### 8.3 运行态重置
+
+为了防止上一轮内容污染下一轮，当前路由层会在 swarm run 开始前调用 `core.reset_runtime_state()`，把 agent 可变状态清空后再执行图。
+
+重置内容包括：
+
+- 清空每个 agent 的 `ManagedAgentContext`（active messages、compressed blocks、archive）
+- 清空每个 agent 的私有 cognitive graph
+- 重建 swarm 级共享 cognitive graph
 
 这意味着：
 

@@ -247,6 +247,7 @@ angelus/
 - [ ] 更严格的 skill contract 校验
 - [ ] 持久化运行时 session
 - [ ] 更丰富的分析型默认工具
+- [x] **Angelus Memory Graph (alpha)** — 见 `core/memory/` 与 `docs/memory_graph.md`
 
 ---
 
@@ -259,6 +260,7 @@ angelus/
 - [前端文档](docs/frontend/README.md)
 - [metadata 约定](docs/metadata_reference.md)
 - [agent 目录结构](docs/agent_structure.md)
+- [Angelus Memory Graph (alpha)](docs/memory_graph.md) — 记忆图模块说明
 
 ---
 

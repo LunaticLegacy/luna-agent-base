@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..agent import Agent
 from ..config import AgentConfig
 from ..core import Core
 from ..policy import ExecutionGraph
+from ..runtime.limiter import ConcurrencyLimiter
 from ..skills import SkillAsset
 from .utils import (
     _backend_to_agent_config,
@@ -37,6 +38,28 @@ from ..swarm_spec import (
     load_swarm_manifest,
 )
 from ..toodefl import ToolDefinition
+
+
+def _load_concurrency_config(package_path: Path) -> Dict[str, Any]:
+    """Walk upward from package_path to find config.toml and read [runtime.concurrency]."""
+    current = package_path.resolve()
+    for _ in range(5):
+        config_path = current / "config.toml"
+        if config_path.exists():
+            try:
+                import tomllib
+                with config_path.open("rb") as f:
+                    raw = tomllib.load(f)
+                runtime = raw.get("runtime", {})
+                concurrency = runtime.get("concurrency", {}) if isinstance(runtime, dict) else {}
+                return dict(concurrency) if isinstance(concurrency, dict) else {}
+            except Exception:
+                break
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return {}
 
 
 @dataclass
@@ -135,6 +158,8 @@ def build_core_from_package(
     default_config = manifest.default_llm or _backend_to_agent_config(manifest.llm_backends[0])
     default_workspace_mode, default_workspace_root = _resolve_workspace_defaults(package_path, manifest)
     default_workspace_root.mkdir(parents=True, exist_ok=True)
+    concurrency_config = _load_concurrency_config(package_path)
+    limiter = ConcurrencyLimiter(concurrency_config)
     core = Core(
         agent_name=manifest.swarm_name,
         agent_config=AgentConfig(
@@ -144,6 +169,7 @@ def build_core_from_package(
             provider=default_config.provider,
         ),
         workspace_root=default_workspace_root,
+        limiter=limiter,
     )
     core.workspace_mode = default_workspace_mode
     core.set_runtime_info_dir(package_path / "runtime_info")
@@ -196,7 +222,7 @@ def build_core_from_package(
             skill_by_name=skill_by_name,
             skill_by_path=skill_by_path,
         )
-        llm_handler = _build_llm_handler(blueprint, package_backends, manifest.default_backend)
+        llm_handler = _build_llm_handler(blueprint, package_backends, manifest.default_backend, limiter=limiter)
         workspace_mode, workspace_root = _resolve_workspace_for_agent(package_path, manifest, blueprint)
 
         agent_tools = []
@@ -209,6 +235,17 @@ def build_core_from_package(
                     flush=True,
                 )
 
+        agent_class = Agent
+        if blueprint.source_file:
+            import sys
+            from pathlib import Path as _Path
+            _src = _Path(blueprint.source_file)
+            _mod_name = f"angelus_swarm_{_src.parent.name}_{_src.stem}"
+            _mod = sys.modules.get(_mod_name)
+            if _mod is not None:
+                _ac = getattr(_mod, "AGENT_CLASS", None)
+                if isinstance(_ac, type):
+                    agent_class = _ac
         core.create_agent(
             agent_id=blueprint.agent_id,
             character_prompt=prompt,
@@ -217,6 +254,8 @@ def build_core_from_package(
             tools=agent_tools if agent_tools else None,
             workspace_mode=workspace_mode,
             workspace_root=workspace_root,
+            tool_execution_mode=blueprint.tool_execution_mode,
+            agent_class=agent_class,
         )
         workspace_root.mkdir(parents=True, exist_ok=True)
         print(
@@ -246,16 +285,31 @@ def build_core_from_package(
 
 
 def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -> List[LoadedSwarm]:
-    """Discover and load every swarm package in the given root."""
+    """Discover and load every swarm package in the given root.
+
+    Individual package load failures are logged and skipped so that
+    successfully-loaded swarms remain available.
+    """
     package_paths = discover_swarm_packages(root)
     print(
         f"[angelus] discovered swarm packages: root={root} count={len(package_paths)}",
         flush=True,
     )
-    manifest_entries = [load_swarm_manifest(package_path) for package_path in package_paths]
+
+    valid_package_paths: List[Path] = []
+    manifest_entries: List[Tuple[Path, SwarmManifest]] = []
+    for package_path in package_paths:
+        try:
+            manifest_entries.append(load_swarm_manifest(package_path))
+            valid_package_paths.append(package_path)
+        except Exception as exc:
+            print(
+                f"[angelus] failed to load manifest: package={package_path} error={exc}",
+                flush=True,
+            )
 
     if preinstall_tool_requirements:
-        requirements = collect_tool_requirement_files(package_paths, manifest_entries)
+        requirements = collect_tool_requirement_files(valid_package_paths, manifest_entries)
         if requirements:
             print(
                 f"[angelus] preinstalling tool requirements: files={len(requirements)}",
@@ -263,7 +317,7 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -
             )
         install_tool_requirements(requirements)
 
-    api_requirements = collect_api_requirement_files(package_paths, manifest_entries)
+    api_requirements = collect_api_requirement_files(valid_package_paths, manifest_entries)
     if preinstall_tool_requirements and api_requirements:
         print(
             f"[angelus] preinstalling api requirements: files={len(api_requirements)}",
@@ -272,16 +326,25 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -
         install_api_requirements(api_requirements)
 
     swarms: List[LoadedSwarm] = []
-    for package_path, (manifest_path, manifest) in zip(package_paths, manifest_entries):
-        swarms.append(
-            build_core_from_package(
-                package_path,
-                manifest=manifest,
-                manifest_path=manifest_path,
+    for package_path, (manifest_path, manifest) in zip(valid_package_paths, manifest_entries):
+        try:
+            swarms.append(
+                build_core_from_package(
+                    package_path,
+                    manifest=manifest,
+                    manifest_path=manifest_path,
+                )
             )
-        )
+        except Exception as exc:
+            print(
+                f"[angelus] failed to build swarm: name={manifest.swarm_name} error={exc}",
+                flush=True,
+            )
+
+    failed_count = len(package_paths) - len(swarms)
     print(
-        f"[angelus] swarm loading complete: loaded={len(swarms)}",
+        f"[angelus] swarm loading complete: discovered={len(package_paths)} "
+        f"loaded={len(swarms)} failed={failed_count}",
         flush=True,
     )
     return swarms

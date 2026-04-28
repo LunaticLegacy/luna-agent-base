@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, Input, ElementRef, afterNextRender, signal, inject, NgZone } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, ElementRef, afterNextRender, signal, inject, NgZone, type SimpleChanges } from '@angular/core';
 import type { GraphEdgeSnapshot, GraphNodeSnapshot, GraphSnapshot } from './api.types';
 
 interface RenderNode {
@@ -91,6 +91,7 @@ interface RenderEdge {
               [class.tool-node]="nodeRole(renderNode.node) === 'tool'"
               [class.exit]="nodeRole(renderNode.node) === 'exit'"
               [class.active]="renderNode.node.node_id === activeNodeId"
+              [class.quarantined]="isQuarantined(renderNode.node)"
             >
               @if (isCenterNode(renderNode.node)) {
                 <polygon
@@ -429,9 +430,16 @@ export class GraphViewerComponent {
     }
   }
 
-  ngOnChanges(): void {
-    this.needsFit = true;
-    this.recalculateLayout();
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['graph']) {
+      this.needsFit = true;
+      this.recalculateLayout();
+    }
+  }
+
+  isQuarantined(node: GraphNodeSnapshot): boolean {
+    const meta = node.metadata;
+    return typeof meta === 'object' && meta !== null && !Array.isArray(meta) && !!meta['quarantined'];
   }
 
   isEdgeActive(edge: GraphEdgeSnapshot): boolean {

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+from pathlib import Path
+from typing import Any, Optional
 
 from core.executor import GraphExecutor
+from core.results import ExecutionState
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -17,8 +21,61 @@ from web.utils import to_jsonable
 router = APIRouter()
 
 
+_ARTIFACT_PATH_PATTERNS = [
+    re.compile(r"(?:将该文件命名|命名|文件名)\s*为\s+([^\s,;，。]+)", re.IGNORECASE),
+    re.compile(r"(?:保存为)\s+([^\s,;，。]+)", re.IGNORECASE),
+    re.compile(r"(?:name it|save as)\s+([^\s,;，。]+)", re.IGNORECASE),
+]
+
+
+def extract_artifact_path(text: str) -> Optional[str]:
+    """Scan user text for an explicit filename/path request."""
+    for pattern in _ARTIFACT_PATH_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            candidate = match.group(1).strip()
+            if "." in candidate:
+                return candidate
+    return None
+
+
+def normalize_initial_payload(raw: Any) -> Any:
+    """Normalize an HTTP input into a runtime payload.
+
+    Rules:
+    - Dicts are passed through.
+    - Strings are passed through.
+    - Everything else is coerced via ``str()``.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        return raw
+    return str(raw)
+
+
 def _get_swarm_or_404(request: Request, swarm_name: str):
     return get_runtime_registry(request).get_swarm(swarm_name)
+
+
+def resolve_final_output(state: ExecutionState) -> Any:
+    """Return the human-facing final output for a completed run.
+
+    Walks ``metadata.outputs`` and extracts the most meaningful field
+    from the last node output.
+    """
+    outputs = state.metadata.get("outputs")
+    if isinstance(outputs, dict) and outputs:
+        last_key = list(outputs.keys())[-1]
+        last_output = outputs[last_key]
+        if isinstance(last_output, dict):
+            for key in ("final_answer", "final_report", "approved_report", "draft_report", "content"):
+                value = last_output.get(key)
+                if value is not None:
+                    return value
+            return last_output
+        return last_output
+    return state.payload
 
 
 def _get_runs_registry(request: Request) -> RunRegistry:
@@ -48,6 +105,7 @@ def _serialize_execution_graph_with_state(swarm) -> dict:
         raise ApiError(f"Swarm '{swarm.manifest.swarm_name}' has no execution graph attached.")
     payload = serialize_graph_snapshot(graph)
     payload["graph_kind"] = getattr(graph, "graph_kind", "execution")
+    payload.update(swarm.core.get_graph_runtime_state())
     return payload
 
 
@@ -58,7 +116,7 @@ async def _execute_swarm_run(request: Request, swarm_name: str, *, use_backgroun
         raise ApiError(f"Swarm '{swarm_name}' has no agent graph attached.")
 
     request_data = await parse_json_body(request)
-    payload = request_data.get("input")
+    payload = normalize_initial_payload(request_data.get("input"))
     rounds = int(request_data.get("rounds", 0))
     meta_mode = bool(request_data.get("meta_mode", False))
     runs_registry = _get_runs_registry(request)
@@ -101,7 +159,7 @@ async def _execute_swarm_run(request: Request, swarm_name: str, *, use_backgroun
         "success": True,
         "swarm": swarm_name,
         "rounds": state.rounds,
-        "output": to_jsonable(state.payload),
+        "output": to_jsonable(resolve_final_output(state)),
         "trace": to_jsonable(state.trace),
         "metadata": to_jsonable(state.metadata),
     }
@@ -343,6 +401,35 @@ async def run_swarm(swarm_name: str, request: Request):
 @router.post("/{swarm_name}/runs")
 async def create_run(swarm_name: str, request: Request):
     return await _execute_swarm_run(request, swarm_name, use_background=True)
+
+
+@router.post("/{swarm_name}/runs/stop")
+async def stop_swarm_runs(swarm_name: str, request: Request):
+    """Stop all active runs for a swarm.
+
+    Body: {"stop_type": "soft" | "hard"}  (default: soft)
+    """
+    swarm = _get_swarm_or_404(request, swarm_name)
+    body = await parse_json_body(request)
+    stop_type = str(body.get("stop_type", "soft")).strip().lower()
+    if stop_type not in {"soft", "hard"}:
+        raise ConflictError(f"Invalid stop_type: '{stop_type}'. Use 'soft' or 'hard'.")
+
+    registry = _get_runs_registry(request)
+    active_ids = registry.active_run_ids(swarm_name)
+    stopped = []
+    for run_id in active_ids:
+        record = registry.stop_run(run_id, stop_type=stop_type)
+        if record is not None:
+            stopped.append({"run_id": run_id, "status": record.status})
+
+    return {
+        "success": True,
+        "swarm": swarm_name,
+        "stop_type": stop_type,
+        "stopped": stopped,
+        "count": len(stopped),
+    }
 
 
 @router.delete("/{swarm_name}")

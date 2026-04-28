@@ -16,8 +16,6 @@ import type {
   LogListResponse,
   MemoryCatalogItem,
   TaskCatalogItem,
-  TaskGraphResponse,
-  TaskGraphTaskSnapshot,
   MetricsResponse,
   ReadyResponse,
   RunSnapshot,
@@ -279,7 +277,6 @@ export class StateService {
   readonly selectedGraphState = signal<GraphStateSnapshot | null>(null);
   readonly selectedThoughtGraph = signal<ThoughtGraphSnapshot | null>(null);
   readonly selectedExecutionTrace = signal<ExecutionTraceResponse | null>(null);
-  readonly selectedTaskGraph = signal<TaskGraphResponse | null>(null);
   readonly swarmExecutionTemplate = signal<SwarmExecutionTemplate>('summary');
   readonly swarmExecutionPrompt = signal<string>(SWARM_EXECUTION_PRESETS.summary.prompt);
   readonly swarmExecutionContext = signal<string>(SWARM_EXECUTION_PRESETS.summary.context);
@@ -346,14 +343,6 @@ export class StateService {
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
   readonly resolvedGraph = computed<GraphSnapshot | null>(() => this.selectedGraph() ?? this.selectedSwarm()?.graph ?? null);
   readonly resolvedThoughtGraph = computed<ThoughtGraphSnapshot | null>(() => this.selectedThoughtGraph());
-  readonly resolvedTaskGraph = computed<TaskGraphResponse | null>(() => this.selectedTaskGraph());
-  readonly resolvedTaskGraphTasks = computed<TaskItem[]>(() => {
-    const graph = this.resolvedTaskGraph();
-    if (!graph?.graph?.tasks?.length) {
-      return this.derivedTasks();
-    }
-    return graph.graph.tasks.map((task) => this.mapTaskGraphSnapshot(task));
-  });
   readonly activeRunNodeId = computed(() => {
     const run = this.activeRun();
     return run?.status === 'running' ? run.current_node_id ?? null : null;
@@ -361,6 +350,10 @@ export class StateService {
   readonly activeRunStatusText = computed(() => {
     const run = this.activeRun();
     return run ? this.runStatusLabel(run.status) : '空闲';
+  });
+  readonly canStopRun = computed(() => {
+    const run = this.activeRun();
+    return run != null && run.status !== 'completed' && run.status !== 'failed';
   });
 
   /* ---------- Derived data (replaces hard-coded mock) ---------- */
@@ -947,37 +940,6 @@ export class StateService {
     };
   }
 
-  private mapTaskGraphSnapshot(item: TaskGraphTaskSnapshot): TaskItem {
-    const metadata = item.metadata && typeof item.metadata === 'object' ? (item.metadata as Record<string, unknown>) : {};
-    const durationMs = typeof metadata['duration_ms'] === 'number' ? metadata['duration_ms'] as number : 0;
-    const logs = Array.isArray(metadata['logs'])
-      ? (metadata['logs'] as Array<{ time?: string; level?: 'info' | 'warn' | 'error' | 'success'; message?: string }>)
-          .map((entry) => ({
-            time: entry.time ?? '-',
-            level: (entry.level ?? 'info') as 'info' | 'warn' | 'error' | 'success',
-            message: entry.message ?? '',
-          }))
-      : [];
-    return {
-      id: item.task_id,
-      name: item.name,
-      status: item.status as TaskItem['status'],
-      priority: item.priority as TaskItem['priority'],
-      executor: item.agent_id || 'system',
-      duration: durationMs > 0 ? this.fmtDurationMs(durationMs) : '-',
-      createdAt: item.created_at,
-      dependencies: [...(item.dependencies ?? [])],
-      nextTasks: [...(item.next_tasks ?? [])],
-      detail: {
-        description: item.description,
-        input: item.input,
-        output: item.output,
-        logs,
-        failureReason: item.status === 'failed' && item.failed_count > 0 ? `failed_count=${item.failed_count}` : undefined,
-      },
-    };
-  }
-
   private mapToolCatalogItem(item: ToolCatalogItem): ToolItem {
     return {
       id: item.id,
@@ -1400,7 +1362,6 @@ this.loadLogs(),
         this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
         this.selectedExecutionTrace.set(null);
-        this.selectedTaskGraph.set(null);
         this.agents.set([]);
         this.agentsLoaded.set(true);
         this.tasks.set([]);
@@ -1435,7 +1396,6 @@ this.loadLogs(),
       this.selectedGraph.set(null);
       this.selectedThoughtGraph.set(null);
       this.selectedExecutionTrace.set(null);
-      this.selectedTaskGraph.set(null);
       this.agents.set([]);
       this.agentsLoaded.set(true);
       this.tasks.set([]);
@@ -1455,12 +1415,26 @@ this.loadLogs(),
       const response = await this.apiService.getSwarm(baseUrl, swarmName);
       this.selectedSwarm.set(response.swarm);
       this.ensureAgentSelection(response.swarm);
+      // Restore active run if any exists on the backend
+      const activeRunIds = (response.swarm as any)?.active_run_ids ?? [];
+      if (activeRunIds.length > 0) {
+        const latestRunId = activeRunIds[activeRunIds.length - 1];
+        try {
+          const runResponse = await this.apiService.getRun(baseUrl, latestRunId);
+          this.activeRun.set(runResponse.run);
+          this.pushFeed(`运行恢复 · ${latestRunId}`, 'GET', `${baseUrl}/runs/${latestRunId}`, 'info', runResponse);
+          if (runResponse.run.status === 'running') {
+            this.watchRun(runResponse.run);
+          }
+        } catch (runError) {
+          this.pushFeed(`运行恢复失败 · ${latestRunId}`, 'GET', `${baseUrl}/runs/${latestRunId}`, 'warn', { error: errorSummary(runError) });
+        }
+      }
       this.pushFeed(`Swarm 详情 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}`, 'success', response);
       await Promise.all([
         this.loadSelectedGraph(),
         this.loadSelectedThoughtGraph(),
         this.loadSelectedExecutionTrace(),
-        this.loadTaskGraph(),
         this.loadAgents(),
         this.loadTasks(),
         this.loadTools(),
@@ -1488,7 +1462,6 @@ this.loadLogs(),
         } : null);
         this.ensureAgentSelection(fallback);
         this.selectedExecutionTrace.set(null);
-        this.selectedTaskGraph.set(null);
         this.apis.set([]);
         this.apisLoaded.set(true);
       } else {
@@ -1496,7 +1469,6 @@ this.loadLogs(),
         this.clearSelectedGraph();
         this.selectedThoughtGraph.set(null);
         this.selectedExecutionTrace.set(null);
-        this.selectedTaskGraph.set(null);
         this.apis.set([]);
         this.apisLoaded.set(true);
       }
@@ -1867,25 +1839,6 @@ this.loadLogs(),
     }
   }
 
-  async loadTaskGraph(): Promise<void> {
-    const swarmName = this.selectedSwarmName();
-    if (!swarmName) {
-      this.selectedTaskGraph.set(null);
-      return;
-    }
-    try {
-      const response = await this.apiService.getTaskGraph(this.baseUrl(), swarmName);
-      this.selectedTaskGraph.set(response);
-      this.pushFeed(`任务图谱 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/task-graph`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.selectedTaskGraph.set(null);
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed(`任务图谱失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/task-graph`, 'error', { error: errorSummary(error) });
-      }
-    }
-  }
-
   async loadTools(): Promise<void> {
     try {
       const response = await this.apiService.listTools(this.baseUrl(), {});
@@ -2194,6 +2147,33 @@ this.loadLogs(),
     } catch (error) { this.error.set(formatErrorDetail(error)); }
   }
 
+  async stopRun(stopType: 'soft' | 'hard' = 'soft'): Promise<void> {
+    const run = this.activeRun();
+    this.loading.set(true); this.error.set(null);
+    if (run) {
+      this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${run.run_id}`, 'STOP', '', 'info', { stopType });
+      try {
+        const response = await this.apiService.stopRun(this.baseUrl(), run.run_id, stopType);
+        this.pushFeed(`运行停止 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'success', response);
+        await this.refreshRunSnapshot(run.run_id);
+      } catch (error) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`运行停止失败 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'error', { error: errorSummary(error) });
+      } finally { this.loading.set(false); }
+    } else {
+      const swarmName = this.selectedSwarmName();
+      if (!swarmName) { this.loading.set(false); return; }
+      this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${swarmName}`, 'STOP', '', 'info', { stopType });
+      try {
+        const response = await this.apiService.stopSwarmRuns(this.baseUrl(), swarmName, stopType);
+        this.pushFeed(`Swarm 停止 · ${swarmName} (${response.count} 个运行)`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs/stop`), 'success', response);
+      } catch (error) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`Swarm 停止失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs/stop`), 'error', { error: errorSummary(error) });
+      } finally { this.loading.set(false); }
+    }
+  }
+
   async runAgentRound(): Promise<void> {
     const swarmName = this.selectedSwarmName();
     const agentId = this.selectedAgentId();
@@ -2258,7 +2238,7 @@ this.loadLogs(),
     };
   }
 
-  private pushFeed(title: string, method: string, endpoint: string, tone: FeedItem['tone'], payload: unknown, meta?: string): void {
+  pushFeed(title: string, method: string, endpoint: string, tone: FeedItem['tone'], payload: unknown, meta?: string): void {
     const item: FeedItem = { id: this.nextFeedId(), title, endpoint, method, tone, timestamp: shortTime(), payload: normalizeJsonValue(payload), meta };
     this.responseFeed.set([item, ...this.responseFeed()].slice(0, 14));
   }
@@ -2272,6 +2252,14 @@ this.loadLogs(),
     this.eventSource = source;
     source.onopen = () => { this.streamState.set('open'); this.streamNote.set(`实时事件流已开启: ${run.run_id}`); };
     source.onerror = () => {
+      // If the run has already finished, treat stream closure as normal rather than error.
+      const currentRun = this.activeRun();
+      if (currentRun?.run_id === run.run_id && (currentRun.status === 'completed' || currentRun.status === 'failed')) {
+        this.streamState.set('closed');
+        this.streamNote.set(`运行已结束: ${run.run_id}`);
+        this.closeStream();
+        return;
+      }
       this.streamState.set('error');
       this.streamNote.set(`实时事件流已中断: ${run.run_id}`);
       if (this.autoReconnect()) {
@@ -2294,9 +2282,23 @@ this.loadLogs(),
     const refreshOnEvent = () => {
       this.scheduleRunRefresh(run.run_id);
     };
-    for (const eventName of ['run.started', 'node.started', 'branch.started', 'run.completed', 'run.failed', 'node.failed', 'branch.failed']) {
+    for (const eventName of ['run.started', 'node.started', 'branch.started', 'node.failed', 'branch.failed']) {
       source.addEventListener(eventName, refreshOnEvent);
     }
+    // Terminal events: close stream gracefully and clear any stale error.
+    source.addEventListener('run.completed', () => {
+      refreshOnEvent();
+      this.error.set(null);
+      this.streamState.set('closed');
+      this.streamNote.set(`运行已完成: ${run.run_id}`);
+      this.closeStream();
+    });
+    source.addEventListener('run.failed', () => {
+      refreshOnEvent();
+      this.streamState.set('closed');
+      this.streamNote.set(`运行失败: ${run.run_id}`);
+      this.closeStream();
+    });
   }
 
   private scheduleRunRefresh(runId: string): void {

@@ -230,23 +230,26 @@ def _deserialize_node(payload: Dict[str, Any]) -> Node:
     common_kwargs = {
         "node_id": int(payload["node_id"]),
         "node_name": str(payload.get("node_name", "")),
-        "next_node_ids": [int(item) for item in payload.get("next_node_ids", []) or []],
         "metadata": dict(payload.get("metadata", {}) or {}),
     }
+    next_node_ids = [int(item) for item in payload.get("next_node_ids", []) or []]
     if node_type == "AgentNode":
-        return AgentNode(
+        node = AgentNode(
             **common_kwargs,
             blueprint_ref=str(payload.get("blueprint_ref") or payload.get("agent_id") or ""),
             additional_prompt=payload.get("additional_prompt"),
             instance_policy=str(payload.get("instance_policy", "singleton") or "singleton"),
         )
+        node.next_node_ids = next_node_ids
+        return node
     if node_type == "ToolNode":
         return ToolNode(
             **common_kwargs,
+            next_node_ids=next_node_ids,
             tool_name=str(payload.get("tool_name", "")),
             input_mapping=dict(payload.get("input_mapping", {}) or {}),
         )
-    return Node(**common_kwargs)
+    return Node(**common_kwargs, next_node_ids=next_node_ids)
 
 
 def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:

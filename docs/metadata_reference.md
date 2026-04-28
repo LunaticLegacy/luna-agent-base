@@ -131,7 +131,26 @@
 
 - 类型：`int`
 - 语义：
-  - 该 agent 当前上下文中的消息条数
+  - 该 agent 当前上下文中**所有**消息的条数
+  - 包括 active window 中的消息，以及所有 compressed blocks 中归档的原始消息
+  - 计算公式：`len(active_messages) + sum(len(b.archived_messages) for b in compressed_blocks)`
+
+### `compressed_blocks`
+
+- 类型：运行时内部结构，不直接暴露在 metadata 中
+- 语义：
+  - `ManagedAgentContext` 维护的压缩块列表
+  - 每条压缩块包含 `summary`、`keywords`、`participants` 和归档的完整 `messages`
+  - 通过 `recall_context` 工具可按查询召回归档内容
+
+### `llm_input`（事件字段，非 metadata）
+
+- 来源：`node.completed` 事件的 `data.llm_input`
+- 语义：
+  - 仅对 `AgentNode` 存在
+  - 记录该节点实际发送给 LLM 的完整输入：`system` prompt、`user` message、`prev_messages`、绑定的 `tools`
+  - 是调试和审计 agent 行为的核心证据
+  - 详见 [事件流协议](./event_stream_protocol.md)
 
 ### 其他 agent-local 字段
 

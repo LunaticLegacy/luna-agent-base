@@ -17,10 +17,10 @@ import type {
   MemoryCatalogItem,
   MetricsResponse,
   TaskListResponse,
-  TaskGraphResponse,
   ReadyResponse,
   RunSnapshot,
   RunStartResponse,
+  RunStopResponse,
   RunSwarmRequest,
   RunSwarmResponse,
   SettingsResponse,
@@ -128,15 +128,6 @@ export class ApiService {
   ): Promise<TaskListResponse> {
     return firstValueFrom(
       this.http.post<TaskListResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/tasks/search`), query)
-    );
-  }
-
-  getTaskGraph(
-    baseUrl: string,
-    swarmName: string
-  ): Promise<TaskGraphResponse> {
-    return firstValueFrom(
-      this.http.get<TaskGraphResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/task-graph`))
     );
   }
 
@@ -326,6 +317,24 @@ export class ApiService {
     return firstValueFrom(
       this.http.get<{ success: boolean; run: RunSnapshot }>(
         joinUrl(baseUrl, `/runs/${encodeURIComponent(runId)}`)
+      )
+    );
+  }
+
+  stopRun(baseUrl: string, runId: string, stopType: 'soft' | 'hard' = 'soft'): Promise<RunStopResponse> {
+    return firstValueFrom(
+      this.http.post<RunStopResponse>(
+        joinUrl(baseUrl, `/runs/${encodeURIComponent(runId)}/stop`),
+        { stop_type: stopType }
+      )
+    );
+  }
+
+  stopSwarmRuns(baseUrl: string, swarmName: string, stopType: 'soft' | 'hard' = 'soft'): Promise<{ success: boolean; swarm: string; stop_type: string; stopped: Array<{ run_id: string; status: string }>; count: number }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; swarm: string; stop_type: string; stopped: Array<{ run_id: string; status: string }>; count: number }>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/runs/stop`),
+        { stop_type: stopType }
       )
     );
   }

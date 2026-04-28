@@ -32,6 +32,7 @@ class RunRecord:
     error: Optional[str] = None
     events: list[Dict[str, Any]] = field(default_factory=list)
     _done: bool = False
+    _stop_type: Optional[str] = None
     _condition: threading.Condition = field(default_factory=threading.Condition, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -87,6 +88,13 @@ class RunRecord:
                 self.final_state = to_jsonable(data["state_snapshot"])
                 self.current_state = dict(self.final_state)
             self._done = True
+        elif event_type == "run.stopped":
+            self.status = "stopped"
+            self.finished_at = self.finished_at or _utc_now_iso()
+            if data.get("state_snapshot") is not None:
+                self.final_state = to_jsonable(data["state_snapshot"])
+                self.current_state = dict(self.final_state)
+            self._done = True
         elif event_type == "run.failed":
             self.status = "failed"
             self.finished_at = self.finished_at or _utc_now_iso()
@@ -110,6 +118,22 @@ class RunRecord:
 
         if timestamp is not None and self.started_at is None and event_type in {"run.started", "node.started"}:
             self.started_at = _utc_now_iso()
+
+    def stop(self, stop_type: str) -> bool:
+        """Request a soft or hard stop for this run.
+
+        The actual stopping is handled by the engine checking the core's stop event.
+        This method records the intent and updates status.
+        """
+        with self._condition:
+            if self._done:
+                return False
+            self._stop_type = stop_type
+            if stop_type == "hard":
+                self.status = "stopping_hard"
+            else:
+                self.status = "stopping_soft"
+            return True
 
     def snapshot(self) -> Dict[str, Any]:
         """Return a JSON-ready view of the run."""

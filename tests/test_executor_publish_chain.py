@@ -41,8 +41,10 @@ class DummyCore:
     def has_agent_blueprint(self, blueprint_ref: str) -> bool:
         return blueprint_ref in self.agent_blueprints
 
-    def acquire_agent_instance(self, blueprint_ref: str, *, instance_policy: str = "singleton"):
-        if instance_policy == "per_call":
+    def acquire_agent_instance(
+        self, blueprint_ref: str, *, instance_policy: str = "singleton", parallel_context: bool = False
+    ):
+        if instance_policy == "per_call" or parallel_context:
             prototype = self.agent_blueprints[blueprint_ref]
             clone = getattr(prototype, "clone_for_runtime", None)
             if callable(clone):
@@ -59,15 +61,15 @@ class DummyCore:
         if snapshot:
             self.swarm_cognitive_graph = CognitiveGraph.from_dict(snapshot)
 
-    def get_cognitive_graph_export(self, query=None, max_nodes=20) -> str:
+    def get_cognitive_graph_export(self, query=None, max_nodes=None) -> str:
         return ""
 
 
 def build_publish_graph() -> ExecutionGraph:
     graph = ExecutionGraph("publish")
-    graph.add_node(AgentNode(node_id=18, node_name="writer", agent_id="writer", next_node_ids=[19]))
-    graph.add_node(AgentNode(node_id=19, node_name="reviewer", agent_id="reviewer", next_node_ids=[20, 18]))
-    graph.add_node(AgentNode(node_id=20, node_name="publisher", agent_id="publisher", next_node_ids=[]))
+    graph.add_node(AgentNode(node_id=18, node_name="writer", agent_id="writer"))
+    graph.add_node(AgentNode(node_id=19, node_name="reviewer", agent_id="reviewer"))
+    graph.add_node(AgentNode(node_id=20, node_name="publisher", agent_id="publisher"))
     graph.add_edge(18, 19, label="review", priority=10)
     graph.add_edge(19, 20, label="approve", condition="approve", priority=20)
     graph.add_edge(19, 18, label="revise", condition="revise", priority=10)
@@ -91,10 +93,12 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(build_publish_graph(), core, "mission")
 
-        self.assertEqual(core.agents["publisher"].user_messages, [draft])
-        self.assertEqual(state.metadata["verdict"], "approve")
+        # Without envelope mode, agent receives the raw payload directly
+        publisher_input = core.agents["publisher"].user_messages[0]
+        self.assertEqual(publisher_input, "mission")
+        self.assertEqual(state.metadata["control"]["19"]["verdict"], "approve")
         self.assertEqual(state.metadata["approved_report"], draft)
-        self.assertEqual(state.metadata["draft_report"], draft)
+        self.assertEqual(state.metadata["outputs"]["18"]["content"], draft)
 
     async def test_reviewer_revise_can_send_revision_payload_back_to_writer(self) -> None:
         core = DummyCore(
@@ -110,8 +114,11 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(build_publish_graph(), core, "mission")
 
-        self.assertEqual(core.agents["writer"].user_messages[1], "Please tighten evidence.")
-        self.assertEqual(core.agents["publisher"].user_messages, ["REVISED DRAFT"])
+        # Without envelope mode, agents receive the raw payload directly
+        writer_input = core.agents["writer"].user_messages[1]
+        self.assertEqual(writer_input, "mission")
+        publisher_input = core.agents["publisher"].user_messages[0]
+        self.assertEqual(publisher_input, "mission")
         self.assertEqual(state.metadata["approved_report"], "REVISED DRAFT")
 
     async def test_publisher_final_answer_becomes_file_writer_payload(self) -> None:
@@ -124,7 +131,7 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
                 return {"written": True}
 
         graph = ExecutionGraph("publish-final-answer")
-        graph.add_node(AgentNode(node_id=1, node_name="publisher", agent_id="publisher", next_node_ids=[2]))
+        graph.add_node(AgentNode(node_id=1, node_name="publisher", agent_id="publisher"))
         graph.add_node(ToolNode(node_id=2, node_name="file_writer", tool_name="file_writer", next_node_ids=[]))
         graph.add_edge(1, 2)
         graph.set_entry(1)
@@ -147,9 +154,9 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_cannot_route_to_non_outgoing_node(self) -> None:
         graph = ExecutionGraph("route-policy")
-        graph.add_node(AgentNode(node_id=1, node_name="router", agent_id="router", next_node_ids=[2]))
-        graph.add_node(AgentNode(node_id=2, node_name="allowed", agent_id="allowed", next_node_ids=[]))
-        graph.add_node(AgentNode(node_id=3, node_name="blocked", agent_id="blocked", next_node_ids=[]))
+        graph.add_node(AgentNode(node_id=1, node_name="router", agent_id="router"))
+        graph.add_node(AgentNode(node_id=2, node_name="allowed", agent_id="allowed"))
+        graph.add_node(AgentNode(node_id=3, node_name="blocked", agent_id="blocked"))
         graph.add_edge(1, 2)
         graph.set_entry(1)
         graph.set_exit(2)
@@ -176,13 +183,10 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         graph = ExecutionGraph("per-call")
         graph.add_node(
-            AgentNode(
-                node_id=1,
+            AgentNode(node_id=1,
                 node_name="writer",
                 blueprint_ref="writer",
-                instance_policy="per_call",
-                next_node_ids=[],
-            )
+                instance_policy="per_call")
         )
         graph.set_entry(1)
         graph.set_exit(1)
@@ -191,7 +195,9 @@ class ExecutorPublishChainTest(unittest.IsolatedAsyncioTestCase):
 
         state = await GraphExecutor().execute(graph, core, "mission")
 
-        self.assertEqual(state.payload, "draft")
+        # Payload is immutable; agent output lives in metadata.outputs
+        self.assertEqual(state.payload, "mission")
+        self.assertEqual(state.metadata["outputs"]["1"]["content"], "draft")
         self.assertEqual(prototype.clone_count, 1)
 
 

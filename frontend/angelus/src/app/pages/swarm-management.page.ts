@@ -1,15 +1,17 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
+import { parse as parseMarkdown } from 'marked';
 import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
 import { THOUGHT_NODE_LEGEND_ENTRIES, THOUGHT_RELATION_LEGEND_ENTRIES } from '../thought-graph.taxonomy';
-import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent } from '../shared';
+import { JsonViewerComponent } from '../json-viewer.component';
+import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent, ModalComponent } from '../shared';
 
 @Component({
   selector: 'app-swarm-management-page',
   standalone: true,
-  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent, StatCardGridComponent, TabBarComponent, PanelCardComponent, EmptyStateComponent],
+  imports: [CommonModule, GraphViewerComponent, ThoughtGraphViewerComponent, StatCardGridComponent, TabBarComponent, PanelCardComponent, EmptyStateComponent, ModalComponent, JsonViewerComponent],
   template: `
     <div class="page">
       <!-- Header (kept inline due to custom status badge inline with title) -->
@@ -41,6 +43,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
               </div>
             }
           </div>
+          <button class="btn btn-danger" (click)="state.stopRun('soft')" [disabled]="state.loading()">
+            停止运行
+          </button>
+          <button class="btn btn-danger" (click)="state.stopRun('hard')" [disabled]="state.loading()">
+            强制停止
+          </button>
           <button class="btn btn-secondary" (click)="state.activeRun() && state.startRun()" [disabled]="!state.activeRun()">
             重新启动结构
           </button>
@@ -192,7 +200,9 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     </td>
                     <td>{{ state.activeRun()?.started_at || '刚刚' }}</td>
                     <td>
-                      <button class="btn btn-sm" (click)="state.startRun()">启动结构</button>
+                      <button class="btn btn-sm btn-danger" (click)="state.stopRun('soft')" [disabled]="state.loading()">停止</button>
+                      <button class="btn btn-sm btn-danger" (click)="state.stopRun('hard')" [disabled]="state.loading()">强制停止</button>
+                      <button class="btn btn-sm" (click)="state.startRun()" [disabled]="state.loading()">启动结构</button>
                     </td>
                   </tr>
                 } @else {
@@ -312,20 +322,123 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                   <app-empty-state message="当前没有可展示的运行轨迹。"></app-empty-state>
                 }
               </app-panel-card>
-              <app-panel-card title="事件列表" [badge]="state.selectedExecutionTrace()?.events?.length ?? 0" [noPadding]="true">
+              <app-panel-card title="事件列表" [badge]="state.selectedExecutionTrace()?.events?.length ?? 0" [hasActions]="true" [noPadding]="true">
+                <div actions>
+                  <button class="btn btn-sm" (click)="copyAllEvents()">复制全部</button>
+                </div>
                 <div class="trace-event-list">
                   @for (event of state.selectedExecutionTrace()?.events ?? []; track $index) {
-                    <div class="trace-event-item">
+                    <div class="trace-event-item compact" (click)="selectedEvent.set(event)">
                       <div class="trace-event-head">
-                        <span class="trace-event-index mono">#{{ $index + 1 }}</span>
-                        <span class="trace-event-title">{{ traceEventLabel(event) }}</span>
+                        <div class="trace-event-head-left">
+                          <span class="trace-event-index mono">#{{ $index + 1 }}</span>
+                          <span class="trace-event-title">{{ traceEventLabel(event) }}</span>
+                          <span class="trace-event-meta">{{ traceEventMeta(event) }}</span>
+                        </div>
+                        <div class="trace-event-actions">
+                          <span class="trace-event-badge pill {{ traceEventStatus(event) }}">{{ traceEventStatus(event) }}</span>
+                          <button class="btn btn-sm btn-ghost" (click)="$event.stopPropagation(); copyEvent(event)">复制</button>
+                        </div>
                       </div>
-                      <pre class="trace-event-body">{{ event | json }}</pre>
                     </div>
                   } @empty {
                     <app-empty-state message="当前没有事件可展示。"></app-empty-state>
                   }
                 </div>
+
+                <app-modal
+                  [open]="!!selectedEvent()"
+                  [title]="'事件详情 #' + selectedEventIndex()"
+                  size="wide"
+                  (close)="selectedEvent.set(null)">
+                  @if (selectedEvent(); as ev) {
+                    <div class="trace-modal-body">
+                      <div class="trace-modal-meta">
+                        <span class="trace-modal-meta-item">类型: {{ ev['event_type'] || ev['type'] || '—' }}</span>
+                        <span class="trace-modal-meta-item">节点: {{ ev['node_name'] || ev['node_id'] || '—' }}</span>
+                        <span class="trace-modal-meta-item">状态: {{ ev['status'] || '—' }}</span>
+                      </div>
+                      @if (traceSummaryText(ev); as summary) {
+                        <div class="trace-summary-line">{{ summary }}</div>
+                      }
+                      <div class="event-detail-tabs">
+                        <button
+                          class="event-detail-tab"
+                          [class.active]="eventDetailTab() === 'structured'"
+                          (click)="eventDetailTab.set('structured')">
+                          结构化视图
+                        </button>
+                        @if (hasLlmInput(ev)) {
+                          <button
+                            class="event-detail-tab"
+                            [class.active]="eventDetailTab() === 'llm_input'"
+                            (click)="eventDetailTab.set('llm_input')">
+                            LLM 输入
+                          </button>
+                        }
+                        <button
+                          class="event-detail-tab"
+                          [class.active]="eventDetailTab() === 'raw'"
+                          (click)="eventDetailTab.set('raw')">
+                          原始信息
+                        </button>
+                      </div>
+                      <div class="event-detail-content">
+                        @switch (eventDetailTab()) {
+                          @case ('structured') {
+                            <div class="trace-modal-col-body">
+                              <app-json-viewer [value]="ev"></app-json-viewer>
+                            </div>
+                          }
+                          @case ('llm_input') {
+                            <div class="trace-modal-col-body llm-input-panel">
+                              @if (ev['data']?.['llm_input']; as li) {
+                                @if (li['system']) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">System Prompt</div>
+                                    <div class="llm-input-block markdown-body" [innerHTML]="renderMarkdown(li['system'])"></div>
+                                  </div>
+                                }
+                                @if (li['user']) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">User Message</div>
+                                    <div class="llm-input-block markdown-body" [innerHTML]="renderMarkdown(li['user'])"></div>
+                                  </div>
+                                }
+                                @if (li['prev_messages']?.length) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">Previous Messages ({{ li['prev_messages'].length }})</div>
+                                    <div class="llm-message-list">
+                                      @for (msg of li['prev_messages']; track $index) {
+                                        <div class="llm-message-item">
+                                          <span class="llm-message-role">{{ msg['role'] }}</span>
+                                          <div class="llm-message-content markdown-body" [innerHTML]="renderMarkdown(msg['content'])"></div>
+                                        </div>
+                                      }
+                                    </div>
+                                  </div>
+                                }
+                                @if (li['tools']?.length) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">Tools ({{ li['tools'].length }})</div>
+                                    <div class="llm-tool-list">
+                                      @for (tool of li['tools']; track $index) {
+                                        <div class="llm-tool-chip">{{ tool['function']?.['name'] || tool['type'] || 'tool' }}</div>
+                                      }
+                                    </div>
+                                  </div>
+                                }
+                              }
+                            </div>
+                          }
+                          @default {
+                            <pre class="trace-event-body-full">{{ ev | json }}</pre>
+                          }
+                        }
+                      </div>
+                    </div>
+                  }
+                </app-modal>
               </app-panel-card>
             </div>
           </div>
@@ -1040,8 +1153,9 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       flex: 1 1 auto;
     }
     .trace-event-list {
-      max-height: 100%;
-      overflow: auto;
+      max-height: calc(100vh - 340px);
+      min-height: 200px;
+      overflow-y: auto;
       padding: 12px 14px 14px;
       display: grid;
       gap: 10px;
@@ -1055,8 +1169,29 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
     .trace-event-head {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 10px;
       margin-bottom: 8px;
+    }
+    .trace-event-head-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid rgba(148,163,184,0.15);
+      color: #94a3b8;
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-ghost:hover {
+      background: rgba(139,92,246,0.10);
+      border-color: rgba(139,92,246,0.30);
+      color: #c4b5fd;
     }
     .trace-event-index {
       color: #94a3b8;
@@ -1067,6 +1202,29 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       font-size: 13px;
       font-weight: 600;
     }
+    .trace-event-item.compact {
+      cursor: pointer;
+      transition: background 0.15s;
+      padding: 8px 12px;
+    }
+    .trace-event-item.compact:hover {
+      background: rgba(139,92,246,0.08);
+    }
+    .trace-event-meta {
+      color: #64748b;
+      font-size: 12px;
+    }
+    .trace-event-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .trace-event-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      text-transform: capitalize;
+    }
     .trace-event-body {
       margin: 0;
       color: #cbd5e1;
@@ -1074,6 +1232,213 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+    .trace-modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+      flex: 1;
+    }
+    .trace-modal-meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .trace-modal-meta-item {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .event-detail-tabs {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(148,163,184,0.08);
+      padding: 0 12px;
+    }
+    .event-detail-tab {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .event-detail-tab:hover {
+      color: #e2e8f0;
+    }
+    .event-detail-tab.active {
+      color: #f8fafc;
+      border-bottom-color: #8B5CF6;
+    }
+    .event-detail-content {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      background: #0B0F19;
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 10px;
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+    }
+    .trace-modal-col-body {
+      flex: 1;
+      overflow: auto;
+      padding: 10px;
+      min-height: 0;
+      min-width: 0;
+    }
+    .trace-event-body-full {
+      margin: 0;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: transparent;
+      padding: 10px;
+      overflow: auto;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
+    }
+    .trace-summary-line {
+      font-size: 11px;
+      color: #94a3b8;
+      padding: 0 12px 6px;
+      flex-shrink: 0;
+    }
+    .llm-input-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .llm-input-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .llm-input-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #a78bfa;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .llm-input-block {
+      margin: 0;
+      padding: 8px 10px;
+      background: rgba(139,92,246,0.06);
+      border: 1px solid rgba(139,92,246,0.12);
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow: auto;
+    }
+    .llm-message-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .llm-message-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 6px 8px;
+      background: rgba(148,163,184,0.04);
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 6px;
+    }
+    .llm-message-role {
+      font-size: 10px;
+      font-weight: 600;
+      color: #60a5fa;
+      text-transform: uppercase;
+    }
+    .llm-message-content {
+      margin: 0;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: normal;
+      word-break: break-word;
+    }
+    .markdown-body {
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    .markdown-body ::ng-deep h1, .markdown-body ::ng-deep h2, .markdown-body ::ng-deep h3, .markdown-body ::ng-deep h4, .markdown-body ::ng-deep h5, .markdown-body ::ng-deep h6 {
+      margin: 0.5em 0 0.25em;
+      font-weight: 600;
+      color: #f8fafc;
+      line-height: 1.3;
+    }
+    .markdown-body ::ng-deep h1 { font-size: 1rem; }
+    .markdown-body ::ng-deep h2 { font-size: 0.92rem; }
+    .markdown-body ::ng-deep h3, .markdown-body ::ng-deep h4, .markdown-body ::ng-deep h5, .markdown-body ::ng-deep h6 { font-size: 0.85rem; }
+    .markdown-body ::ng-deep p { margin: 0.35em 0; color: #cbd5e1; }
+    .markdown-body ::ng-deep ul, .markdown-body ::ng-deep ol { margin: 0.35em 0; padding-left: 1.2em; }
+    .markdown-body ::ng-deep li { margin: 0.15em 0; color: #cbd5e1; }
+    .markdown-body ::ng-deep code {
+      background: rgba(139, 123, 255, 0.10);
+      color: #A090FF;
+      padding: 0.15em 0.35em;
+      border-radius: 4px;
+      font-size: 0.9em;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    .markdown-body ::ng-deep pre {
+      background: rgba(10, 14, 26, 0.72);
+      border: 1px solid rgba(148,163,184,0.10);
+      border-radius: 8px;
+      padding: 8px 10px;
+      overflow: auto;
+      margin: 0.4em 0;
+    }
+    .markdown-body ::ng-deep pre code {
+      background: transparent;
+      padding: 0;
+      color: #cbd5e1;
+    }
+    .markdown-body ::ng-deep blockquote {
+      margin: 0.4em 0;
+      padding-left: 0.8em;
+      border-left: 3px solid rgba(139,92,246,0.35);
+      color: #94a3b8;
+    }
+    .markdown-body ::ng-deep hr {
+      border: none;
+      border-top: 1px solid rgba(148,163,184,0.12);
+      margin: 0.6em 0;
+    }
+    .markdown-body ::ng-deep a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    .markdown-body ::ng-deep a:hover {
+      text-decoration: underline;
+    }
+    .llm-tool-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .llm-tool-chip {
+      font-size: 11px;
+      padding: 3px 8px;
+      background: rgba(16,185,129,0.10);
+      border: 1px solid rgba(16,185,129,0.20);
+      color: #10B981;
+      border-radius: 999px;
     }
     .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
@@ -1149,6 +1514,14 @@ export class SwarmManagementPageComponent {
   readonly tabs = ['概览', 'Agent 图', '执行轨迹', '思维图谱', 'Agents', '任务', '知识', '记忆', '设置'];
   readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
   readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
+  readonly selectedEvent = signal<any>(null);
+  readonly eventDetailTab = signal<'structured' | 'raw' | 'llm_input'>('structured');
+  readonly selectedEventIndex = computed(() => {
+    const events = this.state.selectedExecutionTrace()?.events ?? [];
+    const ev = this.selectedEvent();
+    const idx = events.indexOf(ev);
+    return idx >= 0 ? String(idx + 1) : '';
+  });
 
   async loadSwarm(): Promise<void> {
     const source = window.prompt('输入要加载的 Swarm 路径或名称');
@@ -1170,12 +1543,100 @@ export class SwarmManagementPageComponent {
   traceEventLabel(event: unknown): string {
     if (event && typeof event === 'object') {
       const record = event as Record<string, unknown>;
-      const label = record['type'] ?? record['event'] ?? record['kind'];
+      const label = record['event_type'] ?? record['type'] ?? record['event'] ?? record['kind'];
       if (typeof label === 'string' && label.trim()) {
         return label;
       }
     }
     return 'event';
+  }
+
+  traceEventMeta(event: unknown): string {
+    if (!event || typeof event !== 'object') return '';
+    const record = event as Record<string, unknown>;
+    const parts: string[] = [];
+    const ts = record['timestamp'];
+    if (typeof ts === 'number') {
+      parts.push(new Date(ts * 1000).toLocaleTimeString('zh-CN'));
+    } else if (typeof ts === 'string') {
+      parts.push(ts);
+    }
+    const nodeName = record['node_name'];
+    if (typeof nodeName === 'string') {
+      parts.push(nodeName);
+    }
+    return parts.join(' · ');
+  }
+
+  traceEventStatus(event: unknown): string {
+    if (!event || typeof event !== 'object') return 'info';
+    const record = event as Record<string, unknown>;
+    const status = String(record['status'] || '').toLowerCase();
+    if (status === 'running') return 'running';
+    if (status === 'ok' || status === 'completed' || status === 'success') return 'success';
+    if (status === 'failed' || status === 'error') return 'error';
+    if (status === 'skipped') return 'warn';
+    return 'info';
+  }
+
+  hasLlmInput(event: unknown): boolean {
+    if (!event || typeof event !== 'object') return false;
+    const data = (event as Record<string, unknown>)['data'];
+    if (!data || typeof data !== 'object') return false;
+    return !!(data as Record<string, unknown>)['llm_input'];
+  }
+
+  traceSummaryText(event: unknown): string | null {
+    if (!event || typeof event !== 'object') return null;
+    const data = (event as Record<string, unknown>)['data'];
+    if (!data || typeof data !== 'object') return null;
+    const snapshot = (data as Record<string, unknown>)['state_snapshot'];
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    const summary = (snapshot as Record<string, unknown>)['trace_summary'];
+    if (!summary || typeof summary !== 'object') return null;
+    const length = (summary as Record<string, unknown>)['length'] as number | undefined;
+    const lastNode = (summary as Record<string, unknown>)['last_node_name'] as string | undefined;
+    const lastStatus = (summary as Record<string, unknown>)['last_status'] as string | undefined;
+    if (typeof length !== 'number') return null;
+    const parts: string[] = [`已执行 ${length} 步`];
+    if (lastNode) parts.push(`最后节点: ${lastNode}`);
+    if (lastStatus && lastStatus !== 'ok') parts.push(`状态: ${lastStatus}`);
+    return parts.join(' · ');
+  }
+
+  renderMarkdown(text: unknown): string {
+    if (typeof text !== 'string') return '';
+    try {
+      const html = parseMarkdown(text) as string;
+      return html;
+    } catch {
+      return String(text);
+    }
+  }
+
+  async copyEvent(event: unknown): Promise<void> {
+    const text = typeof event === 'string' ? event : JSON.stringify(event, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      this.state.pushFeed('已复制事件到剪贴板', 'COPY', '', 'success', {});
+    } catch {
+      this.state.pushFeed('复制失败，请手动复制', 'COPY', '', 'error', {});
+    }
+  }
+
+  async copyAllEvents(): Promise<void> {
+    const events = this.state.selectedExecutionTrace()?.events ?? [];
+    if (events.length === 0) {
+      this.state.pushFeed('没有可复制的事件', 'COPY', '', 'warn', {});
+      return;
+    }
+    const text = JSON.stringify(events, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      this.state.pushFeed(`已复制全部 ${events.length} 个事件到剪贴板`, 'COPY', '', 'success', { count: events.length });
+    } catch {
+      this.state.pushFeed('复制失败，请手动复制', 'COPY', '', 'error', {});
+    }
   }
 
 }

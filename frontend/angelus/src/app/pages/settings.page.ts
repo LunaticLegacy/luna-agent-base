@@ -26,7 +26,7 @@ import { PageHeaderComponent } from '../shared';
         <div class="form-group">
           <label>后端 API 地址</label>
           <input class="input" [(ngModel)]="apiUrl" placeholder="http://localhost:5000" />
-          <span class="hint">Flask 后端服务地址，保存后立即生效</span>
+          <span class="hint">FastAPI 后端服务地址，保存后立即生效</span>
         </div>
         <div class="form-group">
           <label>API 超时 (秒)</label>

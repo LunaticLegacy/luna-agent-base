@@ -1,6 +1,6 @@
 # 当前 API 结构说明
 
-本文档总结当前项目的 Flask API 形态、返回结构，以及它和 `core/` 运行时之间的关系。
+本文档总结当前项目的 FastAPI 形态、返回结构，以及它和 `core/` 运行时之间的关系。
 
 ## 1. API 总体定位
 
@@ -28,7 +28,7 @@ API 本身不负责：
 
 - 读取 `config.toml`
 - 扫描 `agents/` 下的 swarm 包
-- 创建 Flask app
+- 创建 FastAPI app
 - 注册 health 和 swarm 路由
 
 ## 3. 当前路由
@@ -234,6 +234,37 @@ API 首页信息。它和 `/` 的内容基本一致，但用于统一前后端�
 
 这个接口不会等待图执行结束，而是返回一个 `run_id` 供后续查询和订阅。
 
+### 3.13 `POST /api/swarms/<swarm_name>/runs/stop`
+
+对指定 swarm 的所有活跃 run 发起停止请求。
+
+请求体：
+
+```json
+{
+  "stop_type": "soft"
+}
+```
+
+- `stop_type`：`soft`（允许当前节点完成后停止）或 `hard`（立即终止）
+
+返回示例：
+
+```json
+{
+  "success": true,
+  "stopped": 2
+}
+```
+
+说明：
+
+- 该接口会遍历该 swarm 下所有 `active_run_ids`，对每个 run 调用 `registry.stop_run()`
+- 如果没有活跃 run，返回 `{"success": true, "stopped": 0}`
+- 前端 stop 按钮在两种场景下都会调用此接口：
+  - 当没有 `activeRun` 时，直接调用 swarm-level stop
+  - 当有 `activeRun` 时，优先按 `run_id` 停止，失败时回退到 swarm-level stop
+
 ### 3.11 `GET /api/runs/<run_id>`
 
 查询一个异步 run session 的当前状态。
@@ -307,7 +338,7 @@ SSE 事件体是 JSON 字符串，前端可用来实时高亮当前节点、更�
 
 ## 5. 运行时绑定关系
 
-当前 Flask app 会把运行时注册表放到：
+当前 FastAPI app 会把运行时注册表放到：
 
 - `app.extensions["angelus_runtime"]`
 
@@ -327,7 +358,7 @@ API 层只负责调用 runtime，不直接执行业务逻辑。
 
 典型流程是：
 
-1. Flask 路由接收请求
+1. FastAPI 路由接收请求
 2. 根据 swarm 名称找到已加载运行时
 3. 调用 `ExecutionGraph.run(...)` 或 `Agent.round_call(...)`
 4. 把结果转成 JSON 返回

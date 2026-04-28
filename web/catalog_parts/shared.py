@@ -205,7 +205,12 @@ def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str
                 entry["executions"] += 1
                 entry["last_started"] = timestamp or entry["last_started"]
                 entry["last_seen"] = timestamp or entry["last_seen"]
-                entry["last_input"] = data.get("input_payload", entry["last_input"])
+                input_payload = data.get("input_payload")
+                if input_payload is None:
+                    state_snapshot = data.get("state_snapshot", {})
+                    payload = state_snapshot.get("payload") if isinstance(state_snapshot, dict) else None
+                    input_payload = payload
+                entry["last_input"] = input_payload or entry["last_input"]
                 entry["last_status"] = "running"
                 if isinstance(event.get("timestamp"), (int, float)):
                     active_starts[int(node_id)] = float(event["timestamp"])
@@ -219,7 +224,13 @@ def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str
             elif event_type == "node.completed":
                 entry["completed"] += 1
                 entry["last_seen"] = timestamp or entry["last_seen"]
-                entry["last_output"] = data.get("output_payload", entry["last_output"])
+                output_payload = data.get("output_payload")
+                if output_payload is None:
+                    state_snapshot = data.get("state_snapshot", {})
+                    metadata = state_snapshot.get("metadata", {}) if isinstance(state_snapshot, dict) else {}
+                    outputs = metadata.get("outputs", {}) if isinstance(metadata, dict) else {}
+                    output_payload = outputs.get(str(node_id)) if node_id is not None else None
+                entry["last_output"] = output_payload or entry["last_output"]
                 entry["last_status"] = "success"
                 if isinstance(event.get("timestamp"), (int, float)):
                     start_ts = active_starts.pop(int(node_id), None)

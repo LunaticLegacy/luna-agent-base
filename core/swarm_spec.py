@@ -55,6 +55,8 @@ class AgentBlueprint:
     prompt_file: Optional[str] = None
     prompt_text: Optional[str] = None
     tools: List[str] = field(default_factory=list)
+    tool_execution_mode: str = "internal"
+    source_file: Optional[str] = None
 
 
 @dataclass
@@ -326,6 +328,8 @@ def _load_module_from_path(path: Path) -> ModuleType:
         raise SwarmLoaderError(f"Unable to load module from {path}")
 
     module = importlib.util.module_from_spec(spec)
+    import sys
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -377,6 +381,8 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
         prompt_file=raw.get("prompt_file"),
         prompt_text=raw.get("prompt_text"),
         tools=tools,
+        tool_execution_mode=str(raw.get("tool_execution_mode", "internal")).strip(),
+        source_file=str(source),
     )
 
 

@@ -190,12 +190,33 @@ def _load_module_from_path(path: Path):
     if not path.exists():
         raise SwarmLoaderError(f"Python file not found: {path}")
 
-    module_name = f"angelus_swarm_{path.parent.name}_{path.stem}"
+    parent = path.parent
+    package_name = f"angelus_swarm_{parent.name}"
+    init_path = parent / "__init__.py"
+
+    # If the file lives inside a package directory, register the parent package
+    # so that relative imports (e.g. ``from .common import ...``) work.
+    if init_path.exists() and package_name not in sys.modules:
+        pkg_spec = importlib.util.spec_from_file_location(
+            package_name, str(init_path), submodule_search_locations=[str(parent)]
+        )
+        if pkg_spec is not None:
+            pkg = importlib.util.module_from_spec(pkg_spec)
+            sys.modules[package_name] = pkg
+            if pkg_spec.loader is not None:
+                pkg_spec.loader.exec_module(pkg)
+
+    if init_path.exists():
+        module_name = f"{package_name}.{path.stem}"
+    else:
+        module_name = f"angelus_swarm_{parent.name}_{path.stem}"
+
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise SwarmLoaderError(f"Unable to load module from {path}")
 
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -374,6 +395,7 @@ def _build_llm_handler(
     blueprint: AgentBlueprint,
     backends: Sequence[LLMBackendConfig],
     default_backend_name: Optional[str],
+    limiter: Optional[Any] = None,
 ) -> LLMFetcher:
     if blueprint.api_key or blueprint.model:
         return LLMFetcher(
@@ -381,6 +403,7 @@ def _build_llm_handler(
             api_key=blueprint.api_key,
             model=blueprint.model,
             provider=blueprint.provider,
+            limiter=limiter,
         )
 
     if not backends:
@@ -393,12 +416,12 @@ def _build_llm_handler(
             raise SwarmLoaderError(
                 f"Agent '{blueprint.agent_id}' references unknown backend '{blueprint.backend_name}'."
             )
-        return LLMFetcher(backends=backends, default_backend=blueprint.backend_name)
+        return LLMFetcher(backends=backends, default_backend=blueprint.backend_name, limiter=limiter)
 
     if default_backend_name and default_backend_name in {backend.name for backend in backends}:
-        return LLMFetcher(backends=backends, default_backend=default_backend_name)
+        return LLMFetcher(backends=backends, default_backend=default_backend_name, limiter=limiter)
 
-    return LLMFetcher(backends=backends)
+    return LLMFetcher(backends=backends, limiter=limiter)
 
 
 def _resolve_workspace_defaults(package_path: Path, manifest: SwarmManifest) -> tuple[str, Path]:

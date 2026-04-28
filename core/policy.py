@@ -43,7 +43,6 @@ class AgentNode(Node):
         self,
         node_id: int,
         node_name: str,
-        next_node_ids: Optional[List[int]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         blueprint_ref: str = "",
         additional_prompt: Optional[str] = None,
@@ -53,7 +52,7 @@ class AgentNode(Node):
     ) -> None:
         self.node_id = node_id
         self.node_name = node_name
-        self.next_node_ids = list(next_node_ids or [])
+        self.next_node_ids: List[int] = []
         self.metadata = dict(metadata or {})
         self.blueprint_ref = str(blueprint_ref or agent_id or "").strip()
         self.additional_prompt = additional_prompt
@@ -190,7 +189,6 @@ class ExecutionGraph:
                 AgentNode(
                     node_id=node.node_id,
                     node_name=node.node_name,
-                    next_node_ids=[],
                     metadata=dict(node.metadata),
                     blueprint_ref=node.blueprint_ref,
                     additional_prompt=node.additional_prompt,
@@ -453,7 +451,6 @@ class ExecutionGraph:
                     "        AgentNode(",
                     f"            node_id={node.node_id},",
                     f"            node_name={pformat(node.node_name, sort_dicts=True)},",
-                    f"            next_node_ids={pformat(list(node.next_node_ids), sort_dicts=True)},",
                     f"            metadata={pformat(dict(node.metadata), sort_dicts=True)},",
                     f"            blueprint_ref={pformat(node.blueprint_ref, sort_dicts=True)},",
                     f"            additional_prompt={pformat(node.additional_prompt, sort_dicts=True)},",
@@ -500,10 +497,10 @@ class ExecutionGraph:
         cloned = type(node)(
             node_id=node.node_id,
             node_name=node.node_name,
-            next_node_ids=list(node.next_node_ids),
             metadata=dict(node.metadata),
             **self._node_specific_kwargs(node),
         )
+        cloned.next_node_ids = list(node.next_node_ids)
         return cloned
 
     def _node_specific_kwargs(self, node: Node) -> Dict[str, Any]:

@@ -1,8 +1,0 @@
-[skill]
-name = "orchestrator_prompt"
-capability = "task_orchestration"
-description = "Analyzes user requests and produces structured plans for research or implementation."
-input_schema = { type = "object", properties = { text = { type = "string" } }, required = ["text"] }
-output_schema = { type = "object", properties = { plan = { type = "object" }, content = { type = "string" }, task_mode = { type = "string", enum = ["research", "implementation"] } }, required = ["plan", "content", "task_mode"] }
-requires_tools = []
-parallelizable = false
