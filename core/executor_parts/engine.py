@@ -6,10 +6,13 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ..cognitive import CognitiveEdge, CognitiveNode, CognitiveNodeType, CognitiveRelationType
+from ..errors import RequiredToolFailedError, ToolContractError
+from ..failure_classifier import classify_failure
 from ..fault_tolerance import FailureEvent
 from ..policy import AgentNode, ExecutionGraph, ExecutionStep, ToolNode
 from ..results import ExecutionEvent, ExecutionState
 from ..toodefl import ToolContext
+from ..tool_contract import ToolContractValidator
 from .protocol import ExecutionProtocolMixin
 
 if TYPE_CHECKING:
@@ -77,6 +80,19 @@ class GraphExecutor(ExecutionProtocolMixin):
         if graph.entry_node_id is None:
             raise ValueError("Graph entry node is not set.")
 
+        contract_validator = getattr(core, "tool_contract_validator", None) or ToolContractValidator()
+        contract_report = contract_validator.validate(core, graph)
+        if not contract_report.ok:
+            record = getattr(core, "record_runtime_change", None)
+            if callable(record):
+                record(
+                    action="tool.contract_validation_failed",
+                    subject_kind="graph",
+                    subject_id=getattr(graph, "graph_name", None),
+                    detail=contract_report.to_dict(),
+                )
+            raise ToolContractError(contract_report)
+
         effective_run_id = run_id or uuid.uuid4().hex
         set_current_run_id = getattr(core, "set_current_run_id", None)
         if callable(set_current_run_id):
@@ -115,14 +131,19 @@ class GraphExecutor(ExecutionProtocolMixin):
                     event_sink=event_sink,
                 )
             except Exception as exc:
+                classification = classify_failure(exc)
                 failure = FailureEvent(
                     run_id=effective_run_id,
                     swarm_name=swarm_name or "",
                     graph_revision=self._graph_revision(core),
                     failure_scope="run",
-                    failure_kind=self._classify_failure_kind(exc),
+                    failure_kind=classification.failure_kind,
                     message=str(exc),
                     state_snapshot=state.snapshot(),
+                    recoverable=classification.recoverable,
+                    retryable=classification.retryable,
+                    suggested_action=classification.suggested_action,
+                    detail=classification.detail or {},
                 )
                 regulate_failure = getattr(core, "regulate_failure", None)
                 regulation = None
@@ -255,6 +276,7 @@ class GraphExecutor(ExecutionProtocolMixin):
             routing_payload = input_payload
             next_node_override: Optional[int] = None
             llm_input: Optional[Dict[str, Any]] = None
+            node_completion_status = "ok"
 
             self._emit(
                 event_sink,
@@ -310,6 +332,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                         if tool_execution_mode == "external":
                             remaining_input = agent_input
                             tool_round = 0
+                            tool_policy_repair_rounds = 0
                             while True:
                                 result = await agent.round_call(
                                     rounds=state.rounds,
@@ -341,6 +364,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                                     if tname and callable(get_capabilities):
                                         tool_caps.update(get_capabilities(tname) or set())
                                 tool_context = ToolContext(
+                                    agent_id=node.agent_id,
                                     node_id=node.node_id,
                                     rounds=state.rounds,
                                     workspace_mode=getattr(core, "workspace_mode", "workspace"),
@@ -358,6 +382,114 @@ class GraphExecutor(ExecutionProtocolMixin):
                                     tool_round=tool_round,
                                     context=tool_context,
                                 )
+
+                                if (getattr(batch_result, "summary", {}) or {}).get("failed_required"):
+                                    failure_policy = node.metadata.get("failure_policy") if isinstance(node.metadata, dict) else {}
+                                    all_policy_denied = self._all_failed_tools_are_policy_denied(batch_result)
+                                    all_argument_errors = self._all_failed_tools_have_failure_kind(
+                                        batch_result,
+                                        "tool_argument_error",
+                                    )
+                                    allow_policy_repair = bool(
+                                        isinstance(failure_policy, dict)
+                                        and failure_policy.get("allow_tool_policy_repair")
+                                    )
+                                    allow_tool_call_repair = bool(
+                                        isinstance(failure_policy, dict)
+                                        and failure_policy.get("allow_tool_call_repair")
+                                    )
+                                    max_repair_rounds = self._safe_int(
+                                        failure_policy.get("max_tool_repair_rounds") if isinstance(failure_policy, dict) else None,
+                                        1,
+                                    )
+                                    can_repair_policy = all_policy_denied and allow_policy_repair
+                                    can_repair_args = all_argument_errors and allow_tool_call_repair
+                                    if (can_repair_policy or can_repair_args) and tool_policy_repair_rounds < max_repair_rounds:
+                                        remaining_input = self._format_tool_repair_result(batch_result)
+                                        if can_repair_policy:
+                                            combined_prompt = (
+                                                "Your previous tool call was denied by command_runner safety policy. "
+                                                "Rewrite the tool call at most once using safe single-command calls only. "
+                                                "Do not use shell metacharacters or redirects: ; && || | > < ` $() . "
+                                                "If workspace probing is not essential, stop calling tools and continue from explicit assumptions."
+                                            )
+                                        else:
+                                            combined_prompt = (
+                                                "Your previous tool call had invalid or missing arguments. "
+                                                "Rewrite the tool call at most once using the exact tool schema. "
+                                                "For file_writer, include both path and content. "
+                                                "For file_editor, include path and operation plus the needed edit fields."
+                                            )
+                                        tool_policy_repair_rounds += 1
+                                        tool_round += 1
+                                        continue
+                                    allow_fallback = bool(
+                                        isinstance(failure_policy, dict)
+                                        and failure_policy.get("allow_toolless_fallback")
+                                    )
+                                    if allow_fallback:
+                                        degraded_reason = "tool_policy_denied" if all_policy_denied else "tool_argument_error" if all_argument_errors else "required_tool_failed"
+                                        state.metadata.setdefault("degraded_nodes", {})[str(node.node_id)] = {
+                                            "reason": degraded_reason,
+                                            "tool_batch_summary": getattr(batch_result, "summary", {}),
+                                        }
+                                        node_completion_status = "degraded_ok"
+                                        self._emit(
+                                            event_sink,
+                                            ExecutionEvent(
+                                                run_id=run_id or "",
+                                                swarm_name=swarm_name,
+                                                event_type="node.degraded",
+                                                node_id=node.node_id,
+                                                node_name=node.node_name,
+                                                node_type=node.__class__.__name__,
+                                                rounds=state.rounds,
+                                                status="degraded_ok",
+                                                data={
+                                                    "degraded_reason": degraded_reason,
+                                                    "tool_batch_summary": getattr(batch_result, "summary", {}),
+                                                    "state_snapshot": state.snapshot(),
+                                                },
+                                            ),
+                                        )
+                                        record = getattr(core, "record_runtime_change", None)
+                                        if callable(record):
+                                            record(
+                                                action="node.degraded",
+                                                subject_kind="node",
+                                                subject_id=str(node.node_id),
+                                                detail={
+                                                    "node_id": node.node_id,
+                                                    "failure_kind": degraded_reason,
+                                                    "tool_batch_summary": getattr(batch_result, "summary", {}),
+                                                },
+                                            )
+                                        state.metadata["degraded_reason"] = degraded_reason
+                                        if all_policy_denied:
+                                            original_mode = getattr(agent, "tool_execution_mode", "external")
+                                            try:
+                                                agent.tool_execution_mode = "disabled"
+                                                result = await agent.round_call(
+                                                    rounds=state.rounds,
+                                                    user_message=self._format_tool_policy_repair_result(batch_result),
+                                                    additional_prompt=(
+                                                        "Tool policy denied workspace probing. Continue without tools. "
+                                                        "Produce the best requirement analysis/plan from the user request, "
+                                                        "and explicitly mark any assumptions."
+                                                    ),
+                                                )
+                                            finally:
+                                                agent.tool_execution_mode = original_mode
+                                        else:
+                                            result.assistant_message = self._format_tool_batch_result(batch_result)
+                                        node_result = self._normalize_agent_node_result(
+                                            state,
+                                            node,
+                                            result,
+                                            input_payload=input_payload,
+                                        )
+                                        break
+                                    raise RequiredToolFailedError(batch_result)
 
                                 remaining_input = self._format_tool_batch_result(batch_result)
                                 combined_prompt = (
@@ -409,9 +541,10 @@ class GraphExecutor(ExecutionProtocolMixin):
                         if callable(release_agent_instance):
                             release_agent_instance(blueprint_ref)
                 elif isinstance(node, ToolNode):
-                    tool = core.get_tool(node.tool_name)
+                    tool_name = self._resolve_tool_alias(core, node.tool_name)
+                    tool = core.get_tool(tool_name)
                     get_capabilities = getattr(core, "get_tool_capabilities", None)
-                    capabilities = get_capabilities(node.tool_name) if callable(get_capabilities) else set()
+                    capabilities = get_capabilities(tool_name) if callable(get_capabilities) else set()
                     tool_context = ToolContext(
                         node_id=node.node_id,
                         rounds=state.rounds,
@@ -457,17 +590,35 @@ class GraphExecutor(ExecutionProtocolMixin):
                     release_agent_instance = getattr(core, "release_agent_instance", None)
                     if callable(release_agent_instance):
                         release_agent_instance(node.blueprint_ref)
+                classification = classify_failure(exc)
+                record = getattr(core, "record_runtime_change", None)
+                if callable(record) and classification.failure_kind == "output_parse_error":
+                    record(
+                        action="node.output_parse_error",
+                        subject_kind="node",
+                        subject_id=str(node.node_id),
+                        detail={
+                            "node_id": node.node_id,
+                            "node_name": node.node_name,
+                            "failure_kind": classification.failure_kind,
+                            "detail": classification.detail or {},
+                        },
+                    )
                 failure = FailureEvent(
                     run_id=run_id or "",
                     swarm_name=swarm_name or "",
                     graph_revision=self._graph_revision(core),
                     failure_scope="node",
-                    failure_kind=self._classify_failure_kind(exc),
+                    failure_kind=classification.failure_kind,
                     node_id=node.node_id,
                     node_name=node.node_name,
                     node_type=node.__class__.__name__,
                     message=str(exc),
                     state_snapshot=state.snapshot(),
+                    recoverable=classification.recoverable,
+                    retryable=classification.retryable,
+                    suggested_action=classification.suggested_action,
+                    detail=classification.detail or {},
                 )
                 regulate_failure = getattr(core, "regulate_failure", None)
                 regulation = None
@@ -520,7 +671,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                         node_type=node.__class__.__name__,
                         branch=None,
                         rounds=state.rounds,
-                        status="ok",
+                        status=node_completion_status,
                         data={
                             "state_snapshot": state.snapshot(),
                         },
@@ -562,7 +713,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                         node_type=node.__class__.__name__,
                         branch=None,
                         rounds=state.rounds,
-                        status="ok",
+                        status=node_completion_status,
                         data=node_completed_data,
                     ),
                 )
@@ -672,18 +823,23 @@ class GraphExecutor(ExecutionProtocolMixin):
                                     )
                                     await asyncio.sleep(backoff)
                                 else:
+                                    classification = classify_failure(exc)
                                     failure = FailureEvent(
                                         run_id=run_id or "",
                                         swarm_name=swarm_name or "",
                                         graph_revision=self._graph_revision(core),
                                         failure_scope="branch",
-                                        failure_kind=self._classify_failure_kind(exc),
+                                        failure_kind=classification.failure_kind,
                                         node_id=branch_node_id,
                                         node_name=graph.nodes[branch_node_id].node_name,
                                         node_type=graph.nodes[branch_node_id].__class__.__name__,
                                         message=str(exc),
                                         state_snapshot=branch_state.snapshot(),
                                         branch=str(branch_index),
+                                        recoverable=classification.recoverable,
+                                        retryable=classification.retryable,
+                                        suggested_action=classification.suggested_action,
+                                        detail=classification.detail or {},
                                     )
                                     regulate_failure = getattr(core, "regulate_failure", None)
                                     regulation = None
@@ -838,7 +994,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                             node_type=node.__class__.__name__,
                             branch=None,
                             rounds=state.rounds,
-                            status="ok",
+                            status=node_completion_status,
                             data=node_completed_data,
                         ),
                     )
@@ -860,7 +1016,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                         node_type=node.__class__.__name__,
                         branch=None,
                         rounds=state.rounds,
-                        status="ok",
+                        status=node_completion_status,
                         data=node_completed_data,
                     ),
                 )
@@ -884,7 +1040,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                     node_type=node.__class__.__name__,
                     branch=None,
                     rounds=state.rounds,
-                    status="ok",
+                    status=node_completion_status,
                     data=node_completed_data,
                 ),
             )
@@ -925,20 +1081,7 @@ class GraphExecutor(ExecutionProtocolMixin):
 
     @staticmethod
     def _classify_failure_kind(exc: Exception) -> str:
-        text = f"{exc.__class__.__name__}: {exc}".lower()
-        if "timeout" in text:
-            return "timeout"
-        if "route" in text:
-            return "routing_error"
-        if "mutation" in text:
-            return "mutation_error"
-        if "invariant" in text or "assert" in text:
-            return "invariant_violation"
-        if "tool" in text:
-            return "tool_error"
-        if "agent" in text:
-            return "agent_error"
-        return "unknown"
+        return classify_failure(exc).failure_kind
 
     @staticmethod
     def _format_tool_batch_result(batch_result: Any) -> str:
@@ -965,3 +1108,68 @@ class GraphExecutor(ExecutionProtocolMixin):
             f"{json.dumps(data, ensure_ascii=False, indent=2)}\n"
             "[/TOOL BATCH RESULT]"
         )
+
+    @staticmethod
+    def _format_tool_policy_repair_result(batch_result: Any) -> str:
+        return GraphExecutor._format_tool_repair_result(batch_result)
+
+    @staticmethod
+    def _format_tool_repair_result(batch_result: Any) -> str:
+        data = {
+            "type": "tool_call_repair_required",
+            "message": "A required tool call failed in a recoverable way.",
+            "repair_instruction": (
+                "Rewrite the failed tool call once using the exact tool schema. "
+                "For command_runner policy denials, use safe single-command calls only. "
+                "For file_writer, include path and content."
+            ),
+            "results": [
+                {
+                    "request_id": getattr(result, "request_id", None),
+                    "tool": getattr(result, "tool", None),
+                    "status": getattr(result, "status", None),
+                    "error": getattr(result, "error", None),
+                }
+                for result in getattr(batch_result, "results", []) or []
+            ],
+            "summary": getattr(batch_result, "summary", {}),
+        }
+        return (
+            "[TOOL POLICY DENIED]\n"
+            f"{json.dumps(data, ensure_ascii=False, indent=2)}\n"
+            "[/TOOL POLICY DENIED]"
+        )
+
+    @staticmethod
+    def _all_failed_tools_are_policy_denied(batch_result: Any) -> bool:
+        return GraphExecutor._all_failed_tools_have_failure_kind(batch_result, "tool_policy_denied")
+
+    @staticmethod
+    def _all_failed_tools_have_failure_kind(batch_result: Any, failure_kind: str) -> bool:
+        failed = [
+            result
+            for result in getattr(batch_result, "results", []) or []
+            if getattr(result, "status", None) == "failed"
+        ]
+        if not failed:
+            return False
+        return all(
+            isinstance(getattr(result, "error", None), dict)
+            and getattr(result, "error", {}).get("failure_kind") == failure_kind
+            for result in failed
+        )
+
+    @staticmethod
+    def _safe_int(raw: Any, default: int) -> int:
+        try:
+            return int(raw)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _resolve_tool_alias(core: Any, tool_name: str) -> str:
+        validator = getattr(core, "tool_contract_validator", None)
+        resolver = getattr(validator, "resolve_alias", None)
+        if callable(resolver):
+            return resolver(tool_name)
+        return str(tool_name or "").strip()

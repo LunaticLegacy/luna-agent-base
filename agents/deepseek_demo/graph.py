@@ -9,13 +9,21 @@ def build_graph(core):
         AgentNode(
             node_id=1,
             node_name='requirement_analyst',
-            metadata={'tool_execution_mode': 'external'},
+            metadata={
+                'tool_execution_mode': 'external',
+                'failure_policy': {
+                    'allow_tool_policy_repair': True,
+                    'allow_toolless_fallback': True,
+                    'max_tool_repair_rounds': 1,
+                },
+            },
             agent_id='requirement_analyst',
             additional_prompt=(
-                'Phase: requirement analysis. Understand the user request, read the project '
-                'structure and relevant files, search for related code, and produce a clear '
+                'Phase: requirement analysis. Understand the user request. Only inspect the workspace '
+                'when the user explicitly provides an existing codebase or asks for workspace inspection. '
+                'For greenfield design tasks, do not probe the filesystem; state assumptions and produce a clear '
                 'implementation plan. Output a JSON envelope with content (the plan) and '
-                'tool_requests (file_reader, search, command_runner).'
+                'tool_requests only when workspace context is necessary.'
             ),
         ),
     )
@@ -25,7 +33,13 @@ def build_graph(core):
         AgentNode(
             node_id=2,
             node_name='coder',
-            metadata={'tool_execution_mode': 'external'},
+            metadata={
+                'tool_execution_mode': 'external',
+                'failure_policy': {
+                    'allow_tool_call_repair': True,
+                    'max_tool_repair_rounds': 1,
+                },
+            },
             agent_id='coder',
             additional_prompt=(
                 'Phase: implementation. You are a coding assistant similar to Claude Code. '

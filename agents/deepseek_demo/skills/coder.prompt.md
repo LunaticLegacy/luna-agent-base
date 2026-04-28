@@ -37,28 +37,26 @@ Use the **OpenAI function-calling** tools bound to this agent to request file op
 
 When you need to perform an action, the LLM will generate the appropriate `tool_calls` which the runtime executes and returns results for.
 
-### CRITICAL: Avoid JSON escaping errors with C/C++ code
+### CRITICAL: Tool call argument contracts
 
-C and C++ source code contain many double-quote characters (`"`). If you put raw source code inside arguments, the JSON will be invalid and **no tools will execute**.
+Always use the function-calling interface with valid JSON arguments. Do not output raw JSON envelopes in assistant text.
 
-**Recommended approach — use `command_runner` with heredoc:**
+The runtime automatically injects a `Runtime Tool Contracts` section generated from the currently bound tool schemas. Treat that generated section as the source of truth for tool names, required fields, optional fields, and argument shapes.
 
-Call the `command_runner` tool with:
-```json
-{
-  "command": "cat > include/rvdlnet/core/types.hpp << 'EOF'\n#pragma once\n#include <cstddef>\n...\nEOF"
-}
-```
+Use `command_runner` only for commands such as:
+- creating directories (`mkdir -p ...`)
+- listing or inspecting the workspace (`ls`, `find`, `pwd`)
+- running configure/build/test/lint commands
 
-- Use `<< 'EOF'` (single-quoted delimiter) so the shell does NOT interpret `$` or backticks inside the code.
-- Escape literal backslashes in the shell command as `\\`.
-- Each line of the file content should be separated by `\n` in the JSON string.
+Do **not** use `command_runner` to create or overwrite source files with `cat`, heredoc, `printf`, or shell redirection. Use:
+- `file_writer` for new files
+- `file_editor` for edits to existing files
 
-**If you must use `file_writer`:**
-- Every `"` inside `"content"` MUST be escaped as `\"`.
-- Every `\` inside `"content"` MUST be escaped as `\\`.
-- Newlines should be literal `\n` escape sequences (do NOT use actual newlines inside the JSON string value).
-- **If the file is large or contains many quotes, use `command_runner` with heredoc instead.**
+C and C++ source code contain many double quotes and backslashes. Let the function-calling tool encode the `file_writer` arguments; do not hand-write JSON text in your assistant message.
+
+Do not call `file_writer` with only content, only input, or an unnamed payload. Follow the generated tool contract: every new file must have an explicit workspace-relative path and complete content.
+
+If a build or test command fails, treat the failed command output as diagnostic information: read stdout/stderr, fix the code, and retry. Do not mark the task complete after a failed verification command.
 
 ## Rules
 

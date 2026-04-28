@@ -4,6 +4,8 @@ import copy
 import json
 from typing import Any, Dict, List, Optional
 
+from ..architecture_patch import ArchitecturePatch
+from ..errors import OutputParseError
 from ..policy import AgentNode, ExecutionGraph, ToolNode, _node_is_transient
 from ..results import ExecutionState
 
@@ -144,11 +146,32 @@ class ExecutionProtocolMixin:
     # Parsing / extraction helpers
     # ------------------------------------------------------------------
 
-    def _parse_structured_agent_output(self, assistant_message: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _parse_structured_agent_output(
+        self,
+        assistant_message: Optional[str],
+        *,
+        required: bool = False,
+        expected_schema: Optional[Any] = None,
+        parser_stage: str = "agent_structured_output",
+    ) -> Optional[Dict[str, Any]]:
         if not assistant_message:
+            if required:
+                raise OutputParseError(
+                    "Expected JSON object but agent output was empty.",
+                    raw_output="",
+                    parser_stage=parser_stage,
+                    expected_schema=expected_schema,
+                )
             return None
         text = assistant_message.strip()
         if not text:
+            if required:
+                raise OutputParseError(
+                    "Expected JSON object but agent output was empty.",
+                    raw_output=assistant_message,
+                    parser_stage=parser_stage,
+                    expected_schema=expected_schema,
+                )
             return None
         # Support markdown-fenced JSON
         if text.startswith("```"):
@@ -162,9 +185,34 @@ class ExecutionProtocolMixin:
             parsed = json.loads(text)
             if isinstance(parsed, dict):
                 return parsed
-        except json.JSONDecodeError:
-            pass
+            if required:
+                raise OutputParseError(
+                    "Expected JSON object but parsed output was not an object.",
+                    raw_output=assistant_message,
+                    parser_stage=parser_stage,
+                    expected_schema=expected_schema,
+                )
+        except json.JSONDecodeError as exc:
+            if required:
+                raise OutputParseError(
+                    f"Failed to parse required JSON output: {exc.msg}",
+                    raw_output=assistant_message,
+                    parser_stage=parser_stage,
+                    expected_schema=expected_schema,
+                    line=exc.lineno,
+                    column=exc.colno,
+                    pos=exc.pos,
+                ) from exc
         return None
+
+    def _node_output_mode(self, node: AgentNode) -> str:
+        mode = str((node.metadata or {}).get("output_mode") or "").strip().lower()
+        if mode:
+            return mode
+        node_name = str(getattr(node, "node_name", "")).lower()
+        if any(token in node_name for token in ("writer", "report", "coder")):
+            return "raw_text" if "coder" in node_name else "json_optional"
+        return "json_optional"
 
     def _extract_next_node_id(self, payload: Any) -> Optional[int]:
         if isinstance(payload, dict):
@@ -242,7 +290,32 @@ class ExecutionProtocolMixin:
         """Apply the agent output protocol and return routing-ready payloads."""
         from ..results import NodeExecutionResult
 
-        parsed_output = self._parse_structured_agent_output(getattr(result, "assistant_message", None))
+        output_mode = self._node_output_mode(node)
+        assistant_message = getattr(result, "assistant_message", None)
+        expected_schema = node.metadata.get("output_schema") or node.metadata.get("expected_schema")
+        parsed_output: Optional[Dict[str, Any]] = None
+        if output_mode == "raw_text":
+            parsed_output = None
+        elif output_mode == "json_optional":
+            parsed_output = self._parse_structured_agent_output(assistant_message, required=False)
+        elif output_mode in {"json_required", "patch"}:
+            parsed_output = self._parse_structured_agent_output(
+                assistant_message,
+                required=True,
+                expected_schema=expected_schema or ("architecture_patch" if output_mode == "patch" else None),
+            )
+        elif output_mode == "tool_call_only":
+            raw = str(assistant_message or "").strip()
+            if raw and not raw.startswith("[External tool requests:"):
+                raise OutputParseError(
+                    "tool_call_only node returned plain assistant text.",
+                    raw_output=raw,
+                    parser_stage="agent_tool_call_only_output",
+                    expected_schema="tool_calls",
+                )
+        else:
+            parsed_output = self._parse_structured_agent_output(assistant_message, required=False)
+
         state_payload = self._raw_agent_payload(result)
         output_payload = result
         routing_payload = state_payload
@@ -251,6 +324,8 @@ class ExecutionProtocolMixin:
         control_patch: Optional[Dict[str, Any]] = None
 
         if parsed_output is not None:
+            if output_mode == "patch":
+                ArchitecturePatch.coerce(parsed_output.get("architecture_patch", parsed_output))
             output_payload = parsed_output
             routing_payload = parsed_output
             next_node_override = self._extract_next_node_id(parsed_output)

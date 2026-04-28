@@ -4,12 +4,14 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from ..architecture_manager import ArchitectureManager, DEFAULT_ARCHITECTURE_POLICY
 from ..config import AgentConfig
 from ..fault_tolerance import ArchitectureRegulation, ArchitectureRegulator, FailureEvent
 from ..runtime_info import RuntimeInfoManager
 from ..cognitive import CognitiveGraph
 from ..policy import ExecutionGraph
 from ..swarm_spec import GlobalVariablesConfig
+from ..tool_contract import ToolContractValidator
 from .cognitive_state import CognitiveRuntimeMixin
 from .graph_state import ExecutionGraphStateMixin
 from .registry import AgentInstancePool, RuntimeRegistryMixin
@@ -44,6 +46,9 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self._runtime_info: Optional[RuntimeInfoManager] = None
         self._runtime_info_dir: Optional[Path] = None
         self.architecture_regulator = ArchitectureRegulator()
+        self.architecture_policy = dict(DEFAULT_ARCHITECTURE_POLICY)
+        self.architecture_manager = ArchitectureManager(self)
+        self.tool_contract_validator = ToolContractValidator()
         self.swarm_cognitive_graph = CognitiveGraph(graph_id=f"swarm_{agent_name}")
         self.active_thought_subgraphs = {}
         self.current_run_id: Optional[str] = None
@@ -54,7 +59,18 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
 
     async def init(self) -> None:
         if self._execution_graph is not None:
-            self.check_execution_graph_complete()
+            validation = self.check_execution_graph_complete()
+            if not validation.is_valid:
+                raise ValueError("; ".join(validation.errors))
+            report = self.tool_contract_validator.validate(self, self._execution_graph)
+            if not report.ok:
+                self.record_runtime_change(
+                    action="tool.contract_validation_failed",
+                    subject_kind="graph",
+                    subject_id=getattr(self._execution_graph, "graph_name", None),
+                    detail=report.to_dict(),
+                )
+                report.raise_if_failed()
 
     def set_runtime_info_dir(self, runtime_dir: Path) -> None:
         self._runtime_info_dir = Path(runtime_dir)
@@ -157,6 +173,13 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
     def register_architecture_regulator(self, regulator: ArchitectureRegulator) -> None:
         self.architecture_regulator = regulator
 
+    def get_architecture_manager(self) -> ArchitectureManager:
+        manager = getattr(self, "architecture_manager", None)
+        if manager is None:
+            manager = ArchitectureManager(self)
+            self.architecture_manager = manager
+        return manager
+
     def regulate_failure(
         self,
         failure: FailureEvent,
@@ -168,6 +191,25 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
             regulator = ArchitectureRegulator()
             self.architecture_regulator = regulator
         regulation = regulator.regulate(failure, graph=graph or self.get_execution_graph())
+        if failure.failure_kind == "output_parse_error":
+            target_graph = graph or self.get_execution_graph()
+            failed_node = target_graph.nodes.get(int(failure.node_id)) if target_graph is not None and failure.node_id is not None else None
+            metadata = getattr(failed_node, "metadata", {}) if failed_node is not None else {}
+            if isinstance(metadata, dict) and metadata.get("auto_repair"):
+                manager = self.get_architecture_manager()
+                patch = manager.propose_output_repair_patch(failure, graph=target_graph)
+                self.record_runtime_change(
+                    action="architecture.patch_proposed",
+                    subject_kind="graph",
+                    subject_id=getattr(target_graph, "graph_name", None),
+                    detail={"patch": patch.to_dict(), "failure": failure.to_dict()},
+                )
+                apply_result = manager.apply_patch_sync(patch, graph=target_graph, author="architecture_regulator")
+                regulation.metadata_patch["architecture_patch"] = {
+                    "patch_id": patch.patch_id,
+                    "applied": apply_result.ok,
+                    "errors": list(apply_result.errors),
+                }
         subject_kind = "graph" if failure.failure_scope in {"node", "branch", "graph", "swarm"} else "runtime"
         subject_id = str(failure.node_id) if failure.node_id is not None else failure.run_id or self.agent_name
         self.record_runtime_change(

@@ -10,7 +10,22 @@ class FileEditorTool(ToolDefinition):
     """Edit a file with precise replace/insert/delete operations."""
 
     def __init__(self) -> None:
-        super().__init__(tool_name="file_editor", description="Edit a file with precise replace/insert/delete operations.")
+        super().__init__(
+            tool_name="file_editor",
+            description="Edit a file with precise replace/insert/delete operations.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative target file path."},
+                    "operation": {"type": "string", "enum": ["replace", "insert", "delete"]},
+                    "old_string": {"type": "string", "description": "Text to replace or delete."},
+                    "new_string": {"type": "string", "description": "Replacement text or inserted text."},
+                    "after": {"type": "string", "description": "Anchor text for insert operations."},
+                    "fallback_path": {"type": "string"},
+                },
+                "required": ["path", "operation"],
+            },
+        )
 
     def _resolve_path(self, arguments: Dict[str, Any]) -> str:
         """Resolve target path with priority:

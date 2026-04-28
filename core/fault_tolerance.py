@@ -30,6 +30,10 @@ class FailureEvent:
     state_snapshot: Dict[str, Any] = field(default_factory=dict)
     recent_changes: List[Dict[str, Any]] = field(default_factory=list)
     branch: Optional[str] = None
+    recoverable: Optional[bool] = None
+    retryable: Optional[bool] = None
+    suggested_action: Optional[str] = None
+    detail: Dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default_factory=_utc_now_iso)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -47,6 +51,10 @@ class FailureEvent:
             "state_snapshot": self.state_snapshot,
             "recent_changes": list(self.recent_changes),
             "branch": self.branch,
+            "recoverable": self.recoverable,
+            "retryable": self.retryable,
+            "suggested_action": self.suggested_action,
+            "detail": dict(self.detail),
             "timestamp": self.timestamp,
         }
 
@@ -115,7 +123,13 @@ class ArchitectureRegulator:
 
         if node is not None:
             metadata_patch = dict(node.metadata.get("fault_tolerance", {}))
-            if fallback_node_id is not None and int(fallback_node_id) in graph.nodes:
+            if normalized_kind in {"tool_policy_denied", "tool_argument_error"}:
+                action = "degrade_node" if policy.get("allow_toolless_fallback") else "request_tool_rewrite"
+                metadata_patch["quarantined"] = False
+                metadata_patch["skip_policy"] = "tool_rewrite"
+                metadata_patch[normalized_kind] = True
+                node.metadata["fault_tolerance"] = metadata_patch
+            elif fallback_node_id is not None and int(fallback_node_id) in graph.nodes:
                 rerouted_to = int(fallback_node_id)
                 action = "reroute_to_fallback"
                 rerouted_from.append(int(node.node_id))
@@ -123,7 +137,7 @@ class ArchitectureRegulator:
                 metadata_patch["quarantined"] = True
                 metadata_patch["skip_policy"] = "fallback"
                 node.metadata["fault_tolerance"] = metadata_patch
-            elif normalized_kind in {"tool_error", "timeout", "agent_error"} and retry_budget > 0:
+            elif normalized_kind in {"tool_error", "timeout", "agent_error", "runtime_exception"} and retry_budget > 0:
                 action = "retry_node"
                 metadata_patch["quarantined"] = False
                 metadata_patch["skip_policy"] = "retry"

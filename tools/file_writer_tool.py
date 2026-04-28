@@ -10,7 +10,28 @@ class FileWriterTool(ToolDefinition):
     """Write text content to a file path."""
 
     def __init__(self) -> None:
-        super().__init__(tool_name="file_writer", description="Write text to a file.")
+        super().__init__(
+            tool_name="file_writer",
+            description="Write text content to a file in the workspace.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace-relative destination file path.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Complete UTF-8 text content to write.",
+                    },
+                    "fallback_path": {
+                        "type": "string",
+                        "description": "Optional fallback destination path when path is not available.",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+        )
 
     def _resolve_path(self, arguments: Dict[str, Any]) -> str:
         """Resolve target path with priority:

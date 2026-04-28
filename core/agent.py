@@ -19,6 +19,7 @@ from .cognitive import (
 )
 from .results import AgentContextSnapshot, AgentRoundResult, ToolRequest
 from .memory.runtime import AgentMemoryRuntime
+from .tool_prompt_serializer import serialize_tool_contracts
 
 
 @dataclass
@@ -196,6 +197,7 @@ class Agent:
         swarm_name: Optional[str] = None,
         tool_execution_mode: str = "internal",
         memory_runtime: Optional[AgentMemoryRuntime] = None,
+        tool_contract_prompt_mode: str = "auto",
     ) -> None:
         self.agent_id = agent_id
         self.name = name or agent_id
@@ -213,6 +215,7 @@ class Agent:
         self.swarm_name = swarm_name
         self.current_run_id: Optional[str] = None
         self.tool_execution_mode = tool_execution_mode
+        self.tool_contract_prompt_mode = tool_contract_prompt_mode
         self.memory_runtime = memory_runtime
 
     def append_context(self, role: str, content: str) -> None:
@@ -230,6 +233,10 @@ class Agent:
     def reset_context(self) -> None:
         """Clear the isolated agent context."""
         self._context.clear()
+
+    def recall_context(self, query: str) -> List[Dict[str, str]]:
+        """Return archived context matches for built-in recall_context calls."""
+        return self._context.retrieve(query)
 
     def reset_runtime_state(self) -> None:
         """Clear per-run state so a fresh graph run starts without residue."""
@@ -256,6 +263,7 @@ class Agent:
             swarm_name=self.swarm_name,
             tool_execution_mode=self.tool_execution_mode,
             memory_runtime=self.memory_runtime,
+            tool_contract_prompt_mode=self.tool_contract_prompt_mode,
         )
         cloned.set_run_id(self.current_run_id)
         return cloned
@@ -325,6 +333,13 @@ class Agent:
         prompts = [self.character_prompt.strip()]
         if additional_prompt:
             prompts.append(additional_prompt.strip())
+        if self.tool_execution_mode != "disabled":
+            tool_contract_prompt = serialize_tool_contracts(
+                self.tools,
+                mode=self.tool_contract_prompt_mode,
+            )
+            if tool_contract_prompt:
+                prompts.append(tool_contract_prompt)
         return "\n\n".join(prompt for prompt in prompts if prompt)
 
     def _extract_assistant_message(self, response: Any) -> Optional[str]:

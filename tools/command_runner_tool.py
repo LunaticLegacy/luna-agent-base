@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from core.errors import ToolPolicyDeniedError
 from core.toodefl import ToolContext, ToolDefinition, require_tool_capability
 
 
@@ -13,7 +14,28 @@ class CommandRunnerTool(ToolDefinition):
     """Run a shell command in the workspace."""
 
     def __init__(self) -> None:
-        super().__init__(tool_name="command_runner", description="Run a shell command in the workspace.")
+        super().__init__(
+            tool_name="command_runner",
+            description="Run a shell command in the workspace.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to run inside the workspace.",
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Optional working directory, relative to the workspace root unless absolute.",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "Optional timeout in seconds.",
+                    },
+                },
+                "required": ["command"],
+            },
+        )
 
     async def execute(
         self,
@@ -22,7 +44,7 @@ class CommandRunnerTool(ToolDefinition):
         context: Optional[ToolContext] = None,
     ) -> Any:
         require_tool_capability(context, "command_execute", self.tool_name)
-        command = str(arguments.get("command", "")).strip()
+        command = self._resolve_command(arguments)
         if not command:
             raise ValueError("command_runner requires a non-empty 'command'.")
         self._reject_dangerous_command(command)
@@ -89,10 +111,19 @@ class CommandRunnerTool(ToolDefinition):
 
     def _reject_dangerous_command(self, command: str) -> None:
         lowered = command.lower()
+        policy_denial = self._classify_policy_denial(command)
+        if policy_denial is not None:
+            reason, blocked_tokens = policy_denial
+            raise ToolPolicyDeniedError(
+                tool_name=self.tool_name,
+                command=command,
+                reason=reason,
+                blocked_tokens=blocked_tokens,
+                suggested_safe_calls=self._suggest_safe_calls(command),
+            )
         dangerous_patterns = [
             r"rm\s+-rf\s+/",
             r"sudo\s",
-            r">\s*/dev/null",
             r":\(\)\s*\{\s*:\|:\s*\&\s*\};:",
             r"mkfs\.",
             r"dd\s+if=.*of=/dev/[sh]d",
@@ -102,7 +133,90 @@ class CommandRunnerTool(ToolDefinition):
         ]
         for pattern in dangerous_patterns:
             if re.search(pattern, lowered):
-                raise ValueError(f"command_runner refuses to run dangerous command: '{command}'.")
+                raise ToolPolicyDeniedError(
+                    tool_name=self.tool_name,
+                    command=command,
+                    reason="dangerous_command",
+                    blocked_tokens=[pattern],
+                    suggested_safe_calls=self._suggest_safe_calls(command),
+                    message=f"command_runner refuses to run dangerous command: '{command}'.",
+                )
+
+    def _classify_policy_denial(self, command: str) -> tuple[str, list[str]] | None:
+        token_patterns = [
+            ("&&", r"&&"),
+            ("||", r"\|\|"),
+            (";", r";"),
+            ("|", r"(?<!\|)\|(?!\|)"),
+            (">", r">"),
+            ("<", r"<"),
+            ("`", r"`"),
+            ("$()", r"\$\("),
+        ]
+        blocked = [
+            token
+            for token, pattern in token_patterns
+            if re.search(pattern, command)
+        ]
+        if not blocked:
+            return None
+        if any(token in blocked for token in (">", "<")):
+            return "redirect_denied", blocked
+        if any(token in blocked for token in (";", "&&", "||", "|")):
+            return "compound_shell_command", blocked
+        return "shell_metacharacter", blocked
+
+    def _suggest_safe_calls(self, command: str) -> list[dict[str, Any]]:
+        suggestions: list[dict[str, Any]] = []
+        for raw_part in re.split(r"\s*(?:;|&&|\|\|)\s*", command):
+            part = raw_part.strip()
+            if not part:
+                continue
+            if any(token in part for token in ("|", ">", "<", "`", "$(")):
+                continue
+            suggestions.append({
+                "tool": self.tool_name,
+                "args": {
+                    "command": part,
+                    "cwd": ".",
+                    "timeout_seconds": 60,
+                },
+            })
+            if len(suggestions) >= 3:
+                break
+        if suggestions:
+            return suggestions
+        return [
+            {
+                "tool": self.tool_name,
+                "args": {
+                    "command": "pwd",
+                    "cwd": ".",
+                    "timeout_seconds": 60,
+                },
+            },
+            {
+                "tool": self.tool_name,
+                "args": {
+                    "command": "ls",
+                    "cwd": ".",
+                    "timeout_seconds": 60,
+                },
+            },
+        ]
+
+    def _resolve_command(self, arguments: Dict[str, Any]) -> str:
+        for key in ("command", "cmd", "shell", "input"):
+            value = arguments.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        payload = arguments.get("payload")
+        if isinstance(payload, dict):
+            for key in ("command", "cmd", "shell"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return ""
 
     def _is_workspace_restricted(self, context: Optional[ToolContext]) -> bool:
         if context is None:

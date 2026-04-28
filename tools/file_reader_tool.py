@@ -10,7 +10,18 @@ class FileReaderTool(ToolDefinition):
     """Read text content from a file path."""
 
     def __init__(self) -> None:
-        super().__init__(tool_name="file_reader", description="Read text content from a file path.")
+        super().__init__(
+            tool_name="file_reader",
+            description="Read text content from a file path.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative file path to read."},
+                    "fallback_path": {"type": "string"},
+                },
+                "required": ["path"],
+            },
+        )
 
     def _resolve_path(self, arguments: Dict[str, Any]) -> str:
         """Resolve target path with priority:

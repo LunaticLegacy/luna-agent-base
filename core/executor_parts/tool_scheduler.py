@@ -4,6 +4,7 @@ import asyncio
 import time
 from typing import Any, Dict, List, Optional
 
+from core.failure_classifier import classify_failure
 from core.results import ToolBatchResult, ToolRequest, ToolResult
 from core.toodefl import ToolContext
 
@@ -145,14 +146,37 @@ class ToolScheduler:
         try:
             if self.limiter is not None:
                 await self.limiter.acquire_tool()
-            tool = self.core.get_tool(req.tool)
-            result = await tool.execute(req.args, context=context)
+            tool_name = self._resolve_tool_alias(req.tool)
+            if tool_name == "recall_context":
+                result = self._execute_recall_context(req, context=context)
+            else:
+                tool = self.core.get_tool(tool_name)
+                result = await tool.execute(req.args, context=context)
             duration = int((time.time() - started) * 1000)
             if self.limiter is not None:
                 self.limiter.release_tool()
+            if tool_name == "command_runner" and isinstance(result, dict) and int(result.get("returncode", 0) or 0) != 0:
+                return ToolResult(
+                    request_id=req.id,
+                    tool=tool_name,
+                    status="failed",
+                    output=result,
+                    error={
+                        "type": "CommandFailed",
+                        "failure_kind": "runtime_exception",
+                        "tool_name": tool_name,
+                        "message": result.get("error") or result.get("stderr") or f"command exited with {result.get('returncode')}",
+                        "returncode": result.get("returncode"),
+                        "stderr": result.get("stderr"),
+                        "stdout": result.get("stdout"),
+                        "recoverable": True,
+                        "retryable": False,
+                    },
+                    duration_ms=duration,
+                )
             return ToolResult(
                 request_id=req.id,
-                tool=req.tool,
+                tool=tool_name,
                 status="success",
                 output=result if isinstance(result, dict) else {"result": str(result)},
                 duration_ms=duration,
@@ -161,15 +185,76 @@ class ToolScheduler:
             duration = int((time.time() - started) * 1000)
             if self.limiter is not None:
                 self.limiter.release_tool()
+            classification = classify_failure(exc)
+            detail = classification.detail or {}
             return ToolResult(
                 request_id=req.id,
                 tool=req.tool,
                 status="failed",
                 error={
                     "type": type(exc).__name__,
+                    "failure_kind": classification.failure_kind,
+                    "tool_name": detail.get("tool_name") or req.tool,
                     "message": str(exc),
                     "recoverable": True,
-                    "retryable": False,
+                    "retryable": classification.retryable,
+                    "suggested_action": classification.suggested_action,
+                    **detail,
                 },
                 duration_ms=duration,
             )
+
+    def _resolve_tool_alias(self, tool_name: str) -> str:
+        validator = getattr(self.core, "tool_contract_validator", None)
+        resolver = getattr(validator, "resolve_alias", None)
+        if callable(resolver):
+            return resolver(tool_name)
+        return str(tool_name or "").strip()
+
+    def _execute_recall_context(
+        self,
+        req: ToolRequest,
+        *,
+        context: Optional[ToolContext] = None,
+    ) -> Dict[str, Any]:
+        agent_id = (context.agent_id if context is not None else None) or ""
+        if not agent_id:
+            agent_id = str(getattr(context, "metadata", {}).get("agent_id", "") if context is not None else "")
+        agent = self._resolve_agent(agent_id)
+        query = str((req.args or {}).get("query") or (req.args or {}).get("input") or "")
+        messages = self._recall_from_agent(agent, query)
+        return {
+            "found": len(messages),
+            "messages": messages,
+            "query": query,
+        }
+
+    def _resolve_agent(self, agent_id: str) -> Any:
+        if not agent_id:
+            return None
+        get_blueprint = getattr(self.core, "get_agent_blueprint", None)
+        if callable(get_blueprint):
+            try:
+                return get_blueprint(agent_id)
+            except Exception:
+                pass
+        get_agent = getattr(self.core, "get_agent", None)
+        if callable(get_agent):
+            try:
+                return get_agent(agent_id)
+            except Exception:
+                pass
+        return None
+
+    def _recall_from_agent(self, agent: Any, query: str) -> List[Dict[str, Any]]:
+        if agent is None:
+            return []
+        recall = getattr(agent, "recall_context", None)
+        if callable(recall):
+            result = recall(query)
+            return [dict(item) for item in (result or []) if isinstance(item, dict)]
+        managed_context = getattr(agent, "_context", None)
+        retrieve = getattr(managed_context, "retrieve", None)
+        if callable(retrieve):
+            return [dict(item) for item in (retrieve(query) or []) if isinstance(item, dict)]
+        return []
