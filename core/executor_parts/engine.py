@@ -254,6 +254,7 @@ class GraphExecutor(ExecutionProtocolMixin):
             output_payload = input_payload
             routing_payload = input_payload
             next_node_override: Optional[int] = None
+            llm_input: Optional[Dict[str, Any]] = None
 
             self._emit(
                 event_sink,
@@ -380,6 +381,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                         output_payload = node_result.output_payload
                         routing_payload = node_result.routing_payload
                         next_node_override = node_result.next_node_override
+                        llm_input = getattr(result, "llm_input", None)
 
                         # Payload is immutable; append outputs to metadata.
                         state.metadata.setdefault("outputs", {})
@@ -546,6 +548,9 @@ class GraphExecutor(ExecutionProtocolMixin):
                 return state
 
             if len(next_targets) == 1:
+                node_completed_data = {"state_snapshot": state.snapshot()}
+                if llm_input is not None:
+                    node_completed_data["llm_input"] = llm_input
                 self._emit(
                     event_sink,
                     ExecutionEvent(
@@ -558,9 +563,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                         branch=None,
                         rounds=state.rounds,
                         status="ok",
-                        data={
-                            "state_snapshot": state.snapshot(),
-                        },
+                        data=node_completed_data,
                     ),
                 )
                 current_node_id = next_targets[0]
@@ -817,6 +820,13 @@ class GraphExecutor(ExecutionProtocolMixin):
                 state.rounds = max([state.rounds] + [branch_result["rounds"] for branch_result in branch_results])
                 join_node_id = node.metadata.get("join_node_id")
                 if join_node_id is None:
+                    node_completed_data = {
+                        "input_payload": input_payload,
+                        "output_payload": output_payload,
+                        "state_snapshot": state.snapshot(),
+                    }
+                    if llm_input is not None:
+                        node_completed_data["llm_input"] = llm_input
                     self._emit(
                         event_sink,
                         ExecutionEvent(
@@ -829,17 +839,16 @@ class GraphExecutor(ExecutionProtocolMixin):
                             branch=None,
                             rounds=state.rounds,
                             status="ok",
-                            data={
-                                "input_payload": input_payload,
-                                "output_payload": output_payload,
-                                "state_snapshot": state.snapshot(),
-                            },
+                            data=node_completed_data,
                         ),
                     )
                     return state
                 join_node_id = int(join_node_id)
                 self._ensure_node_exists(graph, join_node_id, current_node_id=node.node_id, label="join_node_id")
                 current_node_id = join_node_id
+                node_completed_data = {"state_snapshot": state.snapshot()}
+                if llm_input is not None:
+                    node_completed_data["llm_input"] = llm_input
                 self._emit(
                     event_sink,
                     ExecutionEvent(
@@ -852,13 +861,18 @@ class GraphExecutor(ExecutionProtocolMixin):
                         branch=None,
                         rounds=state.rounds,
                         status="ok",
-                        data={
-                            "state_snapshot": state.snapshot(),
-                        },
+                        data=node_completed_data,
                     ),
                 )
                 continue
 
+            node_completed_data = {
+                "input_payload": input_payload,
+                "output_payload": output_payload,
+                "state_snapshot": state.snapshot(),
+            }
+            if llm_input is not None:
+                node_completed_data["llm_input"] = llm_input
             self._emit(
                 event_sink,
                 ExecutionEvent(
@@ -871,11 +885,7 @@ class GraphExecutor(ExecutionProtocolMixin):
                     branch=None,
                     rounds=state.rounds,
                     status="ok",
-                    data={
-                        "input_payload": input_payload,
-                        "output_payload": output_payload,
-                        "state_snapshot": state.snapshot(),
-                    },
+                    data=node_completed_data,
                 ),
             )
             current_node_id = next_targets[0]

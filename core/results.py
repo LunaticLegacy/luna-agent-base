@@ -68,6 +68,7 @@ class AgentRoundResult:
     cognitive_graph_snapshot: Optional[Dict[str, Any]] = None
     cognitive_graph_delta: Optional[Dict[str, Any]] = None
     tool_requests: Optional[List[ToolRequest]] = None
+    llm_input: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -111,15 +112,20 @@ class ExecutionState:
     def snapshot(self) -> Dict[str, Any]:
         """Create a lightweight runtime snapshot for tracing and live streaming.
 
-        Large string fields (original_request, raw_input.text, outputs,
-        trace payloads) are replaced with summaries to avoid recursive
-        payload bloat in events and persistence.
+        Trace is omitted from the snapshot to avoid O(n) bloat per event.
+        Only a lightweight trace_summary (length + last step hint) is kept.
         """
+        trace_summary: Dict[str, Any] = {"length": len(self.trace)}
+        if self.trace:
+            last = self.trace[-1]
+            trace_summary["last_node_id"] = last.get("node_id")
+            trace_summary["last_node_name"] = last.get("node_name")
+            trace_summary["last_status"] = last.get("status", "ok")
         return {
             "payload": self._summarize_payload(self.payload),
             "rounds": self.rounds,
             "metadata": self._summarize_metadata(self.metadata),
-            "trace": [self._summarize_step(s) for s in self.trace],
+            "trace_summary": trace_summary,
             "branch_results": copy.deepcopy(self.branch_results),
         }
 

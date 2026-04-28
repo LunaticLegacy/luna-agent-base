@@ -442,6 +442,17 @@ class Agent:
         tool_requests: Optional[List[ToolRequest]] = None
         round_cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}_round_{rounds}")
 
+        # Capture the LLM input for this round (initial call, before tool loop mutations).
+        llm_input: Dict[str, Any] = {
+            "system": system_prompt,
+            "user": user_message,
+            "prev_messages": [
+                {"role": m.role, "content": m.content}
+                for m in (prev_messages or [])
+            ],
+            "tools": tools_schemas,
+        }
+
         tool_round = 0
         while True:
             raw_response = await self.llm_handler.fetch(
@@ -527,6 +538,7 @@ class Agent:
             cognitive_graph_snapshot=self.cognitive_graph.snapshot(),
             cognitive_graph_delta=round_cognitive_graph.snapshot(),
             tool_requests=tool_requests if self.tool_execution_mode == "external" else None,
+            llm_input=llm_input,
         )
 
     def _record_tool_call_in_cognitive_graph(
