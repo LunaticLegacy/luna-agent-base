@@ -33,6 +33,11 @@
 - [事件流协议](./event_stream_protocol.md)
   - SSE 事件类型、通用结构、`llm_input` 字段语义、`state_snapshot` 说明
 
+## 记忆子系统
+
+- [Angelus Memory Graph (alpha)](./memory_graph.md)
+  -  episode 历史图、上下文压缩、关键记忆提取与使用追踪
+
 ## 使用建议
 
 - 如果你想先看“接口怎么用”，先看 `api_structure.md`
