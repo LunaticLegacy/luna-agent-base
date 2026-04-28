@@ -357,6 +357,9 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                         <span class="trace-modal-meta-item">节点: {{ ev['node_name'] || ev['node_id'] || '—' }}</span>
                         <span class="trace-modal-meta-item">状态: {{ ev['status'] || '—' }}</span>
                       </div>
+                      @if (traceSummaryText(ev); as summary) {
+                        <div class="trace-summary-line">{{ summary }}</div>
+                      }
                       <div class="event-detail-tabs">
                         <button
                           class="event-detail-tab"
@@ -364,6 +367,14 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                           (click)="eventDetailTab.set('structured')">
                           结构化视图
                         </button>
+                        @if (hasLlmInput(ev)) {
+                          <button
+                            class="event-detail-tab"
+                            [class.active]="eventDetailTab() === 'llm_input'"
+                            (click)="eventDetailTab.set('llm_input')">
+                            LLM 输入
+                          </button>
+                        }
                         <button
                           class="event-detail-tab"
                           [class.active]="eventDetailTab() === 'raw'"
@@ -372,12 +383,56 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                         </button>
                       </div>
                       <div class="event-detail-content">
-                        @if (eventDetailTab() === 'structured') {
-                          <div class="trace-modal-col-body">
-                            <app-json-viewer [value]="ev"></app-json-viewer>
-                          </div>
-                        } @else {
-                          <pre class="trace-event-body-full">{{ ev | json }}</pre>
+                        @switch (eventDetailTab()) {
+                          @case ('structured') {
+                            <div class="trace-modal-col-body">
+                              <app-json-viewer [value]="ev"></app-json-viewer>
+                            </div>
+                          }
+                          @case ('llm_input') {
+                            <div class="trace-modal-col-body llm-input-panel">
+                              @if (ev['data']?.['llm_input']; as li) {
+                                @if (li['system']) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">System Prompt</div>
+                                    <pre class="llm-input-block">{{ li['system'] }}</pre>
+                                  </div>
+                                }
+                                @if (li['user']) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">User Message</div>
+                                    <pre class="llm-input-block">{{ li['user'] }}</pre>
+                                  </div>
+                                }
+                                @if (li['prev_messages']?.length) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">Previous Messages ({{ li['prev_messages'].length }})</div>
+                                    <div class="llm-message-list">
+                                      @for (msg of li['prev_messages']; track $index) {
+                                        <div class="llm-message-item">
+                                          <span class="llm-message-role">{{ msg['role'] }}</span>
+                                          <pre class="llm-message-content">{{ msg['content'] }}</pre>
+                                        </div>
+                                      }
+                                    </div>
+                                  </div>
+                                }
+                                @if (li['tools']?.length) {
+                                  <div class="llm-input-section">
+                                    <div class="llm-input-label">Tools ({{ li['tools'].length }})</div>
+                                    <div class="llm-tool-list">
+                                      @for (tool of li['tools']; track $index) {
+                                        <div class="llm-tool-chip">{{ tool['function']?.['name'] || tool['type'] || 'tool' }}</div>
+                                      }
+                                    </div>
+                                  </div>
+                                }
+                              }
+                            </div>
+                          }
+                          @default {
+                            <pre class="trace-event-body-full">{{ ev | json }}</pre>
+                          }
                         }
                       </div>
                     </div>
@@ -1252,6 +1307,84 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       min-height: 0;
       min-width: 0;
     }
+    .trace-summary-line {
+      font-size: 11px;
+      color: #94a3b8;
+      padding: 0 12px 6px;
+      flex-shrink: 0;
+    }
+    .llm-input-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .llm-input-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .llm-input-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #a78bfa;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .llm-input-block {
+      margin: 0;
+      padding: 8px 10px;
+      background: rgba(139,92,246,0.06);
+      border: 1px solid rgba(139,92,246,0.12);
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow: auto;
+    }
+    .llm-message-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .llm-message-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 6px 8px;
+      background: rgba(148,163,184,0.04);
+      border: 1px solid rgba(148,163,184,0.08);
+      border-radius: 6px;
+    }
+    .llm-message-role {
+      font-size: 10px;
+      font-weight: 600;
+      color: #60a5fa;
+      text-transform: uppercase;
+    }
+    .llm-message-content {
+      margin: 0;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .llm-tool-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .llm-tool-chip {
+      font-size: 11px;
+      padding: 3px 8px;
+      background: rgba(16,185,129,0.10);
+      border: 1px solid rgba(16,185,129,0.20);
+      color: #10B981;
+      border-radius: 999px;
+    }
     .pill.running { background: rgba(59,130,246,0.15); color: #60a5fa; }
     .pill.success { background: rgba(16,185,129,0.15); color: #10B981; }
     .pill.online { background: rgba(16,185,129,0.15); color: #10B981; }
@@ -1327,7 +1460,7 @@ export class SwarmManagementPageComponent {
   readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
   readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
   readonly selectedEvent = signal<any>(null);
-  readonly eventDetailTab = signal<'structured' | 'raw'>('structured');
+  readonly eventDetailTab = signal<'structured' | 'raw' | 'llm_input'>('structured');
   readonly selectedEventIndex = computed(() => {
     const events = this.state.selectedExecutionTrace()?.events ?? [];
     const ev = this.selectedEvent();
@@ -1389,6 +1522,31 @@ export class SwarmManagementPageComponent {
     if (status === 'failed' || status === 'error') return 'error';
     if (status === 'skipped') return 'warn';
     return 'info';
+  }
+
+  hasLlmInput(event: unknown): boolean {
+    if (!event || typeof event !== 'object') return false;
+    const data = (event as Record<string, unknown>)['data'];
+    if (!data || typeof data !== 'object') return false;
+    return !!(data as Record<string, unknown>)['llm_input'];
+  }
+
+  traceSummaryText(event: unknown): string | null {
+    if (!event || typeof event !== 'object') return null;
+    const data = (event as Record<string, unknown>)['data'];
+    if (!data || typeof data !== 'object') return null;
+    const snapshot = (data as Record<string, unknown>)['state_snapshot'];
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    const summary = (snapshot as Record<string, unknown>)['trace_summary'];
+    if (!summary || typeof summary !== 'object') return null;
+    const length = (summary as Record<string, unknown>)['length'] as number | undefined;
+    const lastNode = (summary as Record<string, unknown>)['last_node_name'] as string | undefined;
+    const lastStatus = (summary as Record<string, unknown>)['last_status'] as string | undefined;
+    if (typeof length !== 'number') return null;
+    const parts: string[] = [`已执行 ${length} 步`];
+    if (lastNode) parts.push(`最后节点: ${lastNode}`);
+    if (lastStatus && lastStatus !== 'ok') parts.push(`状态: ${lastStatus}`);
+    return parts.join(' · ');
   }
 
   async copyEvent(event: unknown): Promise<void> {
