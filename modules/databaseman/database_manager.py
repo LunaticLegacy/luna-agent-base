@@ -1,19 +1,41 @@
+"""异步 PostgreSQL 数据库连接池管理模块。
+
+本模块提供基于 ``asyncpg`` 的异步数据库连接池生命周期管理，
+包括连接池初始化、连接获取与释放、活跃连接计数以及上下文管理器封装。
+
+主要导出内容：
+    - :class:`DBTimeoutError`: 自定义数据库连接超时异常。
+    - :class:`DatabaseManager`: 数据库连接池管理器，支持 ``async with`` 安全获取连接。
+"""
+
 import asyncpg
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional, Any, Dict
 
+
 class DBTimeoutError(TimeoutError):
-    """自定义数据库超时异常。"""
+    """自定义数据库超时异常。
+
+    用于在 ``get_connection`` 等待可用连接超时时提供更具语义的异常类型，
+    方便调用方区分网络/配置错误与资源耗尽导致的超时。
+    """
+
     def __init__(self, message: str = "Database operation timed out"):
         super().__init__(message)
 
+
 class DatabaseManager:
+    """数据库连接池管理器。
+
+    封装 ``asyncpg`` 连接池的创建、连接获取/释放以及优雅关闭逻辑。
+    所有公开方法均为异步，避免阻塞事件循环。
+
+    关键属性：
+        connection_pool: ``asyncpg`` 连接池实例；仅在调用 ``init_pool`` 后可用。
+        _active_connections: 当前已分配且尚未归还的连接数，用于泄漏排查。
     """
-    数据库管理器。
-    - 在本管理器内，所有函数均为**异步调用**——为尽可能不阻塞IO。
-    - 异步编程需要使用asyncio库。
-    """
+
     def __init__(
         self,
         db_url: str,
@@ -24,17 +46,16 @@ class DatabaseManager:
         minconn: int = 1,
         maxconn: int = 20
     ):
-        """
-        初始化类。
+        """初始化数据库管理器。
 
         Args:
-            db_url (str): 数据库服务器URL地址。
-            db_username (str): 数据库用户名。
-            db_password (str): 数据库密码。
-            db_database_name (str): 数据库名。
-            db_port (int): 数据库对外端口。
-            minconn (int): 连接池最小连接数量。
-            maxconn (int): 连接池最大连接数量。
+            db_url: 数据库服务器地址。
+            db_username: 数据库用户名。
+            db_password: 数据库密码。
+            db_database_name: 目标数据库名称。
+            db_port: 数据库对外端口。
+            minconn: 连接池最小连接数。
+            maxconn: 连接池最大连接数。
         """
         self.db_url: str = db_url
         self.db_username = db_username
@@ -45,12 +66,17 @@ class DatabaseManager:
         self.maxconn: int = maxconn
 
         self.connection_pool: Optional[asyncpg.pool.Pool] = None
-        # 添加活跃连接计数器
+        # 通过计数器跟踪已分配但未释放的连接，便于在关闭时告警泄漏
         self._active_connections = 0
 
     async def init_pool(self) -> None:
-        """
-        异步初始化连接池。
+        """异步初始化连接池。
+
+        使用 ``asyncpg.create_pool`` 创建连接池，并清零活跃连接计数器。
+        若创建失败会抛出 ``ConnectionError``，避免后续操作在无效池上进行。
+
+        Raises:
+            ConnectionError: 连接池创建失败时抛出。
         """
         print(f"Connection details - Host: {self.db_url}, Port: {self.db_port}, DB: {self.db_database_name}")
         try:
@@ -70,18 +96,21 @@ class DatabaseManager:
             raise ConnectionError(f"Failed to initialize asyncpg pool: {str(e)}")
 
     async def get_connection(self, timeout: float = 5.0) -> asyncpg.Connection:
-        """
-        从连接池获取一个连接。
-        - 在获取连接并使用完毕后，必须使用本实例内的`release_connection`函数释放连接。
-            否则会造成连接泄漏（类似内存泄漏）。
-        
-        注意：请在try块内使用，如果等待超时，该块会抛出`TimeoutError`。
+        """从连接池获取一个连接。
+
+        获取后必须通过 ``release_connection`` 归还，否则会造成连接泄漏。
+        建议始终配合 ``acquire()`` 上下文管理器使用，确保异常安全释放。
 
         Args:
-            timeout (float): 超时等待时长（秒）
-        
+            timeout: 等待可用连接的最大时长（秒）。
+
         Returns:
-            (asyncpg.Connection): 连接对象
+            asyncpg.Connection: 数据库连接对象。
+
+        Raises:
+            ConnectionError: 连接池未初始化时抛出。
+            DBTimeoutError: 等待可用连接超时时抛出。
+            EOFError: 发生其他特殊错误时抛出。
         """
         try:
             if self.connection_pool is None:
@@ -98,22 +127,27 @@ class DatabaseManager:
             raise EOFError(f"A Special error here: {e!r}") from e
 
     async def release_connection(self, connection: asyncpg.Connection) -> None:
-        """
-        释放已获取的连接。
+        """释放已获取的连接。
 
         Args:
-            connection (asyncpg.Connection): 连接对象
+            connection: 要归还的连接对象。
         """
         if self.connection_pool is not None:
             await self.connection_pool.release(connection)
             self._active_connections -= 1
 
     async def close_all_connections(self) -> None:
-        """
-        关闭连接池。
+        """关闭连接池并清理所有资源。
+
+        若仍有未归还的连接，会先打印警告以便排查泄漏。
+        关闭操作设置 30 秒超时，防止在连接挂起时无限等待；
+        即使超时也会强制将池置空，避免后续复用脏状态。
+
+        Raises:
+            asyncio.TimeoutError: 关闭操作超时时被内部捕获，不会向上传播。
         """
         if self.connection_pool is not None:
-            # 显示当前活跃连接数
+            # 在关闭前输出未释放连接数，帮助诊断连接泄漏
             print(f"WARNING: There are {self._active_connections} active connections that may not be released!")
             
             try:
@@ -128,14 +162,19 @@ class DatabaseManager:
     
     @asynccontextmanager
     async def acquire(self):
-        """
-        连接管理器。
-        - **请在async with上下文中使用，例：**
-        ```
-        db = DatabaseManager()
-        async with db.acquire() as conn:
-            conn.somefunction()
-        ```
+        """异步上下文管理器，安全获取并自动释放连接。
+
+        封装 ``get_connection`` + ``release_connection`` 的配对逻辑，
+        确保即使在执行期间发生异常，连接也能被正确归还。
+
+        Yields:
+            asyncpg.Connection: 已获取的连接对象。
+
+        Example::
+            db = DatabaseManager(...)
+            await db.init_pool()
+            async with db.acquire() as conn:
+                ...
         """
         conn = await self.get_connection()
         try:
@@ -144,16 +183,17 @@ class DatabaseManager:
             await self.release_connection(conn)
 
     def get_active_connections_count(self) -> int:
-        """
-        获取当前活跃连接数。
-        
+        """获取当前活跃连接数。
+
         Returns:
-            int: 当前活跃连接数
+            int: 已分配且尚未归还的连接数量。
         """
         return self._active_connections
 
+
 # 使用示例
 async def main():
+    """模块级使用示例：演示连接池初始化、查询与关闭的完整流程。"""
     db = DatabaseManager(
         db_url="127.0.0.1",
         db_username="postgres",

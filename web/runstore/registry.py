@@ -1,3 +1,8 @@
+"""后台运行注册表。
+
+RunRegistry 以线程安全的方式管理所有后台图运行（RunRecord），
+提供启动、查询、停止与事件流式输出的能力。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +20,13 @@ from .record import RunRecord
 
 @dataclass
 class RunRegistry:
-    """Thread-safe registry for background graph runs."""
+    """线程安全的运行注册表。
+
+    Attributes:
+        _runs: 以 run_id 为键的运行记录字典。
+        _run_cores: 以 run_id 为键的关联 core 字典，用于请求停止。
+        _lock: 保护 _runs 与 _run_cores 的 RLock。
+    """
 
     def __init__(self) -> None:
         self._runs: Dict[str, RunRecord] = {}
@@ -32,13 +43,26 @@ class RunRegistry:
         rounds: int = 0,
         meta_mode: bool = False,
     ) -> RunRecord:
-        """Create a run record and execute the graph in a daemon thread."""
+        """创建运行记录并在守护线程中启动图执行。
+
+        Args:
+            swarm_name: 所属 swarm 名称。
+            core: swarm 核心实例。
+            graph: 要执行的图对象。
+            initial_payload: 初始输入负载。
+            rounds: 最大执行轮数。
+            meta_mode: 是否使用 MetaExecutor（元执行器）。
+
+        Returns:
+            已启动的运行记录。
+        """
         run_id = uuid.uuid4().hex
         record = RunRecord(run_id=run_id, swarm_name=swarm_name, rounds=rounds)
         runtime_info_dir = getattr(core, "get_runtime_info_dir", None)
         if callable(runtime_info_dir):
             storage_root = runtime_info_dir()
             if storage_root is not None:
+                # 为运行分配独立的持久化目录，用于保存 events.jsonl 与快照
                 record.bind_storage_dir(Path(storage_root) / "runs" / run_id)
         with self._lock:
             self._runs[run_id] = record
@@ -62,12 +86,26 @@ class RunRegistry:
         return record
 
     def get_run(self, run_id: str) -> Optional[RunRecord]:
-        """Return a run record by id, if present."""
+        """根据 ID 获取运行记录。
+
+        Args:
+            run_id: 运行唯一标识。
+
+        Returns:
+            RunRecord 实例，或 None。
+        """
         with self._lock:
             return self._runs.get(run_id)
 
     def list_runs(self, swarm_name: Optional[str] = None) -> List[RunRecord]:
-        """Return run records in insertion order, optionally filtered by swarm."""
+        """列出运行记录，可按 swarm 过滤。
+
+        Args:
+            swarm_name: 可选的 swarm 名称过滤器。
+
+        Returns:
+            运行记录列表，保持插入顺序。
+        """
         with self._lock:
             runs = list(self._runs.values())
         if swarm_name is None:
@@ -75,14 +113,28 @@ class RunRegistry:
         return [record for record in runs if record.swarm_name == swarm_name]
 
     def snapshot(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """Return the JSON-ready snapshot for one run."""
+        """获取单条运行的 JSON 快照。
+
+        Args:
+            run_id: 运行唯一标识。
+
+        Returns:
+            快照字典，或 None（运行不存在）。
+        """
         record = self.get_run(run_id)
         if record is None:
             return None
         return record.snapshot()
 
     def active_run_count(self, swarm_name: Optional[str] = None) -> int:
-        """Return the number of active runs, optionally filtered by swarm."""
+        """统计活跃运行数。
+
+        Args:
+            swarm_name: 可选的 swarm 名称过滤器。
+
+        Returns:
+            未完成的运行数量。
+        """
         with self._lock:
             return sum(
                 1
@@ -91,7 +143,14 @@ class RunRegistry:
             )
 
     def active_run_ids(self, swarm_name: Optional[str] = None) -> List[str]:
-        """Return active run ids, optionally filtered by swarm."""
+        """获取活跃运行的 ID 列表。
+
+        Args:
+            swarm_name: 可选的 swarm 名称过滤器。
+
+        Returns:
+            活跃运行 ID 列表。
+        """
         with self._lock:
             return [
                 record.run_id
@@ -100,7 +159,17 @@ class RunRegistry:
             ]
 
     def stop_run(self, run_id: str, stop_type: str = "soft") -> Optional[RunRecord]:
-        """Request a stop for an active run."""
+        """请求停止一条活跃运行。
+
+        会同时调用 core 的 request_stop，向执行引擎发送停止信号。
+
+        Args:
+            run_id: 运行唯一标识。
+            stop_type: "soft" 或 "hard"。
+
+        Returns:
+            被停止的运行记录，或 None（运行不存在或已结束）。
+        """
         record = self.get_run(run_id)
         if record is None:
             return None
@@ -125,6 +194,11 @@ class RunRegistry:
         rounds: int,
         meta_mode: bool = False,
     ) -> None:
+        """后台线程的异步执行入口。
+
+        根据 meta_mode 选择 MetaExecutor 或 GraphExecutor，
+        并在异常时自动注入 run.failed 事件。
+        """
         async def _execute() -> None:
             if meta_mode:
                 from core.meta_executor import MetaExecutor
@@ -153,6 +227,8 @@ class RunRegistry:
         try:
             asyncio.run(_execute())
         except Exception as exc:
+            # 若执行过程中抛出未捕获异常，且记录尚未标记完成，
+            # 则自动追加 run.failed 事件，保证前端能收到终止通知
             if not record._done:
                 record.append_event(
                     ExecutionEvent(

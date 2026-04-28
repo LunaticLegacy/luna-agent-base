@@ -1,3 +1,14 @@
+"""Core package public API.
+
+Aggregates the primary classes and types that external code needs to
+interact with the Angelus runtime: agents, execution graphs, tools,
+configuration, and error types.
+
+Main exports:
+    Agent, Core, GraphExecutor, ExecutionGraph,
+    ToolDefinition, ToolContext, AgentConfig, ...
+"""
+
 from .agent import Agent
 from .config import AgentConfig
 from .core import Core

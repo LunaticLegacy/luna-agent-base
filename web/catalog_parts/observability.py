@@ -1,3 +1,8 @@
+"""可观测性数据构建器。
+
+从运行时注册表收集事件与日志项，支持多级过滤与分页，
+为前端可观测性面板提供统一的数据源。
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -22,6 +27,24 @@ def build_event_catalog(
     page: int = 1,
     limit: int = 50,
 ) -> Dict[str, Any]:
+    """构建事件目录。
+
+    与日志目录共用底层可观测性数据，但使用通用过滤逻辑，
+    返回结构更适合事件时间线展示。
+
+    Args:
+        registry: 运行时注册表。
+        level: 日志级别过滤。
+        source: 来源过滤。
+        from_time: 时间下限。
+        to_time: 时间上限。
+        q: 全文搜索关键词。
+        page: 分页页码。
+        limit: 每页数量。
+
+    Returns:
+        包含 total、page、limit、items 与 stats 的字典。
+    """
     items = _collect_observability_items(registry)
     filtered = _filter_observability_items(
         items,
@@ -54,6 +77,25 @@ def build_log_catalog(
     page: int = 1,
     limit: int = 100,
 ) -> Dict[str, Any]:
+    """构建日志目录。
+
+    在底层可观测性数据基础上增加 service 过滤、日志级别标准化与
+    统计聚合，返回更适合日志表格展示的结构。
+
+    Args:
+        registry: 运行时注册表。
+        level: 日志级别过滤。
+        service: 服务名过滤。
+        from_time: 时间下限。
+        to_time: 时间上限。
+        q: 全文搜索关键词。
+        page: 分页页码。
+        limit: 每页数量。
+
+    Returns:
+        包含 total、page、limit、items 与 stats 的字典。
+        stats 包含 error / warn / info / debug 计数。
+    """
     items = _collect_observability_items(registry)
     normalized_level = str(level or "").strip().lower()
     normalized_service = str(service or "").strip().lower()

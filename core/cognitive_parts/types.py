@@ -1,3 +1,9 @@
+"""Primitive types for the cognitive graph.
+
+Defines enums for node and edge semantics, plus dataclasses for nodes,
+edges, and subgraph descriptors.  All IDs are UUID strings by default.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -7,8 +13,9 @@ from enum import Enum
 from typing import Any, Dict, List
 
 
-# 认知节点类型。
 class CognitiveNodeType(str, Enum):
+    """Taxonomy of cognitive node kinds."""
+
     FACT = "fact"
     GOAL = "goal"
     HYPOTHESIS = "hypothesis"
@@ -24,8 +31,10 @@ class CognitiveNodeType(str, Enum):
     TOOL_RESULT = "tool_result"
     EXECUTION_TRACE = "execution_trace"
 
-# 认知关系类型。
+
 class CognitiveRelationType(str, Enum):
+    """Taxonomy of directed relationships between cognitive nodes."""
+
     SUPPORTS = "supports"
     OPPOSES = "opposes"
     DERIVES_FROM = "derives_from"
@@ -40,10 +49,23 @@ class CognitiveRelationType(str, Enum):
     EVIDENCE_FOR = "evidence_for"
 
 
-# 认知图
 @dataclass
 class CognitiveSubgraphDescriptor:
-    """A schedulable view into the shared thought graph."""
+    """A schedulable view into the shared thought graph.
+
+    Attributes:
+        root_node_ids: Entry points for the subgraph.
+        frontier_node_ids: Nodes that have neighbours outside the subgraph.
+        purpose: Human-readable intent (e.g. ``"coder planning context"``).
+        visibility: Access level (``"shared"``, ``"private"``, etc.).
+        owner_agent: Agent that created or owns this view.
+        expected_next_information: Hint about what the owner expects next.
+        priority: Scheduling priority (higher = more urgent).
+        subgraph_id: Auto-generated UUID.
+        status: Lifecycle status (``"active"``, ``"archived"``, etc.).
+        metadata: Free-form extension dict.
+        created_at: ISO timestamp.
+    """
 
     root_node_ids: List[str] = field(default_factory=list)
     frontier_node_ids: List[str] = field(default_factory=list)
@@ -58,6 +80,7 @@ class CognitiveSubgraphDescriptor:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict."""
         return {
             "subgraph_id": self.subgraph_id,
             "root_node_ids": list(self.root_node_ids),
@@ -74,6 +97,7 @@ class CognitiveSubgraphDescriptor:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CognitiveSubgraphDescriptor":
+        """Deserialise from a plain dict."""
         return cls(
             subgraph_id=str(data.get("subgraph_id", uuid.uuid4())),
             root_node_ids=[str(item) for item in data.get("root_node_ids", []) or []],
@@ -88,10 +112,24 @@ class CognitiveSubgraphDescriptor:
             created_at=str(data.get("created_at", datetime.now(timezone.utc).isoformat())),
         )
 
-# 一个人直接点。
+
 @dataclass
 class CognitiveNode:
-    """A single thought / claim / evidence piece in the cognitive space."""
+    """A single thought / claim / evidence piece in the cognitive space.
+
+    Attributes:
+        content: Primary text payload.
+        node_type: Semantic category.
+        node_id: UUID string.
+        summary: Shortened form for display.
+        confidence: 0.0–1.0 credibility estimate.
+        evidence: List of supporting evidence strings.
+        tags: Arbitrary labels for indexing.
+        source: Origin agent or system identifier.
+        metadata: Free-form extension dict.
+        created_at: ISO timestamp.
+        version: Monotonically incremented on merge.
+    """
 
     content: str
     node_type: CognitiveNodeType = CognitiveNodeType.CLAIM
@@ -106,6 +144,7 @@ class CognitiveNode:
     version: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict."""
         return {
             "node_id": self.node_id,
             "node_type": self.node_type.value,
@@ -122,6 +161,7 @@ class CognitiveNode:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CognitiveNode":
+        """Deserialise from a plain dict."""
         return cls(
             node_id=str(data.get("node_id", uuid.uuid4())),
             node_type=CognitiveNodeType(str(data.get("node_type", "claim"))),
@@ -139,7 +179,17 @@ class CognitiveNode:
 
 @dataclass
 class CognitiveEdge:
-    """A directed logical relationship between two cognitive nodes."""
+    """A directed logical relationship between two cognitive nodes.
+
+    Attributes:
+        source_id: Origin node UUID.
+        target_id: Destination node UUID.
+        relation: Semantic relationship type.
+        edge_id: UUID string.
+        strength: 0.0–1.0 weight.
+        description: Human-readable annotation.
+        metadata: Free-form extension dict.
+    """
 
     source_id: str
     target_id: str
@@ -150,6 +200,7 @@ class CognitiveEdge:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict."""
         return {
             "edge_id": self.edge_id,
             "source_id": self.source_id,
@@ -162,6 +213,7 @@ class CognitiveEdge:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CognitiveEdge":
+        """Deserialise from a plain dict."""
         return cls(
             source_id=str(data["source_id"]),
             target_id=str(data["target_id"]),

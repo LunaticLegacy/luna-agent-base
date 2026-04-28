@@ -1,3 +1,30 @@
+"""Swarm package specification parsing and manifest loading.
+
+This module defines the dataclasses that represent a swarm manifest
+(:class:`SwarmManifest`) and its sub-components (agents, workspace,
+global variables, LLM backends).  It also implements the TOML parsing
+logic that transforms a ``swarm.toml`` file into these dataclasses.
+
+Key entry points:
+
+* :func:`load_root_config` — parse the top-level ``config.toml``.
+* :func:`discover_swarm_packages` — find swarm directories.
+* :func:`load_swarm_manifest` — parse a single ``swarm.toml``.
+* :func:`load_agent_blueprints` — load all agent definitions.
+* :func:`load_skill_assets` — load all skill files.
+
+Exports:
+    - :class:`SwarmLoaderError`
+    - :class:`ApiConfig`
+    - :class:`SwarmAppConfig`
+    - :class:`AgentBlueprint`
+    - :class:`WorkspaceAgentConfig`
+    - :class:`WorkspaceConfig`
+    - :class:`GlobalVariablesConfig`
+    - :class:`SwarmManifest`
+    - Parsing helpers
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,7 +46,18 @@ class SwarmLoaderError(ValueError):
 
 @dataclass
 class ApiConfig:
-    """Mutable API/runtime settings persisted in config.toml."""
+    """Mutable API/runtime settings persisted in ``config.toml``.
+
+    Attributes:
+        base_url: Root path for the HTTP API.
+        timeout_seconds: Request timeout.
+        sse_reconnect_interval_seconds: SSE reconnect backoff.
+        auto_reconnect: Whether to auto-reconnect SSE streams.
+        require_auth: Whether API calls require a token.
+        api_token: Static token (overridden by env var if empty).
+        api_token_env: Environment variable name for the token.
+        cors_allowed_origins: List of allowed CORS origins.
+    """
 
     base_url: str = "/api"
     timeout_seconds: int = 30
@@ -33,7 +71,12 @@ class ApiConfig:
 
 @dataclass
 class SwarmAppConfig:
-    """Root application config for discovering swarm packages."""
+    """Root application config for discovering swarm packages.
+
+    Attributes:
+        swarm_root: Directory containing swarm packages.
+        api: API settings.
+    """
 
     swarm_root: Path = Path("agents")
     api: ApiConfig = field(default_factory=ApiConfig)
@@ -41,7 +84,24 @@ class SwarmAppConfig:
 
 @dataclass
 class AgentBlueprint:
-    """One agent definition loaded from a Python file."""
+    """One agent definition loaded from a Python file.
+
+    Attributes:
+        agent_id: Unique identifier.
+        character_prompt: Inline system prompt.
+        name: Optional display name.
+        backend_name: Named LLM backend to use.
+        api_url: Override API URL.
+        api_key: Override API key.
+        model: Override model name.
+        provider: LLM provider (``"openai"``, etc.).
+        skill_name: Name of a skill to use as the prompt.
+        prompt_file: Path to a prompt file.
+        prompt_text: Inline prompt text.
+        tools: List of tool names the agent should bind.
+        tool_execution_mode: ``"internal"`` or ``"external"``.
+        source_file: Path to the defining Python file.
+    """
 
     agent_id: str
     character_prompt: Optional[str] = None
@@ -61,7 +121,12 @@ class AgentBlueprint:
 
 @dataclass
 class WorkspaceAgentConfig:
-    """Workspace override for one agent, declared in swarm.toml."""
+    """Workspace override for one agent, declared in ``swarm.toml``.
+
+    Attributes:
+        workspace_mode: ``"workspace"`` or ``"full_access"``.
+        workspace_root: Relative or absolute workspace root.
+    """
 
     workspace_mode: Optional[str] = None
     workspace_root: Optional[str] = None
@@ -69,7 +134,13 @@ class WorkspaceAgentConfig:
 
 @dataclass
 class WorkspaceConfig:
-    """Swarm-level workspace settings parsed from swarm.toml."""
+    """Swarm-level workspace settings parsed from ``swarm.toml``.
+
+    Attributes:
+        default_mode: Default access mode.
+        default_root: Default workspace root.
+        agents: Per-agent overrides.
+    """
 
     default_mode: str = "workspace"
     default_root: Optional[str] = None
@@ -78,12 +149,26 @@ class WorkspaceConfig:
 
 @dataclass
 class GlobalVariablesConfig:
-    """Swarm-level variables that can be injected into selected agents."""
+    """Swarm-level variables that can be injected into selected agents.
+
+    Attributes:
+        values: Variable name -> value.
+        visibility: Variable name -> list of agent IDs that may see it.
+            ``None`` means visible to all agents.
+    """
 
     values: Dict[str, Any] = field(default_factory=dict)
     visibility: Dict[str, List[str]] = field(default_factory=dict)
 
     def visible_values_for_agent(self, agent_id: str) -> Dict[str, Any]:
+        """Return only the variables visible to *agent_id*.
+
+        Args:
+            agent_id: The agent requesting variables.
+
+        Returns:
+            Filtered dictionary.
+        """
         visible: Dict[str, Any] = {}
         for key, value in self.values.items():
             agents = self.visibility.get(key)
@@ -94,7 +179,22 @@ class GlobalVariablesConfig:
 
 @dataclass
 class SwarmManifest:
-    """Swarm package manifest parsed from TOML."""
+    """Swarm package manifest parsed from TOML.
+
+    Attributes:
+        swarm_name: Human-readable swarm name.
+        graph_file: Path to the execution graph module.
+        agent_files: List of agent definition files.
+        tool_files: List of tool definition files.
+        api_files: List of API definition entries.
+        tool_capabilities: Map ``tool_name -> [capability, ...]``.
+        skill_files: List of skill files.
+        default_backend: Named default LLM backend.
+        default_llm: Inline default LLM configuration.
+        llm_backends: Named LLM backend list.
+        workspace: Workspace settings.
+        global_variables: Global variable settings.
+    """
 
     swarm_name: str
     graph_file: str
@@ -111,7 +211,17 @@ class SwarmManifest:
 
 
 def load_root_config(path: Path) -> SwarmAppConfig:
-    """Load the top-level application config."""
+    """Load the top-level application config.
+
+    Args:
+        path: Path to ``config.toml``.
+
+    Returns:
+        Parsed :class:`SwarmAppConfig`.
+
+    Raises:
+        SwarmLoaderError: On malformed TOML.
+    """
     if not path.exists():
         return SwarmAppConfig()
 
@@ -158,6 +268,7 @@ def load_root_config(path: Path) -> SwarmAppConfig:
 
 
 def _coerce_positive_int(raw: Any, *, fallback: int) -> int:
+    """Parse *raw* as a positive integer, falling back on error or non-positive."""
     try:
         parsed = int(raw)
     except (TypeError, ValueError):
@@ -166,6 +277,10 @@ def _coerce_positive_int(raw: Any, *, fallback: int) -> int:
 
 
 def _coerce_bool(raw: Any, *, fallback: bool) -> bool:
+    """Coerce *raw* to a boolean with a fallback.
+
+    Supports bool, int/float, and string representations.
+    """
     if isinstance(raw, bool):
         return raw
     if isinstance(raw, (int, float)):
@@ -181,6 +296,18 @@ def _coerce_bool(raw: Any, *, fallback: bool) -> bool:
 
 
 def _normalize_string_list(raw: Any, *, field_name: str) -> List[str]:
+    """Coerce *raw* to a list of non-empty strings.
+
+    Args:
+        raw: Value from TOML.
+        field_name: Human-readable field name for error messages.
+
+    Returns:
+        List of stripped strings.
+
+    Raises:
+        SwarmLoaderError: If *raw* is not a string or list.
+    """
     if raw is None:
         return []
     if isinstance(raw, str):
@@ -193,6 +320,18 @@ def _normalize_string_list(raw: Any, *, field_name: str) -> List[str]:
 
 
 def _parse_tool_capabilities(raw: Any, source: Path) -> Dict[str, List[str]]:
+    """Parse the ``[tool_capabilities]`` TOML table.
+
+    Args:
+        raw: Raw TOML value.
+        source: Path to the manifest (for error messages).
+
+    Returns:
+        Map ``tool_name -> [capability, ...]``.
+
+    Raises:
+        SwarmLoaderError: If *raw* is not a dict.
+    """
     if raw is None:
         return {}
     if not isinstance(raw, dict):
@@ -207,7 +346,20 @@ def _parse_tool_capabilities(raw: Any, source: Path) -> Dict[str, List[str]]:
 
 
 def discover_swarm_packages(root: Path) -> List[Path]:
-    """Return all child directories that look like swarm packages."""
+    """Return all child directories that look like swarm packages.
+
+    A directory is considered a swarm package if it contains at least one
+    ``.toml`` file.
+
+    Args:
+        root: Directory to scan.
+
+    Returns:
+        Sorted list of package directories.
+
+    Raises:
+        SwarmLoaderError: If *root* is not a directory.
+    """
     if not root.exists():
         return []
     if not root.is_dir():
@@ -221,7 +373,17 @@ def discover_swarm_packages(root: Path) -> List[Path]:
 
 
 def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
-    """Load and validate a swarm manifest from one package directory."""
+    """Load and validate a swarm manifest from one package directory.
+
+    Args:
+        package_path: Path to the swarm directory.
+
+    Returns:
+        Tuple of ``(manifest_path, manifest)``.
+
+    Raises:
+        SwarmLoaderError: On missing files, malformed TOML, or validation errors.
+    """
     toml_files = sorted(package_path.glob("*.toml"))
     if not toml_files:
         raise SwarmLoaderError(f"No TOML manifest found in {package_path}")
@@ -291,7 +453,18 @@ def load_swarm_manifest(package_path: Path) -> tuple[Path, SwarmManifest]:
 
 
 def load_agent_blueprints(package_path: Path, manifest: SwarmManifest) -> List[AgentBlueprint]:
-    """Load and validate all agent blueprints referenced by the manifest."""
+    """Load and validate all agent blueprints referenced by the manifest.
+
+    Args:
+        package_path: Path to the swarm directory.
+        manifest: Parsed manifest.
+
+    Returns:
+        List of :class:`AgentBlueprint` objects.
+
+    Raises:
+        SwarmLoaderError: If an agent file is missing required exports.
+    """
     blueprints: List[AgentBlueprint] = []
 
     for file_name in manifest.agent_files:
@@ -309,6 +482,18 @@ def load_agent_blueprints(package_path: Path, manifest: SwarmManifest) -> List[A
 
 
 def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
+    """Resolve *value* relative to *package_path* with sandbox containment.
+
+    Args:
+        package_path: The swarm package directory.
+        value: Relative or absolute path.
+
+    Returns:
+        Absolute :class:`Path`.
+
+    Raises:
+        SwarmLoaderError: If the resolved path escapes *package_path*.
+    """
     path = Path(value)
     resolved = path.resolve() if path.is_absolute() else (package_path / path).resolve()
     try:
@@ -319,6 +504,17 @@ def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
 
 
 def _load_module_from_path(path: Path) -> ModuleType:
+    """Dynamically load a Python file as a module.
+
+    Args:
+        path: Absolute path to the Python file.
+
+    Returns:
+        The loaded module.
+
+    Raises:
+        SwarmLoaderError: If the file does not exist or cannot be loaded.
+    """
     if not path.exists():
         raise SwarmLoaderError(f"Python file not found: {path}")
 
@@ -335,6 +531,20 @@ def _load_module_from_path(path: Path) -> ModuleType:
 
 
 def _extract_agent_specs(module: ModuleType) -> List[Dict[str, Any]]:
+    """Extract agent specification dicts from a module.
+
+    Supported exports (in order of precedence):
+
+    * ``AGENTS`` — list of dicts.
+    * ``AGENT_SPEC`` — single dict.
+    * ``AGENT`` — single dict.
+
+    Args:
+        module: The loaded module.
+
+    Returns:
+        List of specification dictionaries.
+    """
     if hasattr(module, "AGENTS"):
         raw = getattr(module, "AGENTS")
         if not isinstance(raw, list):
@@ -357,6 +567,18 @@ def _extract_agent_specs(module: ModuleType) -> List[Dict[str, Any]]:
 
 
 def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint:
+    """Build an :class:`AgentBlueprint` from a raw specification dict.
+
+    Args:
+        raw: Specification dictionary.
+        source: Source file path (for error messages).
+
+    Returns:
+        Populated :class:`AgentBlueprint`.
+
+    Raises:
+        SwarmLoaderError: If ``agent_id`` is missing.
+    """
     agent_id = str(raw.get("agent_id", "")).strip()
     if not agent_id:
         raise SwarmLoaderError(f"{source} is missing agent_id.")
@@ -387,6 +609,18 @@ def _coerce_agent_blueprint(raw: Dict[str, Any], source: Path) -> AgentBlueprint
 
 
 def _parse_workspace_config(raw: Any, source: Path) -> WorkspaceConfig:
+    """Parse the ``[workspace]`` TOML table.
+
+    Args:
+        raw: Raw TOML value.
+        source: Manifest path (for error messages).
+
+    Returns:
+        :class:`WorkspaceConfig`.
+
+    Raises:
+        SwarmLoaderError: On invalid mode values.
+    """
     if raw is None:
         return WorkspaceConfig()
     if not isinstance(raw, dict):
@@ -439,6 +673,18 @@ def _parse_workspace_config(raw: Any, source: Path) -> WorkspaceConfig:
 
 
 def _parse_global_variables_config(raw: Any, source: Path) -> GlobalVariablesConfig:
+    """Parse the ``[globals]`` TOML table.
+
+    Args:
+        raw: Raw TOML value.
+        source: Manifest path (for error messages).
+
+    Returns:
+        :class:`GlobalVariablesConfig`.
+
+    Raises:
+        SwarmLoaderError: On malformed visibility tables.
+    """
     if raw is None:
         return GlobalVariablesConfig()
     if not isinstance(raw, dict):
@@ -468,7 +714,17 @@ def _parse_global_variables_config(raw: Any, source: Path) -> GlobalVariablesCon
 
 
 def _resolve_env_vars(value: str) -> str:
-    """Replace ${VAR_NAME} or $VAR_NAME with environment variable values."""
+    """Replace ``${VAR_NAME}`` or ``$VAR_NAME`` with environment variable values.
+
+    Args:
+        value: String potentially containing variable references.
+
+    Returns:
+        String with all references resolved.
+
+    Raises:
+        SwarmLoaderError: If a referenced variable is not set.
+    """
     pattern = re.compile(r"\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
     def replacer(match: re.Match[str]) -> str:
@@ -485,6 +741,18 @@ def _resolve_env_vars(value: str) -> str:
 
 
 def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendConfig]:
+    """Parse a single LLM backend definition.
+
+    Args:
+        raw: Raw TOML table.
+        fallback_name: Name to use if ``name`` is absent.
+
+    Returns:
+        :class:`LLMBackendConfig` or ``None``.
+
+    Raises:
+        SwarmLoaderError: On missing required fields.
+    """
     if raw is None:
         return None
     if not isinstance(raw, dict):
@@ -525,6 +793,17 @@ def _parse_llm_backend(raw: Any, *, fallback_name: str) -> Optional[LLMBackendCo
 
 
 def _parse_llm_backend_list(raw: Any) -> List[LLMBackendConfig]:
+    """Parse a list of LLM backend definitions.
+
+    Args:
+        raw: Raw TOML array.
+
+    Returns:
+        List of :class:`LLMBackendConfig`.
+
+    Raises:
+        SwarmLoaderError: On malformed entries.
+    """
     if raw is None:
         return []
     if not isinstance(raw, list):
@@ -541,6 +820,18 @@ def _parse_llm_backend_list(raw: Any) -> List[LLMBackendConfig]:
 
 
 def _normalize_path_list(raw: Any, *, field_name: str) -> List[str]:
+    """Coerce *raw* to a list of non-empty strings.
+
+    Args:
+        raw: Raw TOML value.
+        field_name: Human-readable field name for error messages.
+
+    Returns:
+        List of stripped strings.
+
+    Raises:
+        SwarmLoaderError: If *raw* is not a list.
+    """
     if raw is None:
         return []
     if not isinstance(raw, list):
@@ -551,7 +842,15 @@ def _normalize_path_list(raw: Any, *, field_name: str) -> List[str]:
 
 
 def load_skill_assets(package_path: Path, manifest: SwarmManifest) -> List[SkillAsset]:
-    """Load all skill assets referenced by the manifest."""
+    """Load all skill assets referenced by the manifest.
+
+    Args:
+        package_path: Path to the swarm directory.
+        manifest: Parsed manifest.
+
+    Returns:
+        List of :class:`SkillAsset` objects.
+    """
     skills: List[SkillAsset] = []
     for file_name in manifest.skill_files:
         skill_path = _resolve_package_local_path(package_path, file_name)

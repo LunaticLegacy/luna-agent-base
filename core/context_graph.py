@@ -1,3 +1,14 @@
+"""Context graph — a token-budgeted, reference-aware view of execution state.
+
+``ContextGraph`` stores ``ContextEntry`` items (facts, claims, workspace
+artifacts, etc.) as a directed graph of references.  It supports:
+    * Subgraph queries by relevance-propagated BFS.
+    * Token-budget pruning with importance-based eviction.
+    * Assembly into a plain-text prompt block for LLM injection.
+    * Conversion from a ``CognitiveGraph`` so that thought structures can
+      be fed back into the execution context.
+"""
+
 from __future__ import annotations
 
 import copy
@@ -15,6 +26,8 @@ from .cognitive_parts.types import CognitiveEdge, CognitiveNode, CognitiveNodeTy
 
 
 class ContextEntryType(str, Enum):
+    """Taxonomy of context entry kinds."""
+
     SYSTEM = "system"
     FACT = "fact"
     EVIDENCE = "evidence"
@@ -29,6 +42,8 @@ class ContextEntryType(str, Enum):
 
 
 class ContextRelation(str, Enum):
+    """Taxonomy of reference relations between context entries."""
+
     REFERENCES = "references"
     SUMMARY_OF = "summary_of"
     ELABORATION_OF = "elaboration_of"
@@ -40,6 +55,16 @@ class ContextRelation(str, Enum):
 
 @dataclass
 class ContextReference:
+    """A typed reference from one context entry to another.
+
+    Attributes:
+        target_id: ID of the referenced entry.
+        relation: Semantic relationship.
+        target_hash: Content hash at the time the reference was created.
+        fallback_inline: Inline text to use if the target is pruned away.
+        weight: Relevance propagation weight (0.0–1.0+).
+    """
+
     target_id: str
     relation: ContextRelation
     target_hash: str
@@ -47,6 +72,7 @@ class ContextReference:
     weight: float = 1.0
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict."""
         return {
             "target_id": self.target_id,
             "relation": self.relation.value,
@@ -57,6 +83,7 @@ class ContextReference:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContextReference":
+        """Deserialise from a plain dict."""
         return cls(
             target_id=str(data.get("target_id", "")),
             relation=ContextRelation(str(data.get("relation", ContextRelation.REFERENCES.value))),
@@ -68,6 +95,20 @@ class ContextReference:
 
 @dataclass
 class ContextEntry:
+    """One unit of information inside the context graph.
+
+    Attributes:
+        id: Unique entry identifier.
+        summary: Short headline for display.
+        content: Full text payload.
+        token_count: Estimated token count (auto-computed if zero on add).
+        timestamp: Unix timestamp.
+        entry_type: Semantic category.
+        outgoing_refs: References to other entries.
+        metadata: Free-form extension dict.
+        is_retained: Whether the entry survived pruning.
+    """
+
     id: str
     summary: str
     content: str
@@ -79,10 +120,12 @@ class ContextEntry:
     is_retained: bool = False
 
     def content_hash(self) -> str:
+        """Return a stable sha256 hash of the content field."""
         encoded = self.content.encode("utf-8")
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict."""
         return {
             "id": self.id,
             "summary": self.summary,
@@ -97,6 +140,7 @@ class ContextEntry:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContextEntry":
+        """Deserialise from a plain dict."""
         return cls(
             id=str(data.get("id", "")),
             summary=str(data.get("summary", "")),
@@ -112,16 +156,29 @@ class ContextEntry:
 
 @dataclass
 class ContextGraph:
+    """A directed graph of context entries with token-budget pruning.
+
+    Attributes:
+        graph_id: Identifier for this graph instance.
+        entries: Mapping from entry ID to ContextEntry.
+    """
+
     graph_id: str = ""
     entries: Dict[str, ContextEntry] = field(default_factory=dict)
 
     def add_entry(self, entry: ContextEntry) -> ContextEntry:
+        """Register *entry*, auto-estimating tokens if the count is zero."""
         if not entry.token_count:
             entry.token_count = _estimate_tokens(entry.content)
         self.entries[entry.id] = entry
         return entry
 
     def add_reference(self, source_id: str, reference: ContextReference) -> ContextReference:
+        """Append a reference to an existing entry.
+
+        Raises:
+            KeyError: If *source_id* does not exist.
+        """
         source = self.entries.get(source_id)
         if source is None:
             raise KeyError(f"Unknown source entry: {source_id}")
@@ -129,9 +186,11 @@ class ContextGraph:
         return reference
 
     def get_entry(self, entry_id: str) -> Optional[ContextEntry]:
+        """Return the entry with *entry_id*, or None."""
         return self.entries.get(entry_id)
 
     def get_incoming_refs(self, target_id: str) -> List[Tuple[ContextEntry, ContextReference]]:
+        """Return all (source_entry, reference) pairs that point to *target_id*."""
         incoming: List[Tuple[ContextEntry, ContextReference]] = []
         for entry in self.entries.values():
             for ref in entry.outgoing_refs:
@@ -146,6 +205,11 @@ class ContextGraph:
         max_nodes: Optional[int] = None,
         min_relevance: float = 0.1,
     ) -> "ContextGraph":
+        """Extract a relevance-propagated subgraph around *seed_ids*.
+
+        Relevance decays by 0.5^hop and is multiplied by edge weight.
+        Entries below *min_relevance* are discarded.
+        """
         if not seed_ids:
             return ContextGraph(graph_id=f"{self.graph_id}_sub")
 
@@ -194,6 +258,12 @@ class ContextGraph:
         return subgraph
 
     def cascade_retain(self, entry_id: str, depth: int = 2) -> set[str]:
+        """Mark *entry_id* and its ancestors as retained, up to *depth*.
+
+        Different relation types consume different amounts of depth budget
+        so that shallow references (e.g. SUMMARY_OF) do not exhaust the
+        traversal immediately.
+        """
         retained: set[str] = set()
         queue: List[Tuple[str, int]] = [(entry_id, depth)]
         while queue:
@@ -224,6 +294,15 @@ class ContextGraph:
         return retained
 
     def prune_graph(self, anchor_id: str, token_budget: int) -> "ContextGraph":
+        """Return a pruned clone that fits within *token_budget*.
+
+        The algorithm:
+            1. Cascade-retain from *anchor_id*.
+            2. If over budget, evict least-important non-SYSTEM entries.
+            3. Back-fill with the most important remaining entries.
+            4. Resolve missing references by inlining fallback text.
+            5. Final safety pass: evict again if still over budget.
+        """
         working = self.clone()
         for entry in working.entries.values():
             entry.is_retained = entry.entry_type == ContextEntryType.SYSTEM
@@ -269,6 +348,11 @@ class ContextGraph:
         return working
 
     def _resolve_missing_references(self) -> None:
+        """Inline fallback text for references whose targets were pruned away.
+
+        This preserves semantic continuity even when the referenced entry
+        is no longer present in the pruned graph.
+        """
         for entry in self.entries.values():
             if not entry.is_retained:
                 continue
@@ -306,6 +390,11 @@ class ContextGraph:
         token_budget: int = 2048,
         title: str = "Context Graph",
     ) -> str:
+        """Build a plain-text prompt block from the pruned graph.
+
+        If *anchor_id* is omitted, the first SYSTEM entry (or the first
+        entry overall) is used as the pruning anchor.
+        """
         if not self.entries:
             return f"{title} (empty)"
 
@@ -347,22 +436,26 @@ class ContextGraph:
         return "\n".join(lines).strip()
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict."""
         return {
             "graph_id": self.graph_id,
             "entries": [entry.to_dict() for entry in self.entries.values()],
         }
 
     def save(self, path: Path) -> None:
+        """Persist as JSON to *path* (creating parent directories if needed)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> "ContextGraph":
+        """Load from a JSON file at *path*."""
         payload = json.loads(path.read_text(encoding="utf-8"))
         return cls.from_dict(payload)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContextGraph":
+        """Deserialise from a plain dict."""
         graph = cls(graph_id=str(data.get("graph_id", "")))
         for raw_entry in data.get("entries", []) or []:
             if isinstance(raw_entry, dict):
@@ -370,6 +463,7 @@ class ContextGraph:
         return graph
 
     def clone(self) -> "ContextGraph":
+        """Return a deep copy via serialise/deserialise."""
         return ContextGraph.from_dict(self.to_dict())
 
     @classmethod
@@ -383,6 +477,12 @@ class ContextGraph:
         max_nodes: Optional[int] = None,
         max_hops: int = 2,
     ) -> tuple["ContextGraph", List[str]]:
+        """Transform a CognitiveGraph into a ContextGraph with mapped references.
+
+        Returns:
+            (context_graph, descriptor_roots) where *descriptor_roots* are
+            the node IDs that should be treated as entry points.
+        """
         if seed_ids:
             descriptor_roots = [seed_id for seed_id in seed_ids if seed_id in cognitive_graph.nodes]
             subgraph = cognitive_graph.query_subgraph(descriptor_roots, max_hops=max_hops, max_nodes=max_nodes)
@@ -419,6 +519,7 @@ class ContextGraph:
 
 
 def _context_entry_from_cognitive_node(node: CognitiveNode) -> ContextEntry:
+    """Map a CognitiveNode to a ContextEntry with appropriate type translation."""
     entry_type = _context_entry_type_from_cognitive_node_type(node.node_type)
     content = str(node.content or "")
     summary = str(node.summary or content[:160]).strip()
@@ -442,6 +543,7 @@ def _context_entry_from_cognitive_node(node: CognitiveNode) -> ContextEntry:
 
 
 def _context_entry_type_from_cognitive_node_type(node_type: CognitiveNodeType) -> ContextEntryType:
+    """Heuristic mapping from cognitive node taxonomy to context entry taxonomy."""
     mapping = {
         CognitiveNodeType.FACT: ContextEntryType.FACT,
         CognitiveNodeType.EVIDENCE: ContextEntryType.EVIDENCE,
@@ -462,6 +564,7 @@ def _context_entry_type_from_cognitive_node_type(node_type: CognitiveNodeType) -
 
 
 def _context_relation_from_cognitive_relation(relation: CognitiveRelationType) -> ContextRelation:
+    """Heuristic mapping from cognitive relation taxonomy to context relation taxonomy."""
     mapping = {
         CognitiveRelationType.SUPPORTS: ContextRelation.REFERENCES,
         CognitiveRelationType.OPPOSES: ContextRelation.CONTRADICTS,
@@ -480,10 +583,12 @@ def _context_relation_from_cognitive_relation(relation: CognitiveRelationType) -
 
 
 def _estimate_tokens(content: str) -> int:
+    """Crude token estimate: one token ≈ 4 characters."""
     return max(0, len(str(content)) // 4)
 
 
 def _parse_timestamp(raw: Any) -> float:
+    """Coerce *raw* to a Unix timestamp, falling back to now."""
     if isinstance(raw, (int, float)):
         return float(raw)
     try:
@@ -493,6 +598,7 @@ def _parse_timestamp(raw: Any) -> float:
 
 
 def _entry_priority(entry: ContextEntry) -> int:
+    """Return a sort key where lower numbers mean higher priority."""
     return {
         ContextEntryType.SYSTEM: 0,
         ContextEntryType.GOAL: 1,
@@ -509,6 +615,11 @@ def _entry_priority(entry: ContextEntry) -> int:
 
 
 def _entry_importance(entry: ContextEntry, graph: ContextGraph) -> float:
+    """Heuristic importance score for eviction decisions.
+
+    Higher is more important.  Factors in inbound reference count,
+    outbound reference count, and recency.
+    """
     outgoing = len(entry.outgoing_refs)
     incoming = len(graph.get_incoming_refs(entry.id))
     recency = entry.timestamp

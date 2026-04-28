@@ -1,3 +1,12 @@
+"""DAG-based episode history graph.
+
+``EpisodeGraph`` records every user-assistant turn as a node in a directed
+acyclic graph.  Parent links preserve conversation branching.  The graph
+supports compression (summarisation) of ancestor chains so that long
+histories can be condensed into summary nodes without losing structural
+information.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -17,6 +26,10 @@ class EpisodeGraph:
     Each node represents one user-assistant turn. Supports compression
     (summarization) of ancestor chains while preserving original nodes
     in an archived state.
+
+    Attributes:
+        nodes: Mapping from node ID to EpisodeNode.
+        root_ids: Node IDs that have no parents (entry points).
     """
 
     def __init__(self) -> None:
@@ -28,6 +41,7 @@ class EpisodeGraph:
     # ------------------------------------------------------------------
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the entire graph to a plain dict."""
         return {
             "nodes": {nid: node.to_dict() for nid, node in self.nodes.items()},
             "root_ids": sorted(self.root_ids),
@@ -35,6 +49,7 @@ class EpisodeGraph:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "EpisodeGraph":
+        """Deserialise a plain dict back into an EpisodeGraph."""
         graph = cls()
         for nid, node_data in data.get("nodes", {}).items():
             graph.nodes[nid] = EpisodeNode.from_dict(node_data)
@@ -54,7 +69,17 @@ class EpisodeGraph:
     ) -> str:
         """Add a new episode node to the graph.
 
-        Returns the new node id.
+        Args:
+            user_content: The user's message text.
+            assistant_content: The assistant's response text.
+            parent_ids: Set of parent node IDs.  Empty set → root node.
+            node_id: Optional explicit ID; auto-generated if omitted.
+
+        Returns:
+            The new node id.
+
+        Raises:
+            KeyError: If any parent_id does not exist.
         """
         nid = node_id or uuid.uuid4().hex
         parent_ids = set(parent_ids) if parent_ids else set()
@@ -82,6 +107,7 @@ class EpisodeGraph:
         return nid
 
     def _has_path(self, from_id: str, to_id: str, visited: Optional[Set[str]] = None) -> bool:
+        """Depth-first search for a path from *from_id* to *to_id*."""
         if from_id == to_id:
             return True
         if visited is None:
@@ -93,7 +119,16 @@ class EpisodeGraph:
         return False
 
     def add_edge(self, child_id: str, parent_id: str) -> None:
-        """Add a parent relationship to an existing node."""
+        """Add a parent relationship to an existing node.
+
+        Args:
+            child_id: The node that gains a new parent.
+            parent_id: The new parent.
+
+        Raises:
+            KeyError: If either node does not exist.
+            CyclicGraphError: If the edge would create a cycle.
+        """
         if child_id not in self.nodes:
             raise KeyError(f"child_id {child_id} does not exist")
         if parent_id not in self.nodes:
@@ -114,7 +149,21 @@ class EpisodeGraph:
         max_nodes: int = 8,
         strategy: str = "longest",
     ) -> List[str]:
-        """Return one ancestor path from a root to the target node."""
+        """Return one ancestor path from a root to the target node.
+
+        Args:
+            node_id: The target node.
+            max_nodes: Maximum length of the returned chain.
+            strategy: ``"longest"``, ``"shortest"``, or ``"first"``.
+
+        Returns:
+            Ordered list of node IDs from root to target (inclusive),
+            truncated to *max_nodes* if necessary.
+
+        Raises:
+            KeyError: If *node_id* does not exist.
+            ValueError: If *strategy* is unknown.
+        """
         if node_id not in self.nodes:
             raise KeyError(f"node_id {node_id} does not exist")
         if strategy not in {"longest", "shortest", "first"}:
@@ -146,7 +195,11 @@ class EpisodeGraph:
         return chain
 
     def get_all_ancestors(self, node_id: str) -> Set[str]:
-        """Return all ancestor node ids via BFS."""
+        """Return all ancestor node ids via BFS.
+
+        Raises:
+            KeyError: If *node_id* does not exist.
+        """
         if node_id not in self.nodes:
             raise KeyError(f"node_id {node_id} does not exist")
         ancestors: Set[str] = set()
@@ -159,9 +212,11 @@ class EpisodeGraph:
         return ancestors
 
     def get_active_nodes(self) -> Dict[str, EpisodeNode]:
+        """Return nodes that are neither archived nor explicitly inactive."""
         return {nid: node for nid, node in self.nodes.items() if node.active and not node.archived}
 
     def get_archived_nodes(self) -> Dict[str, EpisodeNode]:
+        """Return nodes that have been archived (e.g. after compression)."""
         return {nid: node for nid, node in self.nodes.items() if node.archived}
 
     # ------------------------------------------------------------------
@@ -182,7 +237,18 @@ class EpisodeGraph:
         (prompt: str, system_prompt: Optional[str]) -> str
         that returns the summary text.
 
-        Returns the new summary node id, or None if no compression happened.
+        Args:
+            node_id: The node whose ancestor chain should be compressed.
+            llm_summarize_callback: Async function producing a summary string.
+            max_nodes: Upper bound on ancestor chain length to consider.
+            keep_recent: How many recent ancestors to preserve verbatim.
+            summary_system_prompt: Optional system prompt for the summariser.
+
+        Returns:
+            The new summary node id, or None if no compression happened.
+
+        Raises:
+            KeyError: If *node_id* does not exist.
         """
         if node_id not in self.nodes:
             raise KeyError(f"node_id {node_id} does not exist")

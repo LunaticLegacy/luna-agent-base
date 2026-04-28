@@ -1,3 +1,13 @@
+"""工作区文件读取工具。
+
+本模块提供 ``FileReaderTool``，用于读取工作区内文本文件内容。
+支持多层路径解析回退、工作区沙箱校验以及敏感路径拦截。
+
+主要导出内容：
+    - :class:`FileReaderTool`: 文件读取工具定义。
+    - ``TOOL``: 模块级单例实例。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,8 +34,19 @@ class FileReaderTool(ToolDefinition):
         )
 
     def _resolve_path(self, arguments: Dict[str, Any]) -> str:
-        """Resolve target path with priority:
-        explicit path > payload path hint > fallback_path.
+        """按优先级解析目标文件路径。
+
+        顺序为：显式 path > payload/canonical_payload 中的 path/filename >
+        artifact 中的 path/filename > fallback_path。
+
+        Args:
+            arguments: 工具入参字典。
+
+        Returns:
+            解析出的目标路径字符串。
+
+        Raises:
+            ValueError: 所有来源均未提供有效路径时抛出。
         """
         # Priority 1: explicit path
         path_value = str(arguments.get("path", "")).strip()
@@ -64,6 +85,22 @@ class FileReaderTool(ToolDefinition):
         *,
         context: Optional[ToolContext] = None,
     ) -> Any:
+        """读取目标文件内容并返回。
+
+        流程包括：解析路径 → 工作区沙箱校验 → 敏感路径拦截 →
+        读取文本 → 封装结果。
+
+        Args:
+            arguments: 工具入参，需包含 path。
+            context: 工具执行上下文。
+
+        Returns:
+            Dict[str, Any]: 包含 content、path、bytes、exists 及上下文摘要的字典；
+            文件不存在时返回 exists=False 的友好错误结构。
+
+        Raises:
+            ValueError: 路径越界或命中敏感路径规则时抛出。
+        """
         require_tool_capability(context, "file_read", self.tool_name)
         path_value = self._resolve_path(arguments)
         target_path = Path(path_value)
@@ -108,11 +145,27 @@ class FileReaderTool(ToolDefinition):
         }
 
     def _is_workspace_restricted(self, context: Optional[ToolContext]) -> bool:
+        """判断当前上下文是否处于受限工作区模式。
+
+        Args:
+            context: 工具上下文。
+
+        Returns:
+            True 表示需要沙箱校验。
+        """
         if context is None:
             return True
         return str(getattr(context, "workspace_mode", "workspace")).strip() != "full_access"
 
     def _resolve_workspace_root(self, context: Optional[ToolContext]) -> Optional[Path]:
+        """解析当前工作区的根目录路径。
+
+        Args:
+            context: 工具上下文。
+
+        Returns:
+            工作区绝对路径，或当前进程目录。
+        """
         if context is None:
             return Path.cwd().resolve()
         workspace_root = getattr(context, "workspace_root", None)
@@ -121,12 +174,33 @@ class FileReaderTool(ToolDefinition):
         return Path(workspace_root).resolve()
 
     def _path_is_within_root(self, target_path: Path, workspace_root: Path) -> bool:
+        """判断目标路径是否位于工作区根目录之下。
+
+        Args:
+            target_path: 待检查路径。
+            workspace_root: 工作区根路径。
+
+        Returns:
+            True 表示位于工作区内。
+        """
         try:
             return target_path == workspace_root or workspace_root in target_path.parents
         except RuntimeError:
             return False
 
     def _reject_sensitive_path(self, target_path: Path, context: Optional[ToolContext]) -> None:
+        """拦截对敏感路径或配置文件的读取请求。
+
+        禁止读取 .git、虚拟环境、shell 配置文件等；
+        对于 config.toml / .env 等配置文件，需要显式具备 config_write 能力。
+
+        Args:
+            target_path: 目标文件路径。
+            context: 工具上下文。
+
+        Raises:
+            ValueError: 命中敏感路径规则时抛出。
+        """
         parts = {part.lower() for part in target_path.parts}
         blocked_parts = {".git", ".venv", ".lvenv", "__pycache__"}
         if parts & blocked_parts:

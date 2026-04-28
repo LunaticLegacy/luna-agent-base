@@ -1,3 +1,8 @@
+"""Catalog 构建子包，按领域拆分为独立的构建函数。
+
+每个模块负责从运行时注册表中提取原始数据，并转换为前端可用的
+目录/统计/可观测性结构。所有构建函数均为纯函数，不修改运行时状态。
+"""
 from .agents import build_agent_catalog
 from .metrics import build_metrics_catalog
 from .observability import build_event_catalog, build_log_catalog

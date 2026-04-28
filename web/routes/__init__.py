@@ -1,3 +1,8 @@
+"""路由子包，聚合所有 FastAPI APIRouter 实例。
+
+每个子模块按业务域划分（health、catalog、content、settings、
+swarms、runs），最终由 app_factory 统一挂载到 FastAPI 应用上。
+"""
 from .health import router as health_router
 from .catalog import router as catalog_router
 from .content import router as content_router

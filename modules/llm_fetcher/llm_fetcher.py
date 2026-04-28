@@ -1,3 +1,18 @@
+"""多后端 LLM 请求路由与流式输出管理模块。
+
+本模块封装对 OpenAI、LiteLLM 等后端服务的统一调用接口，
+支持 fallback 自动切换、流式增量提取（含 reasoning 内容）、
+超时重试以及限流器集成。
+
+主要导出内容：
+    - :class:`LLMContext`: 单条对话消息。
+    - :class:`LLMBackendConfig`: 单个后端配置。
+    - :class:`LLMError`: 基础异常。
+    - :class:`LLMTimeoutError`: 超时异常。
+    - :class:`LLMBackendError`: 所有后端均失败异常。
+    - :class:`LLMFetcher`: 请求路由管理器。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -73,6 +88,7 @@ class LLMFetcher:
             timeout: 旧接口模式下的默认超时时间，单位为秒。
             backends: 多后端模式下的后端配置列表。
             default_backend: 多后端模式下的默认后端名称。
+            limiter: 可选的并发限流器，用于控制 LLM 请求速率。
 
         Raises:
             ValueError: 当没有提供有效的构造参数，或默认后端名称不存在时抛出。
@@ -220,6 +236,7 @@ class LLMFetcher:
                 "timeout": backend.timeout,
             }
             if tools:
+                # OpenAI 要求 tools 与 tool_choice 成对出现，仅在传入 tools 时补充 tool_choice
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
             kwargs.update(backend.extra)
@@ -266,7 +283,16 @@ class LLMFetcher:
         return LLMError(message)
 
     def _timeout_retry_count(self, backend: LLMBackendConfig) -> int:
-        """Return how many retries to allow for timeout failures on one backend."""
+        """计算某个后端在超时场景下允许的重试次数。
+
+        将配置中的 ``max_retries`` 转换为至少一次尝试的整数。
+
+        Args:
+            backend: 目标后端配置。
+
+        Returns:
+            int: 该后端在超时失败时允许的重试次数（至少为 1）。
+        """
         return max(1, int(backend.max_retries))
 
     def _extract_content(self, delta: Any) -> Optional[str]:
@@ -314,6 +340,7 @@ class LLMFetcher:
         Yields:
             标准化后的文本片段。
         """
+        # 维护 thinking 状态机，用于在 reasoning 内容与正文之间插入分界标记
         in_thinking = False
         for chunk in response:
             choices = getattr(chunk, "choices", None)
@@ -395,6 +422,7 @@ class LLMFetcher:
                         normalized = self._normalize_exception(backend, exc)
                         if isinstance(normalized, LLMTimeoutError) and retries_left > 0:
                             retries_left -= 1
+                            # 采用指数退避思想，但将单次等待上限限制在 1.5 秒，避免高频重试拖慢整体响应
                             await asyncio.sleep(min(1.5, 0.25 * (self._timeout_retry_count(backend) - retries_left)))
                             continue
                         backend_errors.append(str(normalized))
@@ -464,6 +492,7 @@ class LLMFetcher:
                         normalized_error = self._normalize_exception(backend, exc)
                         if isinstance(normalized_error, LLMTimeoutError) and not yielded_any and retries_left > 0:
                             retries_left -= 1
+                            # 采用指数退避思想，但将单次等待上限限制在 1.5 秒，避免高频重试拖慢整体响应
                             await asyncio.sleep(min(1.5, 0.25 * (self._timeout_retry_count(backend) - retries_left)))
                             continue
                         if yielded_any:

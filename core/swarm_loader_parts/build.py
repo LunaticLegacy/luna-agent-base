@@ -1,3 +1,23 @@
+"""Build a runtime :class:`Core` from a swarm package directory.
+
+This module implements the high-level loading pipeline:
+
+1. Parse the manifest (``swarm.toml``).
+2. Load skills, tools, and APIs.
+3. Resolve LLM backends and workspace defaults.
+4. Create agents from blueprints.
+5. Load and validate the execution graph.
+
+The entry points are :func:`build_core_from_package` for a single swarm
+and :func:`load_all_swarms` for recursive discovery.
+
+Exports:
+    - :class:`LoadedSwarm`
+    - :func:`build_core_from_package`
+    - :func:`load_all_swarms`
+    - :func:`load_swarm_graph`
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -41,7 +61,14 @@ from ..toodefl import ToolDefinition
 
 
 def _load_concurrency_config(package_path: Path) -> Dict[str, Any]:
-    """Walk upward from package_path to find config.toml and read [runtime.concurrency]."""
+    """Walk upward from *package_path* to find ``config.toml`` and read ``[runtime.concurrency]``.
+
+    Args:
+        package_path: The swarm package directory.
+
+    Returns:
+        Dictionary with concurrency settings, or empty dict if not found.
+    """
     current = package_path.resolve()
     for _ in range(5):
         config_path = current / "config.toml"
@@ -64,7 +91,19 @@ def _load_concurrency_config(package_path: Path) -> Dict[str, Any]:
 
 @dataclass
 class LoadedSwarm:
-    """A fully loaded swarm package with a runtime core."""
+    """A fully loaded swarm package with a runtime core.
+
+    Attributes:
+        package_path: Absolute path to the swarm directory.
+        manifest_path: Absolute path to the manifest file.
+        manifest: Parsed :class:`SwarmManifest`.
+        core: Initialised :class:`Core`.
+        skills: Map ``skill_name -> SkillAsset``.
+        tools: Map ``tool_name -> ToolDefinition``.
+        apis: Map ``api_name -> api object``.
+        tool_requirement_files: Paths to tool ``requirements.txt`` files.
+        api_requirement_files: Paths to API ``requirements.txt`` files.
+    """
 
     package_path: Path
     manifest_path: Path
@@ -78,7 +117,21 @@ class LoadedSwarm:
 
 
 def load_swarm_graph(package_path: Path, manifest: SwarmManifest, core: Core) -> ExecutionGraph:
-    """Load the single execution graph file for a swarm package."""
+    """Load the single execution graph file for a swarm package.
+
+    The graph module must expose either ``build_graph(core)`` or ``GRAPH``.
+
+    Args:
+        package_path: Path to the swarm directory.
+        manifest: Parsed manifest.
+        core: Runtime core.
+
+    Returns:
+        The loaded :class:`ExecutionGraph`.
+
+    Raises:
+        SwarmLoaderError: If the graph module is malformed.
+    """
     graph_path = _resolve_package_local_path(package_path, manifest.graph_file)
     backup_path = graph_path.with_name("graph_init.py")
     print(
@@ -130,7 +183,19 @@ def build_core_from_package(
     manifest: Optional[SwarmManifest] = None,
     manifest_path: Optional[Path] = None,
 ) -> LoadedSwarm:
-    """Build a runtime core from one swarm package."""
+    """Build a runtime core from one swarm package.
+
+    Args:
+        package_path: Path to the swarm directory.
+        manifest: Optional pre-parsed manifest.
+        manifest_path: Optional path to the manifest file.
+
+    Returns:
+        A :class:`LoadedSwarm` with fully initialised core.
+
+    Raises:
+        SwarmLoaderError: On any unrecoverable load failure.
+    """
     if manifest is None or manifest_path is None:
         manifest_path, manifest = load_swarm_manifest(package_path)
 
@@ -235,6 +300,7 @@ def build_core_from_package(
                     flush=True,
                 )
 
+        # Allow custom agent classes declared via AGENT_CLASS in the blueprint module
         agent_class = Agent
         if blueprint.source_file:
             import sys
@@ -289,6 +355,14 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -
 
     Individual package load failures are logged and skipped so that
     successfully-loaded swarms remain available.
+
+    Args:
+        root: Directory to scan for swarm packages.
+        preinstall_tool_requirements: Whether to ``pip install`` tool/API
+            requirements before loading.
+
+    Returns:
+        List of successfully loaded :class:`LoadedSwarm` objects.
     """
     package_paths = discover_swarm_packages(root)
     print(
@@ -351,6 +425,7 @@ def load_all_swarms(root: Path, *, preinstall_tool_requirements: bool = False) -
 
 
 def _load_module_from_entry(entry: str, package_path: Path):
+    """Re-export the internal module loader for backward compatibility."""
     from .utils import _load_module_from_entry as load
 
     return load(entry, package_path)

@@ -1,3 +1,10 @@
+"""External tool scheduler for Tool Request Protocol v1.
+
+``ToolScheduler`` executes batches of ``ToolRequest`` objects respecting
+DAG dependencies (via ``depends_on``) and write-conflict grouping so that
+file-writing tools do not race against each other.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +17,12 @@ from core.toodefl import ToolContext
 
 
 class ToolScheduler:
-    """External tool scheduler for Tool Request Protocol v1."""
+    """External tool scheduler for Tool Request Protocol v1.
+
+    Attributes:
+        core: Runtime core providing tool registry and optional rate limiter.
+        limiter: Optional concurrency limiter (``acquire_tool`` / ``release_tool``).
+    """
 
     def __init__(self, core: Any, limiter: Any = None) -> None:
         self.core = core
@@ -25,7 +37,18 @@ class ToolScheduler:
         tool_round: int = 0,
         context: Optional[ToolContext] = None,
     ) -> ToolBatchResult:
-        """Execute a batch of tool requests respecting DAG and resource conflicts."""
+        """Execute a batch of tool requests respecting DAG and resource conflicts.
+
+        Args:
+            tool_requests: The requested tool calls (may include dependencies).
+            node_id: Execution graph node that initiated the batch.
+            agent_id: Agent that initiated the batch.
+            tool_round: Which ReAct tool iteration this is.
+            context: Execution context passed through to each tool.
+
+        Returns:
+            A ToolBatchResult containing individual ToolResults and a summary.
+        """
         execution_plan = self._build_execution_plan(tool_requests)
         results: List[ToolResult] = []
         completed: Dict[str, ToolResult] = {}
@@ -81,7 +104,12 @@ class ToolScheduler:
         )
 
     def _build_execution_plan(self, requests: List[ToolRequest]) -> List[List[ToolRequest]]:
-        """Topological sort into levels."""
+        """Topological sort into levels.
+
+        Each level contains requests whose dependencies have already been
+        placed in earlier levels.  If a cycle is detected, the remaining
+        requests are flushed as a final level to avoid infinite loops.
+        """
         req_map = {r.id: r for r in requests}
         pending = set(req_map.keys())
         plan: List[List[ToolRequest]] = []
@@ -116,7 +144,11 @@ class ToolScheduler:
         return groups
 
     def _conflict(self, a: ToolRequest, b: ToolRequest) -> bool:
-        """Return True if two requests cannot safely run in parallel."""
+        """Return True if two requests cannot safely run in parallel.
+
+        Conflict is defined as touching the same resource ID with at least
+        one write mode.
+        """
         res_a = self._infer_resources(a)
         res_b = self._infer_resources(b)
         for ra in res_a:
@@ -205,6 +237,7 @@ class ToolScheduler:
             )
 
     def _resolve_tool_alias(self, tool_name: str) -> str:
+        """Delegate alias resolution to the core's contract validator, if any."""
         validator = getattr(self.core, "tool_contract_validator", None)
         resolver = getattr(validator, "resolve_alias", None)
         if callable(resolver):
@@ -217,6 +250,7 @@ class ToolScheduler:
         *,
         context: Optional[ToolContext] = None,
     ) -> Dict[str, Any]:
+        """Built-in recall_context tool: search an agent's archived context."""
         agent_id = (context.agent_id if context is not None else None) or ""
         if not agent_id:
             agent_id = str(getattr(context, "metadata", {}).get("agent_id", "") if context is not None else "")
@@ -230,6 +264,7 @@ class ToolScheduler:
         }
 
     def _resolve_agent(self, agent_id: str) -> Any:
+        """Look up an agent by ID through core hooks, tolerating missing agents."""
         if not agent_id:
             return None
         get_blueprint = getattr(self.core, "get_agent_blueprint", None)
@@ -247,6 +282,7 @@ class ToolScheduler:
         return None
 
     def _recall_from_agent(self, agent: Any, query: str) -> List[Dict[str, Any]]:
+        """Query an agent's context archive and normalise results to plain dicts."""
         if agent is None:
             return []
         recall = getattr(agent, "recall_context", None)

@@ -1,3 +1,10 @@
+"""Cognitive module — convenience re-exports for the thought-graph subsystem.
+
+All real implementations live in ``core.cognitive_parts``.  This module
+exists so that downstream code can ``from core.cognitive import ...``
+without knowing the internal package layout.
+"""
+
 from __future__ import annotations
 
 from .cognitive_parts import (
@@ -11,6 +18,7 @@ from .cognitive_parts import (
     merge_cognitive_graphs,
     strip_cognitive_graph_tags,
 )
+
 __all__ = [
     "CognitiveEdge",
     "CognitiveGraph",

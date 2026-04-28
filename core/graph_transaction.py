@@ -1,3 +1,12 @@
+"""Atomic graph mutation transactions.
+
+Provides ``GraphTransaction``, which stages mutations against a working
+clone of an ExecutionGraph, validates the result, and only then copies
+the accepted state back to the live graph.  During commit, affected
+agent blueprints are quarantined and drained so that in-flight rounds
+do not observe a partially-mutated graph.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,7 +17,14 @@ from .policy import AgentNode, ExecutionGraph
 
 @dataclass
 class GraphMutationRecord:
-    """One logical graph mutation staged inside a transaction."""
+    """One logical graph mutation staged inside a transaction.
+
+    Attributes:
+        action: Human-readable mutation name (e.g. ``"architecture_patch"``).
+        detail: Arbitrary serialisable payload describing the change.
+        author: Identity that proposed the mutation.
+        reason: Free-form justification string.
+    """
 
     action: str
     detail: Dict[str, Any] = field(default_factory=dict)
@@ -18,7 +34,15 @@ class GraphMutationRecord:
 
 @dataclass
 class GraphTransactionResult:
-    """Committed graph mutation result."""
+    """Committed graph mutation result.
+
+    Attributes:
+        graph_name: Name of the mutated graph.
+        revision: Optional revision counter after commit.
+        runtime_path: Optional filesystem path to the persisted runtime graph.
+        revision_path: Optional filesystem path to the revision backup.
+        change: Serialisable summary of the mutation.
+    """
 
     graph_name: str
     revision: Optional[int] = None
@@ -28,7 +52,18 @@ class GraphTransactionResult:
 
 
 class GraphTransaction:
-    """Prepare, validate, and commit a graph mutation atomically."""
+    """Prepare, validate, and commit a graph mutation atomically.
+
+    The transaction workflow is:
+        1. ``prepare`` — apply the mutation to a *working* clone and validate.
+        2. ``commit`` — quarantine affected agents, copy state to the live
+           graph, persist, then restore agents.
+        3. ``rollback`` — discard the working clone and reset state.
+
+    Args:
+        graph: The live ExecutionGraph to mutate.
+        core: Optional Core reference for agent-pool and persistence hooks.
+    """
 
     def __init__(
         self,
@@ -44,6 +79,7 @@ class GraphTransaction:
 
     @property
     def working_graph(self) -> ExecutionGraph:
+        """Return the working clone (safe to inspect before commit)."""
         return self._working_graph
 
     def prepare(
@@ -51,6 +87,11 @@ class GraphTransaction:
         mutation: GraphMutationRecord,
         mutate: Callable[[ExecutionGraph], None],
     ) -> ExecutionGraph:
+        """Stage *mutate* against the working graph and validate.
+
+        Raises:
+            ValueError: If validation of the working graph fails.
+        """
         mutate(self._working_graph)
         validation = self._working_graph.validate(self.core)
         if not validation.is_valid:
@@ -61,6 +102,18 @@ class GraphTransaction:
         return self._working_graph
 
     async def commit(self) -> GraphTransactionResult:
+        """Commit the prepared mutation to the live graph.
+
+        Steps:
+            1. Quarantine and drain affected agent blueprints.
+            2. Snapshot the current graph, copy working state over.
+            3. Persist the change via the core hook.
+            4. Restore quarantined agents.
+
+        Raises:
+            ValueError: If called before ``prepare()``.
+            Exception: Re-raised from persistence; live graph is rolled back.
+        """
         if not self._prepared:
             raise ValueError("graph transaction commit called before prepare().")
 
@@ -73,6 +126,7 @@ class GraphTransaction:
         try:
             persistence = self._persist_change(change)
         except Exception:
+            # Rollback on persistence failure so the live graph stays consistent.
             self._copy_graph_state(self.graph, previous)
             self._unquarantine(affected_blueprints)
             raise
@@ -81,11 +135,13 @@ class GraphTransaction:
         return persistence
 
     def rollback(self) -> None:
+        """Discard the working clone and clear staged mutations."""
         self._working_graph = self.graph.clone()
         self._mutations.clear()
         self._prepared = False
 
     async def _quarantine_and_drain(self, blueprint_refs: List[str]) -> None:
+        """Temporarily isolate affected blueprints so no active rounds race."""
         if self.core is None:
             return
         pool = getattr(self.core, "agent_instance_pool", None)
@@ -101,6 +157,7 @@ class GraphTransaction:
                 await drain(blueprint_ref, timeout=2.0)
 
     def _unquarantine(self, blueprint_refs: List[str]) -> None:
+        """Restore quarantined blueprints to the active pool."""
         if self.core is None:
             return
         pool = getattr(self.core, "agent_instance_pool", None)
@@ -112,6 +169,7 @@ class GraphTransaction:
                 restore(blueprint_ref)
 
     def _affected_agent_blueprints(self) -> List[str]:
+        """Compare previous vs working graph to find changed agent nodes."""
         affected: List[str] = []
         previous_agents = {
             node.node_id: node.blueprint_ref
@@ -129,6 +187,7 @@ class GraphTransaction:
         return list(dict.fromkeys([item for item in affected if item]))
 
     def _persist_change(self, change: Dict[str, Any]) -> GraphTransactionResult:
+        """Delegate persistence to the core hook, if available."""
         if self.core is None:
             return GraphTransactionResult(graph_name=self.graph.graph_name, change=change)
         persist = getattr(self.core, "persist_execution_graph", None)
@@ -137,6 +196,7 @@ class GraphTransaction:
         try:
             result = persist(graph=self.graph, change=change)
         except TypeError:
+            # Back-compat: some older hooks take no arguments.
             result = persist()
         if isinstance(result, dict):
             return GraphTransactionResult(
@@ -149,6 +209,7 @@ class GraphTransaction:
         return GraphTransactionResult(graph_name=self.graph.graph_name, change=change)
 
     def _build_change_payload(self, affected_blueprints: List[str]) -> Dict[str, Any]:
+        """Summarise the transaction for audit trails."""
         latest = self._mutations[-1]
         return {
             "action": latest.action,
@@ -161,6 +222,11 @@ class GraphTransaction:
 
     @staticmethod
     def _copy_graph_state(target: ExecutionGraph, source: ExecutionGraph) -> None:
+        """Deep-copy all mutable state from *source* into *target*.
+
+        This is used both for commit (working -> live) and rollback
+        (snapshot -> live) so the target object identity stays stable.
+        """
         target.graph_name = source.graph_name
         target.graph_kind = source.graph_kind
         target.nodes = {

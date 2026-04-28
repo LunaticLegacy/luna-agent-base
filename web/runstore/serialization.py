@@ -1,3 +1,8 @@
+"""图结构与 swarm 元信息的序列化工具。
+
+将 ExecutionGraph、Node、Edge 以及 swarm 的运行时摘要转换为
+JSON-safe 的字典，供路由响应与快照持久化使用。
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,15 +13,35 @@ from web.utils import to_jsonable
 
 
 def _utc_now_iso() -> str:
+    """返回当前 UTC 时间的 ISO 格式字符串。"""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _event_name(event: Dict[str, Any]) -> str:
+    """将事件类型中的空格替换为点号，生成 SSE 事件名。
+
+    Args:
+        event: 包含 event_type 字段的事件字典。
+
+    Returns:
+        规范化的事件名。
+    """
     event_type = str(event.get("event_type") or "message").strip()
     return event_type.replace(" ", ".")
 
 
 def serialize_node(node: Node) -> Dict[str, Any]:
+    """将单个节点序列化为字典，保留类型特定字段。
+
+    对 AgentNode 补充 blueprint_ref、agent_id 等；
+    对 ToolNode 补充 tool_name 与 input_mapping。
+
+    Args:
+        node: 执行图中的节点实例。
+
+    Returns:
+        节点字典。
+    """
     payload: Dict[str, Any] = {
         "node_id": node.node_id,
         "node_name": node.node_name,
@@ -44,6 +69,14 @@ def serialize_node(node: Node) -> Dict[str, Any]:
 
 
 def serialize_edge(edge: Edge) -> Dict[str, Any]:
+    """将边序列化为字典。
+
+    Args:
+        edge: 执行图中的边实例。
+
+    Returns:
+        边字典。
+    """
     return {
         "from_node_id": edge.from_node_id,
         "to_node_id": edge.to_node_id,
@@ -54,6 +87,17 @@ def serialize_edge(edge: Edge) -> Dict[str, Any]:
 
 
 def serialize_graph_snapshot(graph: ExecutionGraph) -> Dict[str, Any]:
+    """将整张执行图序列化为快照字典。
+
+    节点按 node_id 排序，边按 (from, priority, to, label, condition) 排序，
+    确保输出稳定，便于前端做差异比对。
+
+    Args:
+        graph: 执行图实例。
+
+    Returns:
+        图快照字典。
+    """
     return {
         "graph_name": graph.graph_name,
         "graph_kind": getattr(graph, "graph_kind", "execution"),
@@ -70,6 +114,14 @@ def serialize_graph_snapshot(graph: ExecutionGraph) -> Dict[str, Any]:
 
 
 def serialize_swarm_summary(swarm) -> Dict[str, Any]:
+    """生成 swarm 的运行时摘要。
+
+    Args:
+        swarm: 已加载的 swarm 实例。
+
+    Returns:
+        包含基本信息与图校验结果的字典。
+    """
     validation = swarm.core.check_execution_graph_available()
     return {
         "swarm_name": swarm.manifest.swarm_name,
@@ -88,6 +140,14 @@ def serialize_swarm_summary(swarm) -> Dict[str, Any]:
 
 
 def serialize_swarm_detail(swarm) -> Dict[str, Any]:
+    """生成 swarm 的详细视图，包含全局变量与图快照。
+
+    Args:
+        swarm: 已加载的 swarm 实例。
+
+    Returns:
+        在 summary 基础上追加 agent_files、global_variables 与 graph 的字典。
+    """
     payload = serialize_swarm_summary(swarm)
     payload["agent_files"] = list(swarm.manifest.agent_files)
     globals_config = getattr(swarm.manifest, "global_variables", None)

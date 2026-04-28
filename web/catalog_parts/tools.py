@@ -1,3 +1,8 @@
+"""Tool 目录构建器。
+
+从 swarm 的工具注册表与运行事件中提取每个工具的类型、调用次数、
+平均耗时与成功率，生成前端 Tool Catalog 所需的结构化数据。
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -13,6 +18,18 @@ def build_tool_catalog(
     q: Optional[str] = None,
     swarm_name: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """构建跨 swarm 的 Tool 目录。
+
+    Args:
+        registry: 运行时注册表。
+        type_filter: 按工具类型过滤（如 "API" / "本地"）。
+        status: 按状态过滤。
+        q: 全文搜索关键词。
+        swarm_name: 仅查询指定 swarm；None 表示全部。
+
+    Returns:
+        包含 tools 列表与 stats 聚合指标的字典。
+    """
     normalized_type = str(type_filter or "").strip().lower()
     normalized_status = str(status or "").strip().lower()
     normalized_query = str(q or "").strip().lower()
@@ -34,6 +51,7 @@ def build_tool_catalog(
                     for node in graph.nodes.values()
                     if isinstance(node, ToolNode) and node.tool_name == tool_name
                 ]
+            # 取第一个匹配的 ToolNode 用于关联运行统计；若无匹配则使用 -1
             node_id = tool_nodes[0].node_id if tool_nodes else -1
             entry = activity.get((loaded_swarm.manifest.swarm_name, node_id), {})
             executions = int(entry.get("executions", 0) or 0)
@@ -43,6 +61,7 @@ def build_tool_catalog(
             if completed > 0:
                 avg_ms = int(round(float(entry.get("total_duration_ms", 0.0)) / completed))
             elif executions > 0:
+                # 有调用但未完成时，按调用次数做经验估算
                 avg_ms = 80 + executions * 5
             tool_type = _tool_type(tool)
             status_value = "online" if failed == 0 else "error"

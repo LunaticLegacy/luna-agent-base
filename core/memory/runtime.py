@@ -1,3 +1,21 @@
+"""Memory runtime hook for agent rounds.
+
+Integrates episode graph, memory store, context planning, and usage tracing
+into the Angelus agent lifecycle.  The runtime is invoked twice per round:
+
+1. :meth:`before_round` — plans context, compresses old chains, extracts
+   candidate memories.
+2. :meth:`after_round` — writes the episode node, commits candidates,
+   verifies usage, and persists state to disk.
+
+All durable state (episode graph + memory store) is saved as JSON under
+``agents/{swarm_name}/runtime_info/memory/``.
+
+Exports:
+    - :class:`MemoryRuntimeConfig`
+    - :class:`AgentMemoryRuntime`
+"""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +39,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MemoryRuntimeConfig:
+    """Configuration knobs for the memory runtime.
+
+    Attributes:
+        enabled: Master switch; when ``False`` the runtime is a no-op.
+        max_context_nodes: Maximum episode nodes to load per round.
+        pack_keep_recent: How many recent turns to preserve when compressing.
+        enable_usage_trace: Whether to run usage-tracing after each round.
+        enable_candidate_memory: Whether to extract candidate memories before answering.
+        summary_system_prompt: Optional system prompt for LLM-driven summarisation.
+        memory_dir: Optional override for the persistence directory.
+    """
+
     enabled: bool = True
     max_context_nodes: int = 6
     pack_keep_recent: int = 2
@@ -35,6 +65,16 @@ class AgentMemoryRuntime:
 
     Integrates episode graph, memory store, context planning, and usage tracing
     into the Angelus agent lifecycle.
+
+    Attributes:
+        config: The :class:`MemoryRuntimeConfig` controlling behaviour.
+        llm_fetch_callback: Async callable used for planning and summarisation.
+        graph: The :class:`EpisodeGraph` tracking dialogue history.
+        memory_store: The :class:`MemoryStore` holding extracted memories.
+        planner: The :class:`MemoryPlanner` that asks the LLM for decisions.
+        context_builder: The :class:`ContextBuilder` assembling prompt context.
+        lifecycle: The :class:`MemoryLifecycle` validator.
+        _turn_counter: Per-run_id turn counter for generating unique turn IDs.
     """
 
     def __init__(
@@ -42,6 +82,12 @@ class AgentMemoryRuntime:
         config: MemoryRuntimeConfig,
         llm_fetch_callback: Optional[Callable] = None,
     ) -> None:
+        """Initialise the runtime with its configuration.
+
+        Args:
+            config: Memory runtime configuration.
+            llm_fetch_callback: Optional async callable for LLM requests.
+        """
         self.config = config
         self.llm_fetch_callback = llm_fetch_callback
         self.graph = EpisodeGraph()
@@ -59,11 +105,24 @@ class AgentMemoryRuntime:
     # ------------------------------------------------------------------
 
     def _memory_dir_for(self, swarm_name: str) -> Path:
+        """Resolve and create the persistence directory for a swarm.
+
+        Args:
+            swarm_name: Name of the swarm package.
+
+        Returns:
+            Absolute :class:`Path` to the memory storage directory.
+        """
         base = self.config.memory_dir or Path("agents") / swarm_name / "runtime_info" / "memory"
         base.mkdir(parents=True, exist_ok=True)
         return base
 
     def persist(self, swarm_name: str) -> None:
+        """Save the episode graph and memory store to disk.
+
+        Args:
+            swarm_name: Name of the swarm package.
+        """
         if not swarm_name:
             return
         mem_dir = self._memory_dir_for(swarm_name)
@@ -75,6 +134,11 @@ class AgentMemoryRuntime:
         )
 
     def load(self, swarm_name: str) -> None:
+        """Restore the episode graph and memory store from disk.
+
+        Args:
+            swarm_name: Name of the swarm package.
+        """
         if not swarm_name:
             return
         mem_dir = self._memory_dir_for(swarm_name)
@@ -110,6 +174,16 @@ class AgentMemoryRuntime:
         2. Optionally ask the planner to select nodes / extract memories.
         3. Compress old context if needed.
         4. Build prompt context.
+
+        Args:
+            agent_id: Identifier of the agent about to run.
+            swarm_name: Name of the swarm package.
+            run_id: Optional run identifier.
+            user_message: The incoming user message.
+            parent_node_ids: Optional parent node IDs for graph continuity.
+
+        Returns:
+            A :class:`MemoryContextPlan` describing what to inject.
         """
         turn_id = self._next_turn_id(run_id)
         applied_ops: Dict[str, Any] = {
@@ -121,7 +195,7 @@ class AgentMemoryRuntime:
             "memory_queries": [],
         }
 
-        # --- Planning ---
+        decision = None
         if self.llm_fetch_callback and self.graph.nodes:
             decision = await self.planner.plan(
                 user_message=user_message,
@@ -134,100 +208,156 @@ class AgentMemoryRuntime:
             applied_ops["selected_nodes"] = list(decision.selected_node_ids)
             applied_ops["memory_queries"] = list(decision.memory_queries)
 
-            # --- Compression ---
-            for pack_nid in list(decision.nodes_to_pack):
-                if pack_nid not in self.graph.nodes:
-                    continue
-                chain = self.graph.get_ancestor_chain(pack_nid, max_nodes=99, strategy="longest")
-                if len(chain) <= self.config.pack_keep_recent + 1:
-                    # Try fallback to max selected node
-                    alt_candidates = [nid for nid in decision.selected_node_ids if nid in self.graph.nodes]
-                    if alt_candidates:
-                        alt_nid = max(alt_candidates, key=lambda x: self.graph.nodes[x].created_at or x)
-                        alt_chain = self.graph.get_ancestor_chain(alt_nid, max_nodes=99, strategy="longest")
-                        if len(alt_chain) > self.config.pack_keep_recent + 1:
-                            pack_nid = alt_nid
-                            chain = alt_chain
-                        else:
-                            continue
-                    else:
-                        continue
-
-                if self.llm_fetch_callback:
-                    summary_id = await self.graph.compress_ancestors(
-                        node_id=pack_nid,
-                        llm_summarize_callback=self.llm_fetch_callback,
-                        max_nodes=self.config.max_context_nodes + 4,
-                        keep_recent=self.config.pack_keep_recent,
-                        summary_system_prompt=self.config.summary_system_prompt,
-                    )
-                    if summary_id is not None:
-                        applied_ops["pack_triggers"].append(pack_nid)
-                        applied_ops["summary_nodes"].append(summary_id)
-                        compressed = list(self.graph.nodes[summary_id].summarizes)
-                        applied_ops["compressed_nodes"].extend(compressed)
-
-            # --- Candidate memory extraction (before answering) ---
-            if self.config.enable_candidate_memory:
-                existing_contents = {m.content.strip() for m in self.memory_store.get_all_memories()}
-                for mem_data in decision.memories_to_extract:
-                    content = mem_data.get("content", "").strip()
-                    kind = mem_data.get("kind", "fact")
-                    tags = set(mem_data.get("tags", []))
-                    pinned = bool(mem_data.get("pinned", False))
-                    packable = bool(mem_data.get("packable", True))
-                    if not content:
-                        continue
-                    if content in existing_contents:
-                        logger.info("[记忆提取] 已存在相同记忆，跳过: %s...", content[:40])
-                        continue
-                    existing_contents.add(content)
-
-                    canonical_key = None
-                    if pinned or kind in ("formula", "constraint", "api_contract"):
-                        canonical_key = MemoryStore.normalize_formula(content)
-                        existing = self.memory_store._canonical_index.get(canonical_key)
-                        if existing is not None:
-                            logger.info(
-                                "[记忆提取] 已存在相同公式（canonical），跳过: %s...",
-                                content[:40],
-                            )
-                            continue
-
-                    # Apply lifecycle defaults
-                    defaults = MemoryLifecycle.default_pinned_and_packable(kind)
-                    pinned = pinned or defaults[0]
-                    packable = packable and defaults[1]
-
-                    mem_id = self.memory_store.add_memory(
-                        content=content,
-                        kind=kind,
-                        source_node_ids=set(decision.selected_node_ids),
-                        tags=tags,
-                        pinned=pinned,
-                        packable=packable,
-                        canonical_key=canonical_key,
-                        created_turn_id=turn_id,
-                        status="candidate",
-                    )
-                    applied_ops["extracted_memories"].append(mem_id)
-                    flag = "[Pinned]" if pinned else ""
-                    logger.info(
-                        "[记忆提取] Memory %s %s (candidate, turn %s): %s...",
-                        mem_id,
-                        flag,
-                        turn_id,
-                        content[:60],
-                    )
+            await self._compress_ancestor_chains(decision, applied_ops)
+            self._extract_candidate_memories(decision, turn_id, applied_ops)
 
             selected_node_ids = decision.selected_node_ids
             memory_queries = decision.memory_queries
         else:
-            # No planner: use parent nodes or all active nodes
             selected_node_ids = list(parent_node_ids) if parent_node_ids else []
             memory_queries = []
 
-        # --- Build context ---
+        return self._assemble_context_plan(
+            selected_node_ids=selected_node_ids,
+            memory_queries=memory_queries,
+            turn_id=turn_id,
+            applied_ops=applied_ops,
+            decision=decision,
+        )
+
+    async def _compress_ancestor_chains(
+        self,
+        decision: Any,
+        applied_ops: Dict[str, Any],
+    ) -> None:
+        """Compress ancestor chains for nodes selected by the planner.
+
+        If the originally selected chain is too short, a fallback candidate
+        from ``decision.selected_node_ids`` is tried.
+
+        Args:
+            decision: The planner decision object.
+            applied_ops: Mutable dict tracking applied operations (updated in-place).
+        """
+        for pack_nid in list(decision.nodes_to_pack):
+            if pack_nid not in self.graph.nodes:
+                continue
+            chain = self.graph.get_ancestor_chain(pack_nid, max_nodes=99, strategy="longest")
+            if len(chain) <= self.config.pack_keep_recent + 1:
+                alt_candidates = [nid for nid in decision.selected_node_ids if nid in self.graph.nodes]
+                if alt_candidates:
+                    alt_nid = max(alt_candidates, key=lambda x: self.graph.nodes[x].created_at or x)
+                    alt_chain = self.graph.get_ancestor_chain(alt_nid, max_nodes=99, strategy="longest")
+                    if len(alt_chain) > self.config.pack_keep_recent + 1:
+                        pack_nid = alt_nid
+                        chain = alt_chain
+                    else:
+                        continue
+                else:
+                    continue
+
+            summary_id = await self.graph.compress_ancestors(
+                node_id=pack_nid,
+                llm_summarize_callback=self.llm_fetch_callback,
+                max_nodes=self.config.max_context_nodes + 4,
+                keep_recent=self.config.pack_keep_recent,
+                summary_system_prompt=self.config.summary_system_prompt,
+            )
+            if summary_id is not None:
+                applied_ops["pack_triggers"].append(pack_nid)
+                applied_ops["summary_nodes"].append(summary_id)
+                compressed = list(self.graph.nodes[summary_id].summarizes)
+                applied_ops["compressed_nodes"].extend(compressed)
+
+    def _extract_candidate_memories(
+        self,
+        decision: Any,
+        turn_id: str,
+        applied_ops: Dict[str, Any],
+    ) -> None:
+        """Extract candidate memories from the planner decision and stage them in the store.
+
+        Deduplicates against existing memories (both content and canonical keys).
+        Applies lifecycle defaults so that formulas are automatically pinned.
+
+        Args:
+            decision: The planner decision object.
+            turn_id: Current turn identifier.
+            applied_ops: Mutable dict tracking applied operations (updated in-place).
+        """
+        if not self.config.enable_candidate_memory:
+            return
+
+        existing_contents = {m.content.strip() for m in self.memory_store.get_all_memories()}
+        for mem_data in decision.memories_to_extract:
+            content = mem_data.get("content", "").strip()
+            kind = mem_data.get("kind", "fact")
+            tags = set(mem_data.get("tags", []))
+            pinned = bool(mem_data.get("pinned", False))
+            packable = bool(mem_data.get("packable", True))
+            if not content:
+                continue
+            if content in existing_contents:
+                logger.info("[记忆提取] 已存在相同记忆，跳过: %s...", content[:40])
+                continue
+            existing_contents.add(content)
+
+            canonical_key = None
+            if pinned or kind in ("formula", "constraint", "api_contract"):
+                canonical_key = MemoryStore.normalize_formula(content)
+                existing = self.memory_store._canonical_index.get(canonical_key)
+                if existing is not None:
+                    logger.info(
+                        "[记忆提取] 已存在相同公式（canonical），跳过: %s...",
+                        content[:40],
+                    )
+                    continue
+
+            defaults = MemoryLifecycle.default_pinned_and_packable(kind)
+            pinned = pinned or defaults[0]
+            packable = packable and defaults[1]
+
+            mem_id = self.memory_store.add_memory(
+                content=content,
+                kind=kind,
+                source_node_ids=set(decision.selected_node_ids),
+                tags=tags,
+                pinned=pinned,
+                packable=packable,
+                canonical_key=canonical_key,
+                created_turn_id=turn_id,
+                status="candidate",
+            )
+            applied_ops["extracted_memories"].append(mem_id)
+            flag = "[Pinned]" if pinned else ""
+            logger.info(
+                "[记忆提取] Memory %s %s (candidate, turn %s): %s...",
+                mem_id,
+                flag,
+                turn_id,
+                content[:60],
+            )
+
+    def _assemble_context_plan(
+        self,
+        selected_node_ids: List[str],
+        memory_queries: List[str],
+        turn_id: str,
+        applied_ops: Dict[str, Any],
+        decision: Optional[Any],
+    ) -> MemoryContextPlan:
+        """Build the final :class:`MemoryContextPlan` from gathered data.
+
+        Args:
+            selected_node_ids: Node IDs chosen for context injection.
+            memory_queries: Queries to run against the memory store.
+            turn_id: Current turn identifier.
+            applied_ops: Dict tracking all operations performed this round.
+            decision: Planner decision object, or ``None`` in fallback mode.
+
+        Returns:
+            Assembled :class:`MemoryContextPlan`.
+        """
         plan = self.context_builder.build(
             episode_graph_nodes=self.graph.nodes,
             selected_node_ids=selected_node_ids,
@@ -238,14 +368,11 @@ class AgentMemoryRuntime:
         plan.pack_triggers = list(applied_ops["pack_triggers"])
         plan.compressed_node_ids = list(applied_ops["compressed_nodes"])
         plan.summary_node_ids = list(applied_ops["summary_nodes"])
-        plan.reasoning = (
-            (decision.reasoning if "decision" in dir() else "Fallback mode")
-            + f" | Applied ops: {applied_ops}"
-        )
-
-        # Store applied ops in plan metadata for after_round
+        reasoning = decision.reasoning if decision is not None else "Fallback mode"
+        plan.reasoning = f"{reasoning} | Applied ops: {applied_ops}"
         plan.metadata = {"applied_ops": applied_ops, "turn_id": turn_id}
         return plan
+
 
     # ------------------------------------------------------------------
     # after_round
@@ -267,13 +394,54 @@ class AgentMemoryRuntime:
         2. Commit candidate memories.
         3. Verify usage trace.
         4. Persist.
+
+        Args:
+            agent_id: Identifier of the agent that just ran.
+            swarm_name: Name of the swarm package.
+            run_id: Optional run identifier.
+            user_message: The user's message for this turn.
+            assistant_message: The agent's response for this turn.
+            context_plan: The :class:`MemoryContextPlan` produced by :meth:`before_round`.
+
+        Returns:
+            A :class:`MemoryUpdateResult` summarising all mutations.
         """
         turn_id = context_plan.metadata.get("turn_id", "unknown")
         applied_ops = dict(context_plan.metadata.get("applied_ops", {}))
 
-        # 1. Write episode node
+        new_node_id = self._write_episode_node(context_plan, user_message, assistant_message, applied_ops)
+        committed_ids = self._commit_candidate_memories(turn_id)
+        usage_trace = self._verify_usage_trace(context_plan, assistant_message, turn_id)
+
+        self._print_state_summary()
+        self.persist(swarm_name)
+
+        return self._build_memory_update_result(new_node_id, committed_ids, applied_ops, usage_trace)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _write_episode_node(
+        self,
+        context_plan: MemoryContextPlan,
+        user_message: str,
+        assistant_message: str,
+        applied_ops: Dict[str, Any],
+    ) -> str:
+        """Write a new episode node into the graph and record its ID.
+
+        Args:
+            context_plan: The plan from :meth:`before_round`.
+            user_message: User message for this turn.
+            assistant_message: Agent response for this turn.
+            applied_ops: Mutable dict tracking applied operations.
+
+        Returns:
+            The new node ID.
+        """
         parent_ids = set(context_plan.selected_node_ids) if context_plan.selected_node_ids else set()
-        # Filter to nodes that actually exist
+        # Filter to nodes that actually exist (defensive against stale plans)
         parent_ids = {pid for pid in parent_ids if pid in self.graph.nodes}
         new_node_id = self.graph.add_node(
             user_content=user_message,
@@ -281,51 +449,86 @@ class AgentMemoryRuntime:
             parent_ids=parent_ids or None,
         )
         applied_ops["new_node_id"] = new_node_id
+        return new_node_id
 
-        # 2. Commit candidates from this turn
-        committed_ids: List[str] = []
-        if self.config.enable_candidate_memory:
-            committed_ids = self.memory_store.commit_candidates(turn_id)
-            if committed_ids:
-                logger.info(
-                    "[Post-answer Commit] candidate 记忆已提交为 committed: %s",
-                    committed_ids,
-                )
+    def _commit_candidate_memories(self, turn_id: str) -> List[str]:
+        """Commit candidate memories staged during :meth:`before_round`.
 
-        # 3. Usage trace
-        usage_trace = MemoryUsageTrace()
-        if self.config.enable_usage_trace:
-            # Build memory lookup for injected memories
-            injected_ids = list(context_plan.selected_memory_ids)
-            memory_lookup = {
-                mid: self.memory_store.get_memory(mid)
-                for mid in injected_ids
-                if self.memory_store.get_memory(mid) is not None
-            }
-            tracker = UsageTraceTracker(
-                injected_memory_ids=injected_ids,
-                memory_lookup=memory_lookup,  # type: ignore[arg-type]
-                current_turn_id=turn_id,
+        Args:
+            turn_id: Current turn identifier.
+
+        Returns:
+            List of committed memory IDs.
+        """
+        if not self.config.enable_candidate_memory:
+            return []
+        committed_ids = self.memory_store.commit_candidates(turn_id)
+        if committed_ids:
+            logger.info(
+                "[Post-answer Commit] candidate 记忆已提交为 committed: %s",
+                committed_ids,
             )
-            # Parse declarations from assistant message
-            declarations = UsageTraceTracker.parse_declarations(assistant_message)
-            for mem_id_short, stmt in declarations.items():
-                # Map short id like "0" to full id if needed; but our ids are hex strings.
-                # Try exact match first.
-                full_id = mem_id_short if mem_id_short in memory_lookup else None
-                if full_id is None:
-                    # Heuristic: if the short id looks like a numeric index, skip exact mapping
-                    # and just record it as a potential invalid ref.
-                    full_id = mem_id_short
-                tracker.record_declaration(full_id, stmt)
-            usage_trace = tracker.verify_all(assistant_message)
+        return committed_ids
 
-        # 4. Print final state summary
-        self._print_state_summary()
+    def _verify_usage_trace(
+        self,
+        context_plan: MemoryContextPlan,
+        assistant_message: str,
+        turn_id: str,
+    ) -> MemoryUsageTrace:
+        """Verify that the agent's response correctly references injected memories.
 
-        # 5. Persist
-        self.persist(swarm_name)
+        Parses declarations from *assistant_message* and cross-checks them
+        against the memories that were actually injected this round.
 
+        Args:
+            context_plan: The plan from :meth:`before_round`.
+            assistant_message: The agent's response text.
+            turn_id: Current turn identifier.
+
+        Returns:
+            A :class:`MemoryUsageTrace` with verification results.
+        """
+        if not self.config.enable_usage_trace:
+            return MemoryUsageTrace()
+
+        injected_ids = list(context_plan.selected_memory_ids)
+        memory_lookup = {
+            mid: self.memory_store.get_memory(mid)
+            for mid in injected_ids
+            if self.memory_store.get_memory(mid) is not None
+        }
+        tracker = UsageTraceTracker(
+            injected_memory_ids=injected_ids,
+            memory_lookup=memory_lookup,  # type: ignore[arg-type]
+            current_turn_id=turn_id,
+        )
+        declarations = UsageTraceTracker.parse_declarations(assistant_message)
+        for mem_id_short, stmt in declarations.items():
+            full_id = mem_id_short if mem_id_short in memory_lookup else None
+            if full_id is None:
+                full_id = mem_id_short
+            tracker.record_declaration(full_id, stmt)
+        return tracker.verify_all(assistant_message)
+
+    def _build_memory_update_result(
+        self,
+        new_node_id: str,
+        committed_ids: List[str],
+        applied_ops: Dict[str, Any],
+        usage_trace: MemoryUsageTrace,
+    ) -> MemoryUpdateResult:
+        """Assemble the final :class:`MemoryUpdateResult`.
+
+        Args:
+            new_node_id: ID of the newly created episode node.
+            committed_ids: List of committed memory IDs.
+            applied_ops: Dict tracking all operations this round.
+            usage_trace: Usage trace verification results.
+
+        Returns:
+            Populated :class:`MemoryUpdateResult`.
+        """
         return MemoryUpdateResult(
             new_node_id=new_node_id,
             committed_memory_ids=committed_ids,
@@ -334,16 +537,21 @@ class AgentMemoryRuntime:
             applied_ops=applied_ops,
         )
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     def _next_turn_id(self, run_id: Optional[str]) -> str:
+        """Generate a monotonic turn ID for the given run.
+
+        Args:
+            run_id: Optional run identifier.
+
+        Returns:
+            A string of the form ``"{run_id}_turn_{N}"``.
+        """
         key = run_id or "manual"
         self._turn_counter[key] = self._turn_counter.get(key, 0) + 1
         return f"{key}_turn_{self._turn_counter[key]}"
 
     def _print_state_summary(self) -> None:
+        """Print a human-readable summary of the current runtime state to stdout."""
         print("\n" + "=" * 50)
         print("Runtime Applied Ops")
         print("=" * 50)

@@ -1,3 +1,17 @@
+"""Declarative architecture patch manager.
+
+``ArchitectureManager`` validates and applies ``ArchitecturePatch`` objects
+to an ``ExecutionGraph`` under a configurable policy.  It supports:
+    * Pre-flight validation (structural, policy, and graph-level checks).
+    * Transactional application via ``GraphTransaction``.
+    * Rollback to pre-patch state.
+    * Automatic generation of output-repairer patches for parse failures.
+
+The default policy limits graph size and disables dangerous capabilities
+such as prompt mutation or tool permission escalation unless explicitly
+allowed.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,6 +37,15 @@ DEFAULT_ARCHITECTURE_POLICY = {
 
 @dataclass
 class PatchValidationResult:
+    """Outcome of validating an architecture patch.
+
+    Attributes:
+        ok: Whether the patch passed all checks.
+        errors: Blocking issues.
+        warnings: Non-blocking issues.
+        patch: The parsed ArchitecturePatch (available even if validation failed).
+    """
+
     ok: bool
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -31,6 +54,16 @@ class PatchValidationResult:
 
 @dataclass
 class PatchApplyResult:
+    """Outcome of applying an architecture patch.
+
+    Attributes:
+        ok: Whether the patch was committed.
+        patch_id: Identifier of the patch.
+        graph: The mutated ExecutionGraph (same object identity).
+        errors: Blocking issues that prevented application.
+        applied_operations: Serialised record of what changed.
+    """
+
     ok: bool
     patch_id: str
     graph: Optional[ExecutionGraph] = None
@@ -40,19 +73,33 @@ class PatchApplyResult:
 
 @dataclass
 class PatchRollbackResult:
+    """Outcome of rolling back an architecture patch.
+
+    Attributes:
+        ok: Whether the rollback succeeded.
+        patch_id: Identifier of the patch.
+        errors: Issues that prevented rollback.
+    """
+
     ok: bool
     patch_id: str
     errors: List[str] = field(default_factory=list)
 
 
 class ArchitectureManager:
-    """Validate and transactionally apply declarative architecture patches."""
+    """Validate and transactionally apply declarative architecture patches.
+
+    Attributes:
+        core: Back-reference to the runtime Core.
+        rollback_records: Mapping from patch_id to pre-patch snapshot data.
+    """
 
     def __init__(self, core: Any) -> None:
         self.core = core
         self.rollback_records: Dict[str, Dict[str, Any]] = {}
 
     def policy(self) -> Dict[str, Any]:
+        """Return the merged architecture policy (defaults + core overrides)."""
         raw = getattr(self.core, "architecture_policy", None)
         result = dict(DEFAULT_ARCHITECTURE_POLICY)
         if isinstance(raw, dict):
@@ -60,10 +107,71 @@ class ArchitectureManager:
         return result
 
     def validate_patch(self, patch: Any, graph: Optional[ExecutionGraph] = None) -> PatchValidationResult:
+        """Run all validation layers against *patch*.
+
+        Checks performed:
+            1. Structural (patch_id, scope, operations presence).
+            2. Policy (dynamic enabled, size limits).
+            3. Per-operation semantics (unknown agents, duplicate IDs, etc.).
+            4. Trial application + graph validation.
+            5. Reachability and depth constraints.
+
+        Args:
+            patch: Raw dict or ArchitecturePatch instance.
+            graph: Optional graph to validate against; defaults to core's graph.
+
+        Returns:
+            PatchValidationResult with errors/warnings populated.
+        """
+        # 1. Parse and pre-flight checks -------------------------------------
+        parsed, errors, warnings, target_graph = self._parse_and_preflight(patch, graph)
+        if parsed is None:
+            return PatchValidationResult(ok=False, errors=errors, warnings=warnings)
+        if target_graph is None:
+            return PatchValidationResult(ok=False, errors=errors, warnings=warnings, patch=parsed)
+        if errors:
+            return PatchValidationResult(ok=False, errors=errors, warnings=warnings, patch=parsed)
+
+        # 2. Per-operation semantics -----------------------------------------
+        errors, warnings, created_agents = self._validate_operation_semantics(
+            parsed, target_graph, errors, warnings
+        )
+
+        # 3. Global policy limits --------------------------------------------
+        policy = self.policy()
+        errors = self._check_graph_policy_limits(created_agents, target_graph, policy, errors)
+
+        if errors:
+            return PatchValidationResult(ok=False, errors=errors, warnings=warnings, patch=parsed)
+
+        # 4. Trial application + graph-level validation ----------------------
+        errors, warnings = self._trial_apply_and_validate(
+            parsed, target_graph, policy, created_agents, errors, warnings
+        )
+
+        return PatchValidationResult(ok=not errors, errors=errors, warnings=warnings, patch=parsed)
+
+    def _parse_and_preflight(
+        self,
+        patch: Any,
+        graph: Optional[ExecutionGraph],
+    ) -> tuple:
+        """Coerce *patch* to an ArchitecturePatch and run structural pre-flight checks.
+
+        Args:
+            patch: Raw dict or ArchitecturePatch instance.
+            graph: Optional graph to validate against.
+
+        Returns:
+            A tuple of *(parsed, errors, warnings, target_graph)*.
+            *parsed* is ``None`` when coercion fails.
+            *target_graph* is ``None`` when no graph is attached.
+        """
         try:
             parsed = ArchitecturePatch.coerce(patch)
         except Exception as exc:
-            return PatchValidationResult(ok=False, errors=[str(exc)])
+            return None, [str(exc)], [], None
+
         errors: List[str] = []
         warnings: List[str] = []
         if not parsed.patch_id:
@@ -80,11 +188,34 @@ class ArchitectureManager:
         target_graph = graph or self.core.get_execution_graph()
         if target_graph is None:
             errors.append("No execution graph attached.")
-            return PatchValidationResult(ok=False, errors=errors, warnings=warnings, patch=parsed)
 
+        return parsed, errors, warnings, target_graph
+
+    def _validate_operation_semantics(
+        self,
+        parsed: ArchitecturePatch,
+        target_graph: ExecutionGraph,
+        errors: List[str],
+        warnings: List[str],
+    ) -> tuple:
+        """Validate every operation in *parsed* against *target_graph* semantics.
+
+        Tracks ``created_agents`` so that trial-application errors referencing
+        not-yet-created agents can be filtered later.
+
+        Args:
+            parsed: The coerced ArchitecturePatch.
+            target_graph: The graph to validate against.
+            errors: Accumulated error list (mutated in-place).
+            warnings: Accumulated warning list (mutated in-place).
+
+        Returns:
+            A tuple of *(errors, warnings, created_agents)*.
+        """
         created_agents: set[str] = set()
         created_node_refs: set[str] = set()
         working = target_graph.clone()
+
         for operation in parsed.operations:
             if operation.op not in SUPPORTED_ARCHITECTURE_OPS:
                 errors.append(f"Unsupported architecture op: {operation.op}")
@@ -141,14 +272,58 @@ class ArchitectureManager:
                     if to_id not in working.nodes:
                         errors.append(f"{operation.op} references missing to_node_id {to_id}.")
 
+        return errors, warnings, created_agents
+
+    def _check_graph_policy_limits(
+        self,
+        created_agents: set[str],
+        working_graph: ExecutionGraph,
+        policy: Dict[str, Any],
+        errors: List[str],
+    ) -> List[str]:
+        """Enforce global policy limits (max_agents, max_edges).
+
+        Args:
+            created_agents: Agent IDs that would be created by the patch.
+            working_graph: A cloned graph reflecting the patch's node changes.
+            policy: Merged architecture policy.
+            errors: Accumulated error list (mutated in-place).
+
+        Returns:
+            The updated *errors* list.
+        """
         if len(getattr(self.core, "agents", {}) or {}) + len(created_agents) > int(policy.get("max_agents", 12)):
             errors.append("Patch would exceed max_agents policy.")
-        if len(working.edges) > int(policy.get("max_edges", 32)):
+        if len(working_graph.edges) > int(policy.get("max_edges", 32)):
             errors.append("Graph already exceeds max_edges policy.")
+        return errors
 
-        if errors:
-            return PatchValidationResult(ok=False, errors=errors, warnings=warnings, patch=parsed)
+    def _trial_apply_and_validate(
+        self,
+        parsed: ArchitecturePatch,
+        target_graph: ExecutionGraph,
+        policy: Dict[str, Any],
+        created_agents: set[str],
+        errors: List[str],
+        warnings: List[str],
+    ) -> tuple:
+        """Trial-apply the patch to a cloned graph and run graph-level validation.
 
+        Checks reachability, depth, cycles, and edge count after mutation.
+        Errors mentioning agents that the patch itself creates are filtered
+        out because those agents do not exist during validation.
+
+        Args:
+            parsed: The coerced ArchitecturePatch.
+            target_graph: The original graph (cloned before trial application).
+            policy: Merged architecture policy.
+            created_agents: Agent IDs created by the patch.
+            errors: Accumulated error list (mutated in-place).
+            warnings: Accumulated warning list (mutated in-place).
+
+        Returns:
+            A tuple of *(errors, warnings)*.
+        """
         try:
             trial = target_graph.clone()
             self._apply_operations_to_graph(parsed, trial, commit_agents=False)
@@ -169,12 +344,20 @@ class ArchitectureManager:
                 errors.append("Patch would create an uncontrolled cycle.")
         except Exception as exc:
             errors.append(str(exc))
-        return PatchValidationResult(ok=not errors, errors=errors, warnings=warnings, patch=parsed)
+        return errors, warnings
+
 
     async def apply_patch(self, patch: Any, graph: Optional[ExecutionGraph] = None, *, author: Optional[str] = None) -> PatchApplyResult:
+        """Asynchronously apply a validated patch via GraphTransaction."""
         return await self._apply_patch(patch, graph=graph, author=author)
 
     def apply_patch_sync(self, patch: Any, graph: Optional[ExecutionGraph] = None, *, author: Optional[str] = None) -> PatchApplyResult:
+        """Synchronous wrapper that routes to the appropriate event loop path.
+
+        If called from inside a running event loop (e.g. within the executor),
+        it bypasses asyncio.run and applies the mutation directly to avoid
+        nested-loop errors.
+        """
         import asyncio
 
         try:
@@ -187,9 +370,11 @@ class ArchitectureManager:
         return loop.run_until_complete(self._apply_patch(patch, graph=graph, author=author))
 
     async def rollback_patch(self, patch_id: str, graph: Optional[ExecutionGraph] = None) -> PatchRollbackResult:
+        """Async alias for rollback_patch_sync."""
         return self.rollback_patch_sync(patch_id, graph=graph)
 
     def rollback_patch_sync(self, patch_id: str, graph: Optional[ExecutionGraph] = None) -> PatchRollbackResult:
+        """Restore the graph to its pre-patch state and destroy any agents created by the patch."""
         record = self.rollback_records.get(patch_id)
         if record is None:
             return PatchRollbackResult(ok=False, patch_id=patch_id, errors=["Unknown patch_id."])
@@ -210,6 +395,12 @@ class ArchitectureManager:
         return PatchRollbackResult(ok=True, patch_id=patch_id)
 
     def propose_output_repair_patch(self, failure: Any, graph: Optional[ExecutionGraph] = None) -> ArchitecturePatch:
+        """Generate a standard output-repairer patch for a structured-output parse failure.
+
+        The patch inserts a transient ``output_repairer`` node immediately
+        after the failing node so that malformed JSON can be corrected
+        without restarting the run.
+        """
         node_id = getattr(failure, "node_id", None)
         return ArchitecturePatch.from_dict({
             "patch_id": f"patch-output-repairer-{node_id or 'unknown'}",
@@ -264,6 +455,10 @@ class ArchitectureManager:
         return PatchApplyResult(ok=True, patch_id=parsed.patch_id, graph=target_graph, applied_operations=[op.to_dict() for op in parsed.operations])
 
     def _apply_patch_direct(self, patch: Any, graph: Optional[ExecutionGraph], author: Optional[str]) -> PatchApplyResult:
+        """Direct (non-transactional) path used when asyncio is already running.
+
+        Skips GraphTransaction.commit() to avoid deadlock inside the executor.
+        """
         target_graph = graph or self.core.get_execution_graph()
         validation = self.validate_patch(patch, graph=target_graph)
         parsed = validation.patch or ArchitecturePatch.coerce(patch)
@@ -277,6 +472,11 @@ class ArchitectureManager:
         return PatchApplyResult(ok=True, patch_id=parsed.patch_id, graph=target_graph, applied_operations=[op.to_dict() for op in parsed.operations])
 
     def _apply_operations_to_graph(self, patch: ArchitecturePatch, graph: ExecutionGraph, *, commit_agents: bool) -> None:
+        """Execute every operation in *patch* against *graph*.
+
+        When *commit_agents* is False (validation trial run), agent creation
+        is skipped so that the trial does not mutate core state.
+        """
         node_refs: Dict[str, int] = {}
         for operation in patch.operations:
             p = operation.payload
@@ -336,12 +536,18 @@ class ArchitectureManager:
                 graph.nodes[int(p.get("node_id"))].metadata["output_mode"] = str(p.get("output_mode"))
 
     def _record(self, action: str, graph: Optional[ExecutionGraph], patch: ArchitecturePatch, detail: Dict[str, Any]) -> None:
+        """Emit a runtime audit record via the core hook, if available."""
         record = getattr(self.core, "record_runtime_change", None)
         if callable(record):
             payload = {"patch_id": patch.patch_id, "reason": patch.reason, **detail}
             record(action=action, subject_kind="graph", subject_id=getattr(graph, "graph_name", None), detail=payload)
 
     def _create_patch_agent(self, payload: Dict[str, Any]) -> None:
+        """Instantiate a minimal agent from an ``add_agent`` payload.
+
+        Tries the core's ``create_agent`` hook first; falls back to direct
+        insertion into ``core.agents`` and ``core.agent_blueprints``.
+        """
         agent_id = str(payload.get("agent_id"))
         creator = getattr(self.core, "create_agent", None)
         if callable(creator):
@@ -374,16 +580,20 @@ class ArchitectureManager:
             self.core.agent_blueprints[agent_id] = agent
 
     def _created_agents(self, patch: ArchitecturePatch) -> List[str]:
+        """Return the list of agent_ids created by ``add_agent`` operations."""
         return [str(op.payload.get("agent_id")) for op in patch.operations if op.op == "add_agent"]
 
     def _agent_exists(self, agent_id: str) -> bool:
+        """Check whether an agent blueprint is already known to the core."""
         has_agent = getattr(self.core, "has_agent_blueprint", None)
         return bool(has_agent(agent_id)) if callable(has_agent) else agent_id in getattr(self.core, "agents", {})
 
     def _node_ref_exists(self, graph: ExecutionGraph, ref: str) -> bool:
+        """Check whether *ref* resolves to an existing node in *graph*."""
         return self._node_ref_id(graph, ref) is not None
 
     def _node_ref_id(self, graph: ExecutionGraph, ref: str) -> Optional[int]:
+        """Resolve a node reference (numeric string or node_name) to an ID."""
         if ref.isdigit() and int(ref) in graph.nodes:
             return int(ref)
         for node in graph.nodes.values():
@@ -392,9 +602,11 @@ class ArchitectureManager:
         return None
 
     def _payload_node_id(self, payload: Dict[str, Any]) -> Optional[int]:
+        """Extract a node_id from a payload dict, tolerating missing values."""
         return self._int_or_none(payload.get("node_id") or payload.get("from_node_id"))
 
     def _int_or_none(self, raw: Any) -> Optional[int]:
+        """Safe int coercion with None passthrough."""
         try:
             if raw is None:
                 return None
@@ -403,6 +615,11 @@ class ArchitectureManager:
             return None
 
     def _resolve_new_node_id(self, graph: ExecutionGraph, raw: Any) -> int:
+        """Allocate a fresh node ID, or parse an explicit one.
+
+        Auto-allocation scans upward from max(existing IDs) + 1 to avoid
+        collisions with deleted nodes.
+        """
         if raw is None or str(raw).strip().lower() == "auto":
             candidate = max(graph.nodes.keys(), default=0) + 1
             while candidate in graph.nodes:
@@ -411,6 +628,7 @@ class ArchitectureManager:
         return int(raw)
 
     def _node_lifecycle_metadata(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Derive standard lifecycle flags from payload keys like ``persistence``."""
         persistence = str(payload.get("persistence") or "transient").strip().lower()
         transient = persistence in {"transient", "temporary", "ephemeral"}
         lifetime = str(payload.get("lifetime_policy") or ("run" if transient else "manual")).strip().lower()
@@ -426,6 +644,7 @@ class ArchitectureManager:
         }
 
     def _entry_reaches_nodes(self, graph: ExecutionGraph) -> bool:
+        """Return True if the entry node can reach at least one other node."""
         if graph.entry_node_id is None or graph.entry_node_id not in graph.nodes:
             return False
         seen: set[int] = set()
@@ -439,6 +658,7 @@ class ArchitectureManager:
         return bool(seen)
 
     def _max_depth(self, graph: ExecutionGraph) -> int:
+        """Compute the longest path length from entry to any reachable node."""
         if graph.entry_node_id is None or graph.entry_node_id not in graph.nodes:
             return 0
         max_depth = 0
@@ -460,6 +680,7 @@ class ArchitectureManager:
         return max_depth
 
     def _has_cycle(self, graph: ExecutionGraph) -> bool:
+        """Detect cycles using a classic DFS three-colour algorithm."""
         visiting: set[int] = set()
         visited: set[int] = set()
 
@@ -480,6 +701,8 @@ class ArchitectureManager:
 
 
 class _PatchAgent:
+    """Minimal agent stub created when the core lacks a proper create_agent hook."""
+
     def __init__(self, *, agent_id: str, name: str, character_prompt: str, tool_execution_mode: str) -> None:
         self.agent_id = agent_id
         self.name = name

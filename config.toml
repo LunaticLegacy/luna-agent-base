@@ -1,6 +1,13 @@
 [app]
 swarm_root = "agents"
 
+[app.memory_graph]
+enabled = true
+max_context_nodes = 6
+pack_keep_recent = 2
+enable_usage_trace = true
+enable_candidate_memory = true
+
 [api]
 base_url = "/api"
 timeout_seconds = 120
@@ -16,14 +23,9 @@ max_parallel_tool_calls = 10
 max_parallel_branches = 3
 
 [runtime.branch_retry]
-max_retries = 2
+max_retries = 4
 backoff_ms = 1000
 backoff_multiplier = 2.0
 retry_policy = "full_branch"
 
-[app.memory_graph]
-enabled = true
-max_context_nodes = 6
-pack_keep_recent = 2
-enable_usage_trace = true
-enable_candidate_memory = true
+

@@ -1,3 +1,23 @@
+"""Runtime container for agents, tools, execution graphs, and shared state.
+
+The :class:`Core` class is the central hub of an Angelus swarm.  It inherits
+behaviour from three mixins:
+
+* :class:`RuntimeRegistryMixin` — agent / tool / skill / API registration.
+* :class:`ExecutionGraphStateMixin` — execution graph lifecycle and persistence.
+* :class:`CognitiveRuntimeMixin` — shared cognitive graph operations.
+
+:class:`Core` also owns:
+
+* The :class:`ArchitectureManager` and :class:`ArchitectureRegulator` for
+  self-healing graph mutations.
+* The :class:`ToolContractValidator` for pre-flight validation.
+* Stop-event management for cooperative run cancellation.
+
+Exports:
+    - :class:`Core`
+"""
+
 from __future__ import annotations
 
 import threading
@@ -17,8 +37,36 @@ from .graph_state import ExecutionGraphStateMixin
 from .registry import AgentInstancePool, RuntimeRegistryMixin
 
 
-class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin):
-    """Runtime container for agents, tools, execution graphs, and shared state."""
+class Core:
+    """Runtime container for agents, tools, execution graphs, and shared state.
+
+    ``Core`` uses **composition** instead of inheritance.  During construction
+    it binds every public callable from three delegate mixins onto the
+    instance itself, so the external API surface is unchanged while the
+    class hierarchy stays flat.
+
+    Attributes:
+        agent_name: Name of the swarm package.
+        agent_config: Default LLM configuration for agents.
+        workspace_root: Filesystem root for the swarm workspace.
+        workspace_mode: Access mode (``"workspace"`` or ``"full_access"``).
+        agents: Map ``agent_id -> AgentLike``.
+        agent_blueprints: Map ``blueprint_ref -> AgentLike``.
+        agent_instance_pool: Pool managing agent lifecycle (quarantine, drain, etc.).
+        tools: Map ``tool_name -> ToolDefinition``.
+        apis: Map ``api_name -> api object``.
+        api_sources: Map ``api_name -> {origin, source}`` metadata.
+        tool_capabilities: Map ``tool_name -> {capability, ...}``.
+        skills: Map ``skill_name -> SkillAsset``.
+        global_variables: Swarm-level :class:`GlobalVariablesConfig`.
+        architecture_regulator: Policy-driven failure regulator.
+        architecture_manager: Self-healing graph patch manager.
+        tool_contract_validator: Pre-flight binding validator.
+        swarm_cognitive_graph: Shared :class:`CognitiveGraph`.
+        active_thought_subgraphs: Map ``subgraph_id -> descriptor``.
+        current_run_id: Active run identifier.
+        limiter: Global :class:`ConcurrencyLimiter`.
+    """
 
     def __init__(
         self,
@@ -27,6 +75,14 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         workspace_root: Optional[Path] = None,
         limiter: Optional[Any] = None,
     ) -> None:
+        """Initialise the runtime core.
+
+        Args:
+            agent_name: Name of the swarm package.
+            agent_config: Default LLM configuration.
+            workspace_root: Optional workspace root (defaults to CWD).
+            limiter: Optional global concurrency limiter.
+        """
         self.agent_name = agent_name
         self.agent_config = agent_config
         self.workspace_root = Path(workspace_root or Path.cwd()).resolve()
@@ -57,7 +113,38 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         self._stop_events: Dict[str, threading.Event] = {}
         self._stop_types: Dict[str, str] = {}
 
+        # Composition over inheritance: bind mixin capabilities onto this instance.
+        self._bind_mixin(RuntimeRegistryMixin)
+        self._bind_mixin(ExecutionGraphStateMixin)
+        self._bind_mixin(CognitiveRuntimeMixin)
+
+    def _bind_mixin(self, mixin_cls: type) -> None:
+        """Bind every callable from *mixin_cls* onto this instance.
+
+        This preserves the exact same runtime behaviour and API surface as
+        inheritance, but keeps the class hierarchy flat and makes the
+        dependency graph explicit.
+
+        Args:
+            mixin_cls: A mixin class whose methods should be bound to *self*.
+        """
+        for name in dir(mixin_cls):
+            # Skip dunder methods and attributes already defined by Core itself.
+            if name.startswith("__") and name.endswith("__"):
+                continue
+            if name in self.__class__.__dict__:
+                continue
+            attr = getattr(mixin_cls, name)
+            if callable(attr):
+                bound = attr.__get__(self, self.__class__)
+                setattr(self, name, bound)
+
     async def init(self) -> None:
+        """Validate the execution graph and tool contracts after construction.
+
+        Raises:
+            ValueError: If the graph is invalid or tool-contract validation fails.
+        """
         if self._execution_graph is not None:
             validation = self.check_execution_graph_complete()
             if not validation.is_valid:
@@ -73,6 +160,11 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
                 report.raise_if_failed()
 
     def set_runtime_info_dir(self, runtime_dir: Path) -> None:
+        """Set the directory where runtime snapshots and events are persisted.
+
+        Args:
+            runtime_dir: Path to the runtime info directory.
+        """
         self._runtime_info_dir = Path(runtime_dir)
         self._runtime_info = RuntimeInfoManager(runtime_dir=runtime_dir, agent_name=self.agent_name)
         self._record_runtime_change(
@@ -83,6 +175,7 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         )
 
     def get_runtime_info_dir(self) -> Optional[Path]:
+        """Return the runtime info directory, if set."""
         return self._runtime_info_dir
 
     def _record_runtime_change(
@@ -93,6 +186,7 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         subject_id: Optional[str] = None,
         detail: Optional[Dict[str, Any]] = None,
     ) -> None:
+        """Internal helper: record a runtime change if the info manager is available."""
         if self._runtime_info is None:
             return
         self._runtime_info.record(
@@ -111,6 +205,11 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         subject_id: Optional[str] = None,
         detail: Optional[Dict[str, Any]] = None,
     ) -> None:
+        """Public wrapper around :meth:`_record_runtime_change`.
+
+        This indirection allows subclasses or mixins to override logging
+        behaviour without replacing the internal helper.
+        """
         self._record_runtime_change(
             action=action,
             subject_kind=subject_kind,
@@ -119,11 +218,16 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         )
 
     def get_runtime_info_snapshot(self) -> Optional[Dict[str, Any]]:
+        """Return the latest runtime snapshot, or ``None`` if not initialised."""
         if self._runtime_info is None:
             return None
         return self._runtime_info._build_snapshot(core=self)  # noqa: SLF001
 
     def get_graph_runtime_state(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable description of the current graph runtime.
+
+        Includes node/edge counts, entry/exit IDs, revision, hash, and API counts.
+        """
         if self._runtime_info is None:
             return {
                 "graph_name": None,
@@ -154,11 +258,27 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         return state
 
     def get_graph_runtime_events(self, *, since_revision: int = 0) -> list[Dict[str, Any]]:
+        """Return graph events newer than *since_revision*.
+
+        Args:
+            since_revision: Lower bound (exclusive) for event revision.
+
+        Returns:
+            List of event dictionaries.
+        """
         if self._runtime_info is None:
             return []
         return self._runtime_info.get_graph_events(since_revision=since_revision)
 
     def get_graph_runtime_diff(self, *, since_revision: int) -> Dict[str, Any]:
+        """Return a structural diff of the graph since *since_revision*.
+
+        Args:
+            since_revision: Base revision for the diff.
+
+        Returns:
+            Dictionary with ``operations``, ``is_gap_free``, and metadata.
+        """
         if self._runtime_info is None:
             return {
                 "base_revision": since_revision,
@@ -171,9 +291,15 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         return self._runtime_info.get_graph_diff(since_revision=since_revision, core=self)
 
     def register_architecture_regulator(self, regulator: ArchitectureRegulator) -> None:
+        """Replace the default architecture regulator.
+
+        Args:
+            regulator: New :class:`ArchitectureRegulator` instance.
+        """
         self.architecture_regulator = regulator
 
     def get_architecture_manager(self) -> ArchitectureManager:
+        """Return the architecture manager, creating it lazily if needed."""
         manager = getattr(self, "architecture_manager", None)
         if manager is None:
             manager = ArchitectureManager(self)
@@ -186,6 +312,18 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         *,
         graph: Optional[Any] = None,
     ) -> ArchitectureRegulation:
+        """Apply architecture regulation to a runtime failure.
+
+        For ``output_parse_error`` failures on nodes with ``auto_repair`` metadata,
+        an automatic output-repair patch is proposed and applied.
+
+        Args:
+            failure: The failure event to regulate.
+            graph: Optional execution graph to target (defaults to the core's graph).
+
+        Returns:
+            The :class:`ArchitectureRegulation` produced by the regulator.
+        """
         regulator = getattr(self, "architecture_regulator", None)
         if regulator is None:
             regulator = ArchitectureRegulator()
@@ -224,20 +362,41 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         return regulation
 
     def get_tool_scheduler(self) -> Any:
-        """Return or create the ToolScheduler for this core."""
+        """Return or create the ToolScheduler for this core.
+
+        The scheduler is instantiated lazily to avoid import-time side effects.
+
+        Returns:
+            A :class:`ToolScheduler` instance.
+        """
         if self._tool_scheduler is None:
             from core.executor_parts.tool_scheduler import ToolScheduler
             self._tool_scheduler = ToolScheduler(self, self.limiter)
         return self._tool_scheduler
 
     def register_stop_event(self, run_id: str) -> threading.Event:
-        """Register a stop event for a run. Returns the event object."""
+        """Register a stop event for a run.
+
+        Args:
+            run_id: The run to register.
+
+        Returns:
+            A fresh :class:`threading.Event` that callers can set to request a stop.
+        """
         event = threading.Event()
         self._stop_events[run_id] = event
         return event
 
     def request_stop(self, run_id: str, stop_type: str) -> bool:
-        """Request a stop for the given run. stop_type is 'soft' or 'hard'."""
+        """Request a stop for the given run.
+
+        Args:
+            run_id: The run to stop.
+            stop_type: ``"soft"`` (finish current node) or ``"hard"`` (abort immediately).
+
+        Returns:
+            ``True`` if the event existed and was set.
+        """
         event = self._stop_events.get(run_id)
         if event is not None:
             self._stop_types[run_id] = stop_type
@@ -246,7 +405,14 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         return False
 
     def check_stop(self, run_id: Optional[str]) -> Optional[str]:
-        """Check if a stop has been requested for the run. Returns 'soft', 'hard', or None."""
+        """Check if a stop has been requested for the run.
+
+        Args:
+            run_id: The run to check.
+
+        Returns:
+            ``"soft"``, ``"hard"``, or ``None``.
+        """
         if run_id is None:
             return None
         event = self._stop_events.get(run_id)
@@ -255,11 +421,23 @@ class Core(RuntimeRegistryMixin, ExecutionGraphStateMixin, CognitiveRuntimeMixin
         return None
 
     def clear_stop(self, run_id: str) -> None:
-        """Clear the stop event for a run."""
+        """Clear the stop event for a run.
+
+        Args:
+            run_id: The run whose stop state should be reset.
+        """
         self._stop_events.pop(run_id, None)
         self._stop_types.pop(run_id, None)
 
     def cleanup_transient_execution_nodes(self, *, graph: Optional[ExecutionGraph] = None) -> list[int]:
+        """Remove transient nodes from the graph and optionally persist.
+
+        Args:
+            graph: Optional graph to target (defaults to the core's graph).
+
+        Returns:
+            List of removed node IDs.
+        """
         target_graph = graph or self.get_execution_graph()
         if target_graph is None:
             return []

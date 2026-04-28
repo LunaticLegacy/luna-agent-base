@@ -1,7 +1,15 @@
+"""Declarative architecture patch data model.
+
+Defines the ``ArchitecturePatch`` and ``ArchitectureOperation`` dataclasses
+that represent mutations to an ExecutionGraph (add/remove agents, nodes,
+edges, metadata updates, etc.).  Also lists the set of operations supported
+by the ArchitectureManager.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 SUPPORTED_ARCHITECTURE_OPS = {
@@ -24,21 +32,40 @@ SUPPORTED_ARCHITECTURE_OPS = {
 
 @dataclass
 class ArchitectureOperation:
+    """A single operation inside an architecture patch.
+
+    The ``op`` field must be one of ``SUPPORTED_ARCHITECTURE_OPS``.
+    All other fields from the raw dict are collected into ``payload``.
+    """
+
     op: str
     payload: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "ArchitectureOperation":
+        """Parse an operation dict, extracting ``op`` and keeping the rest."""
         payload = dict(raw)
         op = str(payload.pop("op", "")).strip()
         return cls(op=op, payload=payload)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise back to a plain dict."""
         return {"op": self.op, **dict(self.payload)}
 
 
 @dataclass
 class ArchitecturePatch:
+    """A declarative patch that mutates the execution graph.
+
+    Attributes:
+        patch_id: Unique identifier for this patch (required).
+        reason: Human-readable motivation.
+        scope: Currently only ``"package"`` is supported.
+        operations: Ordered list of ArchitectureOperation instances.
+        rollback: Rollback descriptor (default ``{"action": "revert_patch"}``).
+        metadata: Free-form extra metadata.
+    """
+
     patch_id: str
     reason: str
     scope: str = "package"
@@ -48,6 +75,11 @@ class ArchitecturePatch:
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "ArchitecturePatch":
+        """Parse a patch dict into a strongly-typed ``ArchitecturePatch``.
+
+        Raises:
+            ValueError: If *raw* is not a dict.
+        """
         if not isinstance(raw, dict):
             raise ValueError("architecture_patch must be an object.")
         operations = [
@@ -66,11 +98,13 @@ class ArchitecturePatch:
 
     @classmethod
     def coerce(cls, raw: Any) -> "ArchitecturePatch":
+        """Idempotent coercion: pass through if already an ArchitecturePatch."""
         if isinstance(raw, ArchitecturePatch):
             return raw
         return cls.from_dict(raw)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise back to a plain dict."""
         return {
             "patch_id": self.patch_id,
             "reason": self.reason,
@@ -82,6 +116,12 @@ class ArchitecturePatch:
 
 
 def architecture_patch_example() -> Dict[str, Any]:
+    """Return a canonical example patch for documentation / testing.
+
+    The example adds an ``output_repairer`` agent, wires it into the graph
+    after node ``2``, and marks it as transient so it is cleaned up after
+    the run.
+    """
     return {
         "patch_id": "patch-output-repairer-001",
         "reason": "coder structured output parse failed",

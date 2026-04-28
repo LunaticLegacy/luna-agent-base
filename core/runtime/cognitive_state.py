@@ -1,3 +1,19 @@
+"""Shared cognitive-graph helpers for a runtime core.
+
+This mixin (:class:`CognitiveRuntimeMixin`) is designed to be combined with
+:class:`Core` via multiple inheritance.  It provides high-level operations
+on the swarm's shared :class:`CognitiveGraph`:
+
+* Merging per-agent cognitive deltas into the swarm graph.
+* Scheduling and retiring "thought subgraphs" — focused slices of the
+  cognitive graph that one agent is currently reasoning about.
+* Exporting graph context as LLM-ready prompt text.
+* Managing global variables with per-agent visibility filters.
+
+Exports:
+    - :class:`CognitiveRuntimeMixin`
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -8,9 +24,20 @@ from ..context_graph import ContextEntry, ContextEntryType, ContextGraph, Contex
 
 
 class CognitiveRuntimeMixin:
-    """Shared cognitive-graph helpers for a runtime core."""
+    """Shared cognitive-graph helpers for a runtime core.
+
+    Expected to be mixed into :class:`Core`.
+    """
 
     def _public_thought_graph(self) -> CognitiveGraph:
+        """Return a copy of the swarm cognitive graph with execution traces stripped.
+
+        Execution-trace nodes are internal bookkeeping and should not be
+        exposed to LLM prompts.
+
+        Returns:
+            A deep-copied :class:`CognitiveGraph` without EXECUTION_TRACE nodes.
+        """
         graph = CognitiveGraph(graph_id=self.swarm_cognitive_graph.graph_id)
         for node in self.swarm_cognitive_graph.nodes.values():
             if node.node_type == CognitiveNodeType.EXECUTION_TRACE:
@@ -23,6 +50,11 @@ class CognitiveRuntimeMixin:
         return graph
 
     def merge_agent_cognitive_graph(self, agent_id: str) -> None:
+        """Merge an agent's private cognitive graph into the swarm graph.
+
+        Args:
+            agent_id: Identifier of the agent whose graph should be merged.
+        """
         agent = self.agents.get(agent_id)
         if agent is None:
             return
@@ -36,6 +68,12 @@ class CognitiveRuntimeMixin:
         agent_id: str,
         snapshot: Optional[Dict[str, Any]],
     ) -> None:
+        """Merge a cognitive-graph delta (as a snapshot dict) into the swarm graph.
+
+        Args:
+            agent_id: Identifier of the agent that emitted the delta.
+            snapshot: Dictionary representation of a :class:`CognitiveGraph`.
+        """
         if not snapshot:
             return
         try:
@@ -45,6 +83,15 @@ class CognitiveRuntimeMixin:
         merge_cognitive_graphs(self.swarm_cognitive_graph, delta_graph)
 
     def get_cognitive_graph_export(self, query: Optional[str] = None, max_nodes: Optional[int] = None) -> str:
+        """Export the public cognitive graph as LLM-ready text.
+
+        Args:
+            query: Optional query for relevance filtering.
+            max_nodes: Optional node limit for the export.
+
+        Returns:
+            Markdown-formatted graph summary.
+        """
         return self.swarm_cognitive_graph.export_for_llm(query=query, max_nodes=max_nodes)
 
     def schedule_thought_subgraph(
@@ -57,6 +104,22 @@ class CognitiveRuntimeMixin:
         expected_next_information: str = "",
         max_nodes: Optional[int] = None,
     ) -> tuple[CognitiveSubgraphDescriptor, CognitiveGraph]:
+        """Create a new thought subgraph owned by *agent_id*.
+
+        Any previously active subgraph owned by the same agent is retired
+        so that only one subgraph per agent is active at a time.
+
+        Args:
+            agent_id: Owner agent identifier.
+            query: Optional relevance query.
+            seed_ids: Optional seed node IDs for subgraph growth.
+            purpose: Human-readable purpose of the subgraph.
+            expected_next_information: Hint about what information the agent expects next.
+            max_nodes: Optional node limit.
+
+        Returns:
+            A tuple of ``(descriptor, subgraph)``.
+        """
         if agent_id:
             for existing in self.active_thought_subgraphs.values():
                 if existing.owner_agent == agent_id and existing.status == "active":
@@ -73,6 +136,14 @@ class CognitiveRuntimeMixin:
         return descriptor, subgraph
 
     def retire_thought_subgraph(self, subgraph_id: str) -> bool:
+        """Mark a thought subgraph as retired.
+
+        Args:
+            subgraph_id: The subgraph to retire.
+
+        Returns:
+            ``True`` if the subgraph existed and was updated.
+        """
         descriptor = self.active_thought_subgraphs.get(subgraph_id)
         if descriptor is None:
             return False
@@ -80,6 +151,14 @@ class CognitiveRuntimeMixin:
         return True
 
     def get_private_workspace_summary(self, agent_id: str) -> str:
+        """Fetch a private workspace summary from an agent if it supports one.
+
+        Args:
+            agent_id: The agent whose summary is requested.
+
+        Returns:
+            A string summary or a placeholder message.
+        """
         agent = self.agents.get(agent_id)
         summarize = getattr(agent, "summarize_private_workspace", None)
         if callable(summarize):
@@ -87,6 +166,11 @@ class CognitiveRuntimeMixin:
         return "No private workspace summary available."
 
     def set_global_variables(self, globals_config) -> None:
+        """Register the swarm's global variables and record the change.
+
+        Args:
+            globals_config: A :class:`GlobalVariablesConfig` instance.
+        """
         self.global_variables = globals_config
         self._record_runtime_change(
             action="set_global_variables",
@@ -102,6 +186,11 @@ class CognitiveRuntimeMixin:
         )
 
     def get_global_variables_snapshot(self) -> Dict[str, Any]:
+        """Return a snapshot of global variables and their visibility.
+
+        Returns:
+            Dictionary with ``"values"`` and ``"visibility"`` keys.
+        """
         globals_config = getattr(self, "global_variables", None)
         if globals_config is None:
             return {"values": {}, "visibility": {}}
@@ -114,6 +203,14 @@ class CognitiveRuntimeMixin:
         }
 
     def get_global_variables_for_agent(self, agent_id: str) -> Dict[str, Any]:
+        """Return only the global variables visible to *agent_id*.
+
+        Args:
+            agent_id: The agent requesting variables.
+
+        Returns:
+            Filtered dictionary of visible variable names and values.
+        """
         globals_config = getattr(self, "global_variables", None)
         if globals_config is None:
             return {}
@@ -123,6 +220,14 @@ class CognitiveRuntimeMixin:
         return {}
 
     def build_global_context_export(self, *, agent_id: str) -> str:
+        """Build a markdown block of visible global variables for *agent_id*.
+
+        Args:
+            agent_id: The agent that will receive the context.
+
+        Returns:
+            Markdown string or empty string if no variables are visible.
+        """
         visible = self.get_global_variables_for_agent(agent_id)
         if not visible:
             return ""
@@ -135,6 +240,11 @@ class CognitiveRuntimeMixin:
         return "\n".join(lines)
 
     def set_current_run_id(self, run_id: Optional[str]) -> None:
+        """Propagate a run ID to every managed agent.
+
+        Args:
+            run_id: The new run identifier.
+        """
         self.current_run_id = str(run_id).strip() if run_id else None
         for agent in self.agents.values():
             set_run_id = getattr(agent, "set_run_id", None)
@@ -149,6 +259,24 @@ class CognitiveRuntimeMixin:
         purpose: str = "",
         max_nodes: Optional[int] = None,
     ) -> str:
+        """Build a comprehensive thought-context prompt for *agent_id*.
+
+        The returned text contains:
+
+        1. A main shared graph summary.
+        2. An active schedulable subgraph.
+        3. A private workspace summary.
+        4. Output-contract instructions for emitting cognitive graph updates.
+
+        Args:
+            agent_id: The agent that will receive the context.
+            query: Optional relevance query.
+            purpose: Human-readable purpose string.
+            max_nodes: Optional node limit for subgraph exports.
+
+        Returns:
+            Markdown-formatted prompt text.
+        """
         public_graph = self._public_thought_graph()
         main_graph = self.build_context_graph_export(
             agent_id=agent_id,
@@ -201,6 +329,20 @@ class CognitiveRuntimeMixin:
         purpose: str = "",
         max_nodes: Optional[int] = None,
     ) -> str:
+        """Build a context-graph prompt from the public thought graph.
+
+        The context graph is a pruned, LLM-optimised view of the shared
+        cognitive graph.  It also includes system and workspace entries.
+
+        Args:
+            agent_id: The agent that will receive the context.
+            query: Optional relevance query.
+            purpose: Human-readable purpose string.
+            max_nodes: Optional node limit.
+
+        Returns:
+            Markdown-formatted prompt text.
+        """
         public_graph = self._public_thought_graph()
         descriptor, subgraph = public_graph.describe_subgraph(
             owner_agent=agent_id,
@@ -244,6 +386,7 @@ class CognitiveRuntimeMixin:
         )
         context_graph.add_entry(workspace_entry)
 
+        # Anchor the system entry to the first content entry for topological ordering
         anchor_id = anchor_ids[0] if anchor_ids else next(iter(context_graph.entries.keys()), "")
         if anchor_id and anchor_id in context_graph.entries:
             context_graph.add_reference(
@@ -264,6 +407,14 @@ class CognitiveRuntimeMixin:
         return prompt
 
     def get_cognitive_graph_snapshot(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable snapshot of the public cognitive graph.
+
+        The snapshot includes active subgraph descriptors with node IDs
+        filtered to those that still exist in the graph.
+
+        Returns:
+            Dictionary suitable for API responses.
+        """
         public_graph = self._public_thought_graph()
         snapshot = public_graph.snapshot()
         snapshot["active_subgraphs"] = [
@@ -280,6 +431,19 @@ class CognitiveRuntimeMixin:
         return snapshot
 
     def _synthesize_thought_graph_edges(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Synthesise fallback edges when the graph snapshot has no explicit edges.
+
+        Two strategies are tried:
+
+        1. Connect root nodes to frontier nodes within each active subgraph.
+        2. If that yields nothing, connect nodes chronologically.
+
+        Args:
+            snapshot: Graph snapshot dictionary.
+
+        Returns:
+            List of synthetic edge dictionaries.
+        """
         nodes = snapshot.get("nodes") or []
         if len(nodes) < 2:
             return []
@@ -329,6 +493,7 @@ class CognitiveRuntimeMixin:
                     )
 
         if not edges:
+            # Chronological fallback: connect nodes by created_at, source, version, node_id
             ordered_nodes = sorted(
                 node_by_id.values(),
                 key=lambda node: (
@@ -350,6 +515,7 @@ class CognitiveRuntimeMixin:
         return edges
 
     def reset_runtime_state(self) -> None:
+        """Reset all runtime state: agents, cognitive graph, subgraphs, and run ID."""
         for agent in self.agents.values():
             reset_runtime_state = getattr(agent, "reset_runtime_state", None)
             if callable(reset_runtime_state):

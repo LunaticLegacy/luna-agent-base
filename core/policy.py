@@ -1,3 +1,33 @@
+"""Execution graph engine for agents and tools.
+
+The :class:`ExecutionGraph` is the central data structure that describes
+how a swarm's agents and tools are wired together.  It supports:
+
+* Three node types — :class:`Node` (base), :class:`AgentNode` (delegates to
+  an agent), and :class:`ToolNode` (delegates to a tool).
+* Directed edges with optional labels, conditions, and priorities.
+* Validation against a runtime :class:`Core` to ensure every node binds to
+  a real agent blueprint or registered tool.
+* Projection to a pure "agent graph" that hides tool nodes for UI purposes.
+* Python source-code generation so that graphs can be version-controlled.
+
+Two module-level helpers are also provided:
+
+* :func:`_node_is_transient` — determines whether a node is temporary.
+* :func:`_core_has_agent_blueprint` — checks blueprint existence with
+  graceful fallback.
+
+Exports:
+    - :class:`Node`
+    - :class:`Edge`
+    - :class:`AgentNode`
+    - :class:`ToolNode`
+    - :class:`ExecutionStep`
+    - :class:`ExecutionGraph`
+    - :func:`_node_is_transient`
+    - :func:`_core_has_agent_blueprint`
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,7 +42,14 @@ if TYPE_CHECKING:
 
 @dataclass
 class Node:
-    """Base node definition for the execution graph."""
+    """Base node definition for the execution graph.
+
+    Attributes:
+        node_id: Unique integer identifier.
+        node_name: Human-readable name.
+        next_node_ids: Outgoing adjacency list.
+        metadata: Free-form metadata.
+    """
 
     node_id: int
     node_name: str
@@ -22,7 +59,15 @@ class Node:
 
 @dataclass
 class Edge:
-    """Directed edge between two execution nodes."""
+    """Directed edge between two execution nodes.
+
+    Attributes:
+        from_node_id: Source node.
+        to_node_id: Destination node.
+        label: Optional human-readable label.
+        condition: Optional routing condition expression.
+        priority: Higher values are evaluated first when resolving outgoing edges.
+    """
 
     from_node_id: int
     to_node_id: int
@@ -33,7 +78,14 @@ class Edge:
 
 @dataclass(init=False)
 class AgentNode(Node):
-    """Graph node that delegates execution to a managed agent."""
+    """Graph node that delegates execution to a managed agent.
+
+    Attributes:
+        blueprint_ref: Identifier of the agent blueprint to instantiate.
+        additional_prompt: Extra prompt text appended per execution.
+        instance_policy: ``"singleton"`` (reuse one instance) or ``"per_call"``
+            (fresh clone each time).
+    """
 
     blueprint_ref: str
     additional_prompt: Optional[str]
@@ -50,6 +102,17 @@ class AgentNode(Node):
         *,
         agent_id: Optional[str] = None,
     ) -> None:
+        """Initialise an agent node.
+
+        Args:
+            node_id: Unique integer identifier.
+            node_name: Human-readable name.
+            metadata: Free-form metadata.
+            blueprint_ref: Agent blueprint reference.
+            additional_prompt: Extra prompt text.
+            instance_policy: ``"singleton"`` or ``"per_call"``.
+            agent_id: Deprecated alias for *blueprint_ref*.
+        """
         self.node_id = node_id
         self.node_name = node_name
         self.next_node_ids: List[int] = []
@@ -70,7 +133,12 @@ class AgentNode(Node):
 
 @dataclass
 class ToolNode(Node):
-    """Graph node that delegates execution to a standard tool."""
+    """Graph node that delegates execution to a standard tool.
+
+    Attributes:
+        tool_name: Registered tool name to invoke.
+        input_mapping: Optional mapping from payload keys to tool argument names.
+    """
 
     tool_name: str = ""
     input_mapping: Dict[str, Any] = field(default_factory=dict)
@@ -78,7 +146,18 @@ class ToolNode(Node):
 
 @dataclass
 class ExecutionStep:
-    """One step in a graph execution trace."""
+    """One step in a graph execution trace.
+
+    Attributes:
+        node_id: Executed node identifier.
+        node_name: Human-readable node name.
+        node_type: Class name of the node.
+        input_payload: Payload received by the node.
+        output_payload: Payload produced by the node.
+        status: ``"ok"``, ``"failed"``, etc.
+        error: Optional error message.
+        branch: Branch label (for parallel branches).
+    """
 
     node_id: int
     node_name: str
@@ -91,9 +170,23 @@ class ExecutionStep:
 
 
 class ExecutionGraph:
-    """Execution graph engine for agents and tools."""
+    """Execution graph engine for agents and tools.
+
+    Attributes:
+        graph_name: Human-readable name.
+        graph_kind: ``"execution"`` or ``"agent"`` (after projection).
+        nodes: Map ``node_id -> Node``.
+        edges: List of all :class:`Edge` objects.
+        entry_node_id: First node to execute.
+        exit_node_id: Last node in the graph.
+    """
 
     def __init__(self, graph_name: str) -> None:
+        """Initialise an empty graph.
+
+        Args:
+            graph_name: Human-readable name for the graph.
+        """
         self.graph_name = graph_name
         self.graph_kind = "execution"
         self.nodes: Dict[int, Node] = {}
@@ -102,7 +195,14 @@ class ExecutionGraph:
         self.exit_node_id: Optional[int] = None
 
     def add_node(self, node: Node) -> None:
-        """Add a node to the graph."""
+        """Add a node to the graph.
+
+        Args:
+            node: The node instance to add.
+
+        Raises:
+            ValueError: If *node.node_id* already exists.
+        """
         if node.node_id in self.nodes:
             raise ValueError(f"Duplicate node_id: {node.node_id}")
         self.nodes[node.node_id] = node
@@ -116,7 +216,18 @@ class ExecutionGraph:
         condition: Optional[str] = None,
         priority: int = 0,
     ) -> None:
-        """Connect two nodes by id."""
+        """Connect two nodes by id.
+
+        Args:
+            from_node_id: Source node.
+            to_node_id: Destination node.
+            label: Optional edge label.
+            condition: Optional routing condition.
+            priority: Higher values sort first.
+
+        Raises:
+            KeyError: If either node does not exist.
+        """
         if from_node_id not in self.nodes:
             raise KeyError(f"Unknown from_node_id: {from_node_id}")
         if to_node_id not in self.nodes:
@@ -135,7 +246,15 @@ class ExecutionGraph:
             )
 
     def replace_next(self, from_node_id: int, to_node_ids: List[int]) -> None:
-        """Replace the outgoing edges for a node."""
+        """Replace the outgoing edges for a node.
+
+        Args:
+            from_node_id: Node whose outgoing edges are replaced.
+            to_node_ids: New ordered list of destination node IDs.
+
+        Raises:
+            KeyError: If *from_node_id* or any destination node does not exist.
+        """
         if from_node_id not in self.nodes:
             raise KeyError(f"Unknown from_node_id: {from_node_id}")
         for to_node_id in to_node_ids:
@@ -147,7 +266,15 @@ class ExecutionGraph:
             self.edges.append(Edge(from_node_id=from_node_id, to_node_id=to_node_id))
 
     def remove_edge(self, from_node_id: int, to_node_id: int) -> None:
-        """Remove one outgoing edge."""
+        """Remove one outgoing edge.
+
+        Args:
+            from_node_id: Source node.
+            to_node_id: Destination node.
+
+        Raises:
+            KeyError: If *from_node_id* does not exist.
+        """
         if from_node_id not in self.nodes:
             raise KeyError(f"Unknown from_node_id: {from_node_id}")
         self.nodes[from_node_id].next_node_ids = [
@@ -161,7 +288,17 @@ class ExecutionGraph:
         ]
 
     def remove_node(self, node_id: int) -> None:
-        """Remove a node and detach all incoming edges."""
+        """Remove a node and detach all incoming edges.
+
+        Also clears ``entry_node_id`` / ``exit_node_id`` if they pointed to
+        the removed node.
+
+        Args:
+            node_id: The node to remove.
+
+        Raises:
+            KeyError: If the node does not exist.
+        """
         if node_id not in self.nodes:
             raise KeyError(f"Unknown node_id: {node_id}")
         del self.nodes[node_id]
@@ -178,7 +315,15 @@ class ExecutionGraph:
             self.exit_node_id = None
 
     def to_agent_graph(self) -> "ExecutionGraph":
-        """Project the execution graph into a pure agent graph."""
+        """Project the execution graph into a pure agent graph.
+
+        Tool nodes and intermediate routing nodes are elided; only
+        :class:`AgentNode` instances are retained, with edges representing
+        the transitive agent-to-agent routing.
+
+        Returns:
+            A new :class:`ExecutionGraph` with ``graph_kind == "agent"``.
+        """
         derived = ExecutionGraph(self.graph_name)
         derived.graph_kind = "agent"
 
@@ -197,6 +342,7 @@ class ExecutionGraph:
             )
 
         def successor_agent_ids(start_node_id: int) -> list[int]:
+            """DFS through non-agent nodes to find the next reachable agents."""
             seen: set[int] = set()
             stack: list[int] = list(self.nodes[start_node_id].next_node_ids)
             resolved: list[int] = []
@@ -246,25 +392,49 @@ class ExecutionGraph:
         return derived
 
     def set_entry(self, node_id: int) -> None:
-        """Set the entry node for the graph."""
+        """Set the entry node for the graph.
+
+        Args:
+            node_id: The node that will be executed first.
+
+        Raises:
+            KeyError: If the node does not exist.
+        """
         self._ensure_node_exists(node_id)
         self.entry_node_id = node_id
 
     def set_exit(self, node_id: int) -> None:
-        """Set the exit node for the graph."""
+        """Set the exit node for the graph.
+
+        Args:
+            node_id: The node that marks the end of execution.
+
+        Raises:
+            KeyError: If the node does not exist.
+        """
         self._ensure_node_exists(node_id)
         self.exit_node_id = node_id
 
     def _ensure_node_exists(self, node_id: int) -> None:
+        """Defensive guard: raise if *node_id* is absent."""
         if node_id not in self.nodes:
             raise KeyError(f"Unknown node_id: {node_id}")
 
     def _allows_missing_binding(self, node: Node) -> bool:
+        """Return whether a missing blueprint/tool binding is acceptable.
+
+        Transient nodes are allowed to have dangling references because they
+        may be generated dynamically and removed before execution.
+        """
         metadata = node.metadata if isinstance(node.metadata, dict) else {}
         return _node_is_transient(metadata)
 
     def purge_transient_nodes(self) -> List[int]:
-        """Remove transient nodes from the graph and return their ids."""
+        """Remove transient nodes from the graph and return their ids.
+
+        Returns:
+            List of node IDs that were removed.
+        """
         removed: List[int] = []
         for node_id, node in list(self.nodes.items()):
             metadata = node.metadata if isinstance(node.metadata, dict) else {}
@@ -274,7 +444,24 @@ class ExecutionGraph:
         return removed
 
     def validate(self, core: Optional["Core"] = None) -> GraphValidationResult:
-        """Validate graph structure and runtime bindings."""
+        """Validate graph structure and runtime bindings.
+
+        Checks performed:
+
+        1. Structural checks — at least one node, entry node set, etc.
+        2. Edge integrity — no dangling references or duplicates.
+        3. Binding checks — every :class:`AgentNode` has a blueprint and every
+           :class:`ToolNode` has a tool name.  When *core* is provided, the
+           blueprint/tool is verified against the runtime registry.
+        4. Transient-node downgrade — missing bindings on transient nodes
+           become warnings instead of errors.
+
+        Args:
+            core: Optional runtime core for binding verification.
+
+        Returns:
+            A :class:`GraphValidationResult` with errors and warnings.
+        """
         errors: List[str] = []
         warnings: List[str] = []
 
@@ -349,11 +536,25 @@ class ExecutionGraph:
         )
 
     def is_available(self, core: Optional["Core"] = None) -> bool:
-        """Return whether the graph is ready for execution."""
+        """Return whether the graph is ready for execution.
+
+        Args:
+            core: Optional runtime core for binding verification.
+
+        Returns:
+            ``True`` if validation produces no errors.
+        """
         return self.validate(core).is_valid
 
     def is_complete(self, core: Optional["Core"] = None) -> bool:
-        """Return whether the graph is complete enough for runtime use."""
+        """Return whether the graph is complete enough for runtime use.
+
+        Args:
+            core: Optional runtime core for binding verification.
+
+        Returns:
+            ``True`` if validation produces no errors and no warnings.
+        """
         result = self.validate(core)
         return result.is_valid and not result.warnings
 
@@ -367,7 +568,19 @@ class ExecutionGraph:
         swarm_name: Optional[str] = None,
         event_sink: Optional[Callable[[ExecutionEvent], None]] = None,
     ) -> ExecutionState:
-        """Execute the graph from its entry node."""
+        """Execute the graph from its entry node.
+
+        Args:
+            core: The runtime :class:`Core`.
+            initial_payload: Seed payload.
+            rounds: Starting round counter.
+            run_id: Optional run identifier.
+            swarm_name: Name of the swarm package.
+            event_sink: Optional live-event callback.
+
+        Returns:
+            The final :class:`ExecutionState`.
+        """
         from .executor import GraphExecutor
 
         executor = GraphExecutor()
@@ -382,7 +595,11 @@ class ExecutionGraph:
         )
 
     def to_python_source(self) -> str:
-        """Render the graph as a standalone Python module."""
+        """Render the graph as a standalone Python module.
+
+        Returns:
+            Python source code that reconstructs the graph when executed.
+        """
         lines: List[str] = [
             "from core import AgentNode, ExecutionGraph, ToolNode",
             "",
@@ -422,7 +639,11 @@ class ExecutionGraph:
         return "\n".join(lines)
 
     def clone(self) -> "ExecutionGraph":
-        """Create a shallow clone of the graph structure."""
+        """Create a shallow clone of the graph structure.
+
+        Returns:
+            A new :class:`ExecutionGraph` with copied nodes and edges.
+        """
         cloned = ExecutionGraph(self.graph_name)
         cloned.graph_kind = self.graph_kind
         cloned.nodes = {
@@ -444,6 +665,7 @@ class ExecutionGraph:
         return cloned
 
     def _render_node_source(self, node: Node) -> List[str]:
+        """Emit Python source lines that reconstruct *node*."""
         lines: List[str] = ["    graph.add_node("]
         if isinstance(node, AgentNode):
             lines.extend(
@@ -486,7 +708,14 @@ class ExecutionGraph:
         return lines
 
     def outgoing_edges(self, node_id: int) -> List[Edge]:
-        """Return the outgoing edges for a node sorted by priority."""
+        """Return the outgoing edges for a node sorted by priority (descending).
+
+        Args:
+            node_id: The node whose outgoing edges are requested.
+
+        Returns:
+            Sorted list of :class:`Edge` objects.
+        """
         return sorted(
             [edge for edge in self.edges if edge.from_node_id == node_id],
             key=lambda edge: edge.priority,
@@ -494,6 +723,7 @@ class ExecutionGraph:
         )
 
     def _clone_node(self, node: Node) -> Node:
+        """Create a shallow copy of *node* preserving its concrete type."""
         cloned = type(node)(
             node_id=node.node_id,
             node_name=node.node_name,
@@ -504,6 +734,7 @@ class ExecutionGraph:
         return cloned
 
     def _node_specific_kwargs(self, node: Node) -> Dict[str, Any]:
+        """Return constructor kwargs specific to the concrete node type."""
         if isinstance(node, AgentNode):
             return {
                 "blueprint_ref": node.blueprint_ref,
@@ -525,6 +756,7 @@ class ExecutionGraph:
         label: Optional[str] = None,
         condition: Optional[str] = None,
     ) -> bool:
+        """Return whether an identical edge already exists."""
         return any(
             edge.from_node_id == from_node_id
             and edge.to_node_id == to_node_id
@@ -535,6 +767,24 @@ class ExecutionGraph:
 
 
 def _node_is_transient(metadata: Dict[str, Any]) -> bool:
+    """Determine whether a node's metadata marks it as transient.
+
+    Transient nodes are expected to be short-lived and therefore missing
+    runtime bindings are downgraded from errors to warnings.
+
+    The check follows a precedence chain:
+
+    1. ``metadata["runtime_transient"]`` — explicit boolean flag.
+    2. ``metadata["node_lifecycle"]["persistence"]`` / ``["lifetime_policy"]``.
+    3. ``metadata["persistence"]`` / ``metadata["lifetime_policy"]``.
+    4. ``metadata["temporary"]`` — legacy boolean flag.
+
+    Args:
+        metadata: Node metadata dictionary.
+
+    Returns:
+        ``True`` if the node should be treated as transient.
+    """
     if not isinstance(metadata, dict):
         return False
 
@@ -563,6 +813,18 @@ def _node_is_transient(metadata: Dict[str, Any]) -> bool:
 
 
 def _core_has_agent_blueprint(core: "Core", blueprint_ref: str) -> bool:
+    """Check whether *core* knows about *blueprint_ref*.
+
+    Prefers ``core.has_agent_blueprint`` if available (allows custom logic);
+    falls back to a simple ``in`` check against ``core.agents``.
+
+    Args:
+        core: The runtime :class:`Core`.
+        blueprint_ref: Agent blueprint identifier.
+
+    Returns:
+        ``True`` if the blueprint exists.
+    """
     has_blueprint = getattr(core, "has_agent_blueprint", None)
     if callable(has_blueprint):
         try:

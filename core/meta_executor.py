@@ -1,6 +1,6 @@
 """Meta-execution runtime for Angelus.
 
-The MetaExecutor wraps GraphExecutor execution into an iterative,
+The :class:`MetaExecutor` wraps :class:`GraphExecutor` execution into an iterative,
 self-driving loop.  After each pass it inspects the swarm cognitive graph
 for unresolved issues (unsupported claims, conflicts, open questions) and
 automatically re-injects a follow-up mission until the graph converges or
@@ -8,6 +8,9 @@ a max-iteration limit is hit.
 
 This is the "dynamic execution runtime" layer: the graph defines the
 pipeline, but the MetaExecutor decides when the pipeline has truly finished.
+
+Exports:
+    - :class:`MetaExecutor`
 """
 
 from __future__ import annotations
@@ -24,13 +27,26 @@ if TYPE_CHECKING:
 
 
 class MetaExecutor:
-    """Iterative meta-executor that drives a swarm until cognitive convergence."""
+    """Iterative meta-executor that drives a swarm until cognitive convergence.
+
+    Attributes:
+        max_iterations: Upper bound on how many times the graph is re-executed.
+        convergence_threshold: The swarm is considered converged when the
+            total count of open questions + unsupported claims + conflicts
+            is less than or equal to this value.
+    """
 
     def __init__(
         self,
         max_iterations: int = 5,
         convergence_threshold: int = 0,
     ) -> None:
+        """Initialise the meta-executor with its stopping criteria.
+
+        Args:
+            max_iterations: Maximum number of graph executions.
+            convergence_threshold: Issue-count threshold for early convergence.
+        """
         self.max_iterations = max(max_iterations, 1)
         self.convergence_threshold = convergence_threshold
 
@@ -49,6 +65,7 @@ class MetaExecutor:
 
         Each iteration runs the full execution graph from entry to exit.
         After each iteration the swarm cognitive graph is inspected:
+
         - Unsupported claims (claims/hypotheses with no evidence)
         - Logical conflicts (A supports B AND A opposes B)
         - Open questions (QUESTION nodes)
@@ -56,6 +73,21 @@ class MetaExecutor:
         If any issue remains, a follow-up mission is constructed and the
         graph is executed again.  The original payload is preserved and
         enriched with iteration history.
+
+        Args:
+            graph: The execution graph to run.
+            core: The runtime :class:`Core` containing agents and state.
+            initial_payload: Seed payload forwarded to the graph entry node.
+            rounds: Starting round counter.
+            run_id: Optional run identifier.
+            swarm_name: Name of the swarm package.
+            event_sink: Optional callback receiving live :class:`ExecutionEvent` objects.
+
+        Returns:
+            The final :class:`ExecutionState` after convergence or max iterations.
+
+        Raises:
+            RuntimeError: If the meta-executor fails to produce any execution state.
         """
         from .executor import GraphExecutor
 
@@ -63,7 +95,7 @@ class MetaExecutor:
         last_state: Optional[ExecutionState] = None
 
         for iteration in range(1, self.max_iterations + 1):
-            # Tag the payload with iteration metadata
+            # Tag the payload with iteration metadata so downstream nodes can observe it
             current_payload["_meta_iteration"] = iteration
             current_payload["_meta_max_iterations"] = self.max_iterations
 
@@ -166,6 +198,14 @@ class MetaExecutor:
 
     @staticmethod
     def _normalize_payload(payload: Any) -> Dict[str, Any]:
+        """Coerce *payload* to a dictionary so that metadata keys can be injected.
+
+        Args:
+            payload: Raw initial payload (may be a string or dict).
+
+        Returns:
+            A dictionary; non-dict payloads are wrapped under the ``"input"`` key.
+        """
         if isinstance(payload, dict):
             return dict(payload)
         return {"input": payload}
@@ -180,10 +220,27 @@ class MetaExecutor:
         open_questions: List[Any],
         iteration: int,
     ) -> Dict[str, Any]:
-        """Construct the payload for the next meta-iteration."""
+        """Construct the payload for the next meta-iteration.
+
+        The follow-up payload preserves the original user input and appends
+        a *focus* section that enumerates open issues the swarm still needs
+        to resolve.
+
+        Args:
+            previous_payload: Payload from the current iteration.
+            state: Execution state after the current iteration.
+            cg: The swarm cognitive graph.
+            unsupported: Unsupported claims detected in the graph.
+            conflicts: Logical conflicts detected in the graph.
+            open_questions: Open QUESTION nodes in the graph.
+            iteration: The iteration number that just completed.
+
+        Returns:
+            A deep-copied dictionary ready for the next graph execution.
+        """
         payload = copy.deepcopy(previous_payload)
 
-        # Preserve original user input
+        # Preserve original user input under a stable key
         if "input" not in payload and "text" in payload:
             payload["input"] = payload["text"]
 
@@ -233,6 +290,16 @@ class MetaExecutor:
         event_type: str,
         detail: Dict[str, Any],
     ) -> None:
+        """Emit a meta-iteration event if an event sink is registered.
+
+        Args:
+            event_sink: Optional callback.
+            run_id: Current run identifier.
+            swarm_name: Name of the swarm package.
+            iteration: Current iteration number.
+            event_type: Dot-namespaced event type.
+            detail: Event payload dictionary.
+        """
         if event_sink is None:
             return
         event_sink(

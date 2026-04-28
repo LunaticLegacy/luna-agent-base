@@ -1,3 +1,16 @@
+"""Payload normalisation, routing, and report-field helpers for graph execution.
+
+``ExecutionProtocolMixin`` is mixed into ``GraphExecutor`` and provides:
+    * Structured-output parsing (JSON, fenced markdown, raw text).
+    * Report-field promotion so that ``final_answer``, ``draft_report``, etc.
+      are carried forward in execution state metadata.
+    * Routing resolution (next_node_id, branch labels, control patches).
+    * Tool-argument building from upstream node outputs.
+
+All methods are stateless helpers; they operate on the provided state and
+node objects without side effects.
+"""
+
 from __future__ import annotations
 
 import copy
@@ -38,6 +51,7 @@ class ExecutionProtocolMixin:
     # ------------------------------------------------------------------
 
     def _apply_metadata_updates(self, target_metadata: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        """Apply ``metadata_patch`` and ``metadata_clear`` directives."""
         metadata_patch = payload.get("metadata_patch")
         if isinstance(metadata_patch, dict):
             target_metadata.update(metadata_patch)
@@ -67,6 +81,7 @@ class ExecutionProtocolMixin:
     # ------------------------------------------------------------------
 
     def _has_content(self, value: Any) -> bool:
+        """Return True if *value* is a non-empty string or non-None object."""
         if value is None:
             return False
         if isinstance(value, str) and not value.strip():
@@ -74,11 +89,18 @@ class ExecutionProtocolMixin:
         return True
 
     def _is_review_control_payload(self, payload: Dict[str, Any]) -> bool:
+        """Heuristic: does this payload look like a reviewer routing signal?"""
         verdict = str(payload.get("verdict", "") or payload.get("branch", "")).strip().lower()
         has_routing = any(key in payload for key in ("next_node_id", "next_node_ids", "branch", "branches"))
         return verdict in {"approve", "approved", "revise", "re_research", "reject"} or has_routing
 
     def _latest_report_payload(self, state: ExecutionState, input_payload: Any) -> Any:
+        """Walk backwards through state metadata to find the most recent report content.
+
+        Prefers canonical report keys, then scans the ``outputs`` dict while
+        skipping pure control/reviewer payloads so that verdicts do not
+        accidentally become report text.
+        """
         for key in ("approved_report", "final_report", "final_answer", "draft_report", "latest_report", "report_text"):
             value = state.metadata.get(key)
             if self._has_content(value):
@@ -117,6 +139,10 @@ class ExecutionProtocolMixin:
         *,
         input_payload: Any,
     ) -> None:
+        """Promote report keys from *payload* into canonical state metadata slots.
+
+        Also normalises ``final_answer`` → ``final_report`` for consistency.
+        """
         for key in ("report_text", "draft_report", "approved_report", "final_report", "final_answer"):
             value = payload.get(key)
             if self._has_content(value):
@@ -136,6 +162,7 @@ class ExecutionProtocolMixin:
                 state.metadata["latest_report"] = approved
 
     def _extract_final_report_payload(self, payload: Dict[str, Any]) -> Any:
+        """Return the first canonical report field found in *payload*, or None."""
         for key in ("final_report", "final_answer", "approved_report"):
             value = payload.get(key)
             if self._has_content(value):
@@ -154,6 +181,20 @@ class ExecutionProtocolMixin:
         expected_schema: Optional[Any] = None,
         parser_stage: str = "agent_structured_output",
     ) -> Optional[Dict[str, Any]]:
+        """Parse a (possibly fenced) JSON object from the agent's text output.
+
+        Args:
+            assistant_message: Raw assistant text.
+            required: If True, raise OutputParseError on any failure.
+            expected_schema: Optional schema hint for error diagnostics.
+            parser_stage: Identifier for the layer that invoked parsing.
+
+        Returns:
+            The parsed dict, or None if not required and parsing fails.
+
+        Raises:
+            OutputParseError: If *required* is True and parsing fails.
+        """
         if not assistant_message:
             if required:
                 raise OutputParseError(
@@ -206,6 +247,11 @@ class ExecutionProtocolMixin:
         return None
 
     def _node_output_mode(self, node: AgentNode) -> str:
+        """Determine the expected output mode for *node*.
+
+        Explicit ``output_mode`` metadata takes precedence; otherwise we
+        heuristically guess based on the node name.
+        """
         mode = str((node.metadata or {}).get("output_mode") or "").strip().lower()
         if mode:
             return mode
@@ -215,6 +261,7 @@ class ExecutionProtocolMixin:
         return "json_optional"
 
     def _extract_next_node_id(self, payload: Any) -> Optional[int]:
+        """Safely extract an integer next_node_id from a dict payload."""
         if isinstance(payload, dict):
             nid = payload.get("next_node_id")
             if isinstance(nid, int):
@@ -224,6 +271,11 @@ class ExecutionProtocolMixin:
         return None
 
     def _extract_artifact_path(self, payload: Dict[str, Any]) -> Optional[str]:
+        """Try to extract a file path from an agent output dict.
+
+        Checks the ``artifact`` key first, then falls back to regex scanning
+        the serialised JSON for common "save as / 保存为" patterns.
+        """
         path = payload.get("artifact")
         if path:
             return path
@@ -241,6 +293,7 @@ class ExecutionProtocolMixin:
         return None
 
     def _raw_agent_payload(self, result: Any) -> Any:
+        """Extract the natural-language payload from an agent result object."""
         if getattr(result, "assistant_message", None):
             return result.assistant_message
         if isinstance(result, dict):
@@ -266,6 +319,11 @@ class ExecutionProtocolMixin:
         return state.payload
 
     def _build_tool_arguments(self, node: ToolNode, state: ExecutionState) -> Dict[str, Any]:
+        """Assemble the argument dict for a tool node execution.
+
+        Includes the latest upstream output, the current payload, runtime
+        metadata, and any explicit ``input_mapping`` overrides.
+        """
         latest_output = self._get_latest_output_for_tool(state)
         base_arguments = {
             "input": latest_output,
@@ -287,7 +345,13 @@ class ExecutionProtocolMixin:
         *,
         input_payload: Any,
     ) -> "NodeExecutionResult":
-        """Apply the agent output protocol and return routing-ready payloads."""
+        """Apply the agent output protocol and return routing-ready payloads.
+
+        Depending on the node's ``output_mode``, this may parse JSON,
+        validate patch schemas, or pass raw text through unchanged.
+        Report fields are promoted to state metadata so downstream nodes
+        can access them without re-parsing.
+        """
         from ..results import NodeExecutionResult
 
         output_mode = self._node_output_mode(node)
@@ -325,6 +389,7 @@ class ExecutionProtocolMixin:
 
         if parsed_output is not None:
             if output_mode == "patch":
+                # Validate early so malformed patches fail fast.
                 ArchitecturePatch.coerce(parsed_output.get("architecture_patch", parsed_output))
             output_payload = parsed_output
             routing_payload = parsed_output
@@ -363,7 +428,11 @@ class ExecutionProtocolMixin:
         *,
         input_payload: Any,
     ) -> "NodeExecutionResult":
-        """Apply the tool output protocol and return routing-ready payloads."""
+        """Apply the tool output protocol and return routing-ready payloads.
+
+        Tool outputs are generally passed through verbatim, but dict outputs
+        are inspected for metadata patches and report fields.
+        """
         from ..results import NodeExecutionResult
 
         state_payload = output_payload
@@ -394,6 +463,11 @@ class ExecutionProtocolMixin:
         current_node: Any,
         next_targets: List[int],
     ) -> None:
+        """Ensure every target in *next_targets* exists and is an allowed edge.
+
+        Raises:
+            ValueError: If a target is missing or not an outgoing edge.
+        """
         allowed_targets = {edge.to_node_id for edge in graph.outgoing_edges(current_node.node_id)}
         allowed_targets.update(current_node.next_node_ids)
         for next_node_id in next_targets:
@@ -413,6 +487,7 @@ class ExecutionProtocolMixin:
             )
 
     def _allows_dynamic_next_target(self, graph: ExecutionGraph, current_node: Any, next_node_id: int) -> bool:
+        """Allow graph_editor tool nodes to route to newly-created transient nodes."""
         if not isinstance(current_node, ToolNode) or current_node.tool_name != "graph_editor":
             return False
         target = graph.nodes.get(next_node_id)
@@ -427,6 +502,7 @@ class ExecutionProtocolMixin:
         current_node_id: int,
         label: str,
     ) -> None:
+        """Raise ValueError if *node_id* is absent from *graph*."""
         if node_id not in graph.nodes:
             raise ValueError(
                 f"Node {current_node_id} resolved {label} {node_id}, but that node does not exist."
@@ -440,6 +516,15 @@ class ExecutionProtocolMixin:
         next_node_override: Optional[int],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[int]:
+        """Resolve the next node(s) to execute after *node*.
+
+        Resolution order:
+            1. Explicit ``next_node_override``.
+            2. Per-node or global ``control`` metadata.
+            3. Routing keys inside the payload dict.
+            4. Graph outgoing edges.
+            5. Node's static ``next_node_ids``.
+        """
         if next_node_override is not None:
             if next_node_override == node.node_id:
                 next_node_override = None
@@ -500,6 +585,7 @@ class ExecutionProtocolMixin:
         node_id: int,
         branch_value: Any,
     ) -> List[int]:
+        """Map a branch label or literal node ID to outgoing edge targets."""
         branch_label = str(branch_value).strip()
         if not branch_label:
             return []

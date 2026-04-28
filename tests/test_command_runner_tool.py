@@ -55,6 +55,27 @@ class CommandRunnerToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.results[0].status, "failed")
         self.assertEqual(result.results[0].error["returncode"], 1)
 
+    async def test_command_runner_allows_safe_pwd_and_ls_compound_probe(self) -> None:
+        scheduler = ToolScheduler(Core())
+        result = await scheduler.execute_batch(
+            [
+                ToolRequest(
+                    id="probe",
+                    tool="command_runner",
+                    args={"command": "pwd && ls -la"},
+                    required=True,
+                )
+            ],
+            context=ToolContext(
+                workspace_root=Path.cwd(),
+                capabilities={"command_execute"},
+            ),
+        )
+
+        self.assertFalse(result.summary["failed_required"])
+        self.assertEqual(result.results[0].status, "success")
+        self.assertIn(str(Path.cwd()), result.results[0].output["stdout"])
+
     async def test_command_runner_denies_stderr_redirection_to_dev_null(self) -> None:
         scheduler = ToolScheduler(Core())
         result = await scheduler.execute_batch(

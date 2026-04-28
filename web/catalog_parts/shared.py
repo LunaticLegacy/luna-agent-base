@@ -1,3 +1,9 @@
+"""Catalog 构建器的共享工具函数。
+
+提供时间解析、文件元数据读取、agent/tool 元数据推断、
+活动索引构建、可观测性数据收集与过滤等通用能力。
+所有函数均为纯函数，不依赖外部可变状态。
+"""
 from __future__ import annotations
 
 import inspect
@@ -13,6 +19,14 @@ from web.utils import to_jsonable
 
 
 def _utc_iso_from_epoch(timestamp: Optional[float]) -> Optional[str]:
+    """将 Unix 时间戳转为 UTC ISO 格式字符串。
+
+    Args:
+        timestamp: 秒级时间戳。
+
+    Returns:
+        ISO 字符串，或 None（输入无效时）。
+    """
     if timestamp is None:
         return None
     try:
@@ -22,6 +36,16 @@ def _utc_iso_from_epoch(timestamp: Optional[float]) -> Optional[str]:
 
 
 def _parse_iso_timestamp(raw: Optional[str]) -> Optional[datetime]:
+    """将 ISO 时间字符串安全解析为 datetime 对象。
+
+    兼容含 "Z" 后缀的格式。
+
+    Args:
+        raw: 原始时间字符串。
+
+    Returns:
+        解析后的 datetime，或 None。
+    """
     if not raw:
         return None
     text = str(raw).strip()
@@ -34,6 +58,16 @@ def _parse_iso_timestamp(raw: Optional[str]) -> Optional[datetime]:
 
 
 def _file_mtime_iso(path: Path) -> str:
+    """获取文件最后修改时间的 UTC ISO 字符串。
+
+    文件不可读时回退到当前时间，避免前端展示空值。
+
+    Args:
+        path: 目标文件路径。
+
+    Returns:
+        ISO 格式时间字符串。
+    """
     try:
         return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
     except Exception:
@@ -41,6 +75,15 @@ def _file_mtime_iso(path: Path) -> str:
 
 
 def _normalize_priority(raw: Any, default: str = "medium") -> str:
+    """将原始优先级归一化为标准四档之一。
+
+    Args:
+        raw: 原始值。
+        default: 无法识别时的默认值。
+
+    Returns:
+        "low" / "medium" / "high" / "urgent" 之一。
+    """
     value = str(raw or default).strip().lower()
     if value in {"low", "medium", "high", "urgent"}:
         return value
@@ -48,6 +91,14 @@ def _normalize_priority(raw: Any, default: str = "medium") -> str:
 
 
 def _normalize_capabilities(value: Any) -> List[str]:
+    """将原始能力描述规范化为字符串列表。
+
+    Args:
+        value: list、str 或其他。
+
+    Returns:
+        非空字符串列表。
+    """
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     if isinstance(value, str) and value.strip():
@@ -56,6 +107,14 @@ def _normalize_capabilities(value: Any) -> List[str]:
 
 
 def _node_priority(node) -> str:
+    """根据节点类型与元数据推断默认优先级。
+
+    Args:
+        node: 图节点实例。
+
+    Returns:
+        优先级字符串。
+    """
     metadata = node.metadata if isinstance(node.metadata, dict) else {}
     priority = metadata.get("priority")
     if priority:
@@ -68,6 +127,18 @@ def _node_priority(node) -> str:
 
 
 def _agent_role(agent_id: str, node: Optional[Any]) -> str:
+    """根据 agent_id 与节点元数据推断角色。
+
+    若元数据显式指定 role/type 且属于已知集合，则直接采用；
+    否则通过 agent_id 中的关键词启发式推断。
+
+    Args:
+        agent_id: agent 标识。
+        node: 可选的关联节点。
+
+    Returns:
+        "coordinator" / "worker" / "specialist" / "reviewer" 之一。
+    """
     metadata = node.metadata if node is not None and isinstance(node.metadata, dict) else {}
     role = str(metadata.get("role") or metadata.get("type") or "").strip().lower()
     if role and role in {"coordinator", "worker", "specialist", "reviewer"}:
@@ -83,6 +154,18 @@ def _agent_role(agent_id: str, node: Optional[Any]) -> str:
 
 
 def _agent_tags(agent_id: str, node: Optional[Any]) -> List[str]:
+    """提取 agent 的标签列表。
+
+    优先使用节点元数据中的 tags；若缺失则按角色分配默认标签，
+    并对 transient 节点追加 "transient" 标记。
+
+    Args:
+        agent_id: agent 标识。
+        node: 可选的关联节点。
+
+    Returns:
+        标签字符串列表。
+    """
     metadata = node.metadata if node is not None and isinstance(node.metadata, dict) else {}
     tags = _normalize_capabilities(metadata.get("tags"))
     if tags:
@@ -95,6 +178,18 @@ def _agent_tags(agent_id: str, node: Optional[Any]) -> List[str]:
 
 
 def _agent_capabilities(agent_id: str, node: Optional[Any], agent: Any) -> List[str]:
+    """提取 agent 的能力列表。
+
+    优先级：节点元数据 capabilities > agent.tools 工具名 > 按角色默认。
+
+    Args:
+        agent_id: agent 标识。
+        node: 可选的关联节点。
+        agent: agent 实例。
+
+    Returns:
+        能力字符串列表。
+    """
     metadata = node.metadata if node is not None and isinstance(node.metadata, dict) else {}
     capabilities = _normalize_capabilities(metadata.get("capabilities"))
     if capabilities:
@@ -117,6 +212,16 @@ def _agent_capabilities(agent_id: str, node: Optional[Any], agent: Any) -> List[
 
 
 def _estimate_token_usage(agent: Any) -> int:
+    """根据 agent 上下文快照估算已用 Token 数。
+
+    按总字符数除以 4 做粗略估算。
+
+    Args:
+        agent: agent 实例。
+
+    Returns:
+        估算的 Token 数量。
+    """
     snapshot = agent.get_context_snapshot() if hasattr(agent, "get_context_snapshot") else None
     if snapshot is None:
         return 0
@@ -131,6 +236,17 @@ def _estimate_token_usage(agent: Any) -> int:
 
 
 def _tool_type(tool: Any) -> str:
+    """根据工具名称、描述与模块路径推断工具类型。
+
+    若包含 web/search/http/api 相关关键词，则归类为 "API"；
+    否则归类为 "本地"。
+
+    Args:
+        tool: 工具实例。
+
+    Returns:
+        "API" 或 "本地"。
+    """
     description = str(getattr(tool, "description", "") or "").lower()
     tool_name = str(getattr(tool, "tool_name", "") or "").lower()
     module_name = str(getattr(tool.__class__, "__module__", "") or "").lower()
@@ -144,6 +260,16 @@ def _tool_type(tool: Any) -> str:
 
 
 def _tool_schema(tool: Any) -> Dict[str, Any]:
+    """提取工具的 JSON Schema。
+
+    优先使用 OpenAI 风格的 function schema，其次回退到 tool.schema。
+
+    Args:
+        tool: 工具实例。
+
+    Returns:
+        JSON-safe 的 schema 字典。
+    """
     schema = None
     if hasattr(tool, "get_openai_schema") and callable(tool.get_openai_schema):
         openai_schema = tool.get_openai_schema()
@@ -155,6 +281,16 @@ def _tool_schema(tool: Any) -> Dict[str, Any]:
 
 
 def _tool_source_mtime(tool: Any) -> str:
+    """获取工具源文件的最后修改时间。
+
+    若无法通过 inspect 定位源文件，则回退到当前时间。
+
+    Args:
+        tool: 工具实例。
+
+    Returns:
+        ISO 格式时间字符串。
+    """
     try:
         return _file_mtime_iso(Path(inspect.getfile(tool.__class__)))
     except Exception:
@@ -162,6 +298,18 @@ def _tool_source_mtime(tool: Any) -> str:
 
 
 def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str, Any]]:
+    """为所有运行记录构建按 (swarm_name, node_id) 索引的活动统计。
+
+    统计项包括：executions、completed、failed、total_duration_ms、
+    last_seen、last_started、last_input、last_output、last_error、
+    last_status、logs、active_run_ids。
+
+    Args:
+        runs: 运行记录迭代器。
+
+    Returns:
+        活动索引字典。
+    """
     index: Dict[Tuple[str, int], Dict[str, Any]] = defaultdict(
         lambda: {
             "executions": 0,
@@ -180,6 +328,7 @@ def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str
     )
 
     for record in runs:
+        # 记录当前仍活跃的运行（未结束且有 current_node_id）
         active_node_id = getattr(record, "current_node_id", None)
         if active_node_id is not None and not getattr(record, "_done", False):
             index[(record.swarm_name, int(active_node_id))]["active_run_ids"].add(record.run_id)
@@ -277,6 +426,14 @@ def _build_activity_index(runs: Iterable[Any]) -> Dict[Tuple[str, int], Dict[str
 
 
 def _entry_active_run_ids(entry: Dict[str, Any]) -> set[Any]:
+    """安全提取 entry 中的活跃运行 ID 集合。
+
+    Args:
+        entry: 活动索引条目。
+
+    Returns:
+        run_id 的集合。
+    """
     active = entry.get("active_run_ids")
     if isinstance(active, set):
         return active
@@ -286,6 +443,16 @@ def _entry_active_run_ids(entry: Dict[str, Any]) -> set[Any]:
 
 
 def _node_status(entry: Dict[str, Any]) -> str:
+    """根据活动统计推断节点状态。
+
+    状态优先级：running > failed > success > pending。
+
+    Args:
+        entry: 活动索引条目。
+
+    Returns:
+        状态字符串。
+    """
     if _entry_active_run_ids(entry):
         return "running"
     if int(entry.get("failed", 0) or 0) > 0 and int(entry.get("completed", 0) or 0) == 0:
@@ -298,6 +465,17 @@ def _node_status(entry: Dict[str, Any]) -> str:
 
 
 def _parse_duration_seconds(raw: Optional[str], default: int) -> int:
+    """将持续时间描述解析为秒数。
+
+    支持纯数字或 "<数值><单位>" 格式，单位包括 s、m、h、d。
+
+    Args:
+        raw: 原始描述字符串。
+        default: 解析失败时的默认值。
+
+    Returns:
+        正整数秒数。
+    """
     text = str(raw or "").strip().lower()
     if not text:
         return default
@@ -313,6 +491,17 @@ def _parse_duration_seconds(raw: Optional[str], default: int) -> int:
 
 
 def _metric_bucket_index(timestamp: datetime, start: datetime, bucket_seconds: int, bucket_count: int) -> Optional[int]:
+    """将时间点映射到指标桶索引。
+
+    Args:
+        timestamp: 待映射的时间点。
+        start: 窗口起始时间。
+        bucket_seconds: 每个桶的秒数。
+        bucket_count: 桶总数。
+
+    Returns:
+        桶索引，或 None（超出范围）。
+    """
     offset = (timestamp - start).total_seconds()
     if offset < 0:
         return None
@@ -323,11 +512,27 @@ def _metric_bucket_index(timestamp: datetime, start: datetime, bucket_seconds: i
 
 
 def _metric_text_size(value: Any) -> int:
+    """将任意值转为 JSON 字符串后返回其长度。
+
+    Args:
+        value: 原始值。
+
+    Returns:
+        字符串长度。
+    """
     text = jsonable_text(value)
     return len(text)
 
 
 def jsonable_text(value: Any) -> str:
+    """将任意值转为可 JSON 序列化的字符串表示。
+
+    Args:
+        value: 原始值。
+
+    Returns:
+        字符串。
+    """
     normalized = to_jsonable(value)
     if normalized is None:
         return ""
@@ -337,6 +542,14 @@ def jsonable_text(value: Any) -> str:
 
 
 def _load_runtime_info_events(package_path: Path) -> List[Dict[str, Any]]:
+    """从 swarm 包的 runtime_info/events.jsonl 加载运行时事件。
+
+    Args:
+        package_path: swarm 包路径。
+
+    Returns:
+        事件字典列表。
+    """
     events_path = package_path / "runtime_info" / "events.jsonl"
     if not events_path.exists():
         return []
@@ -360,6 +573,14 @@ def _load_runtime_info_events(package_path: Path) -> List[Dict[str, Any]]:
 
 
 def _load_runtime_run_events(package_path: Path) -> List[Dict[str, Any]]:
+    """从 swarm 包的 runtime_info/runs/*/events.jsonl 加载运行级事件。
+
+    Args:
+        package_path: swarm 包路径。
+
+    Returns:
+        事件字典列表。
+    """
     runs_root = package_path / "runtime_info" / "runs"
     if not runs_root.exists():
         return []
@@ -392,6 +613,16 @@ def _runtime_event_to_observability_item(
     swarm_name: str,
     swarm_package_path: Path,
 ) -> Dict[str, Any]:
+    """将运行时事件转换为可观测性条目。
+
+    Args:
+        event: 原始事件字典。
+        swarm_name: 所属 swarm 名称。
+        swarm_package_path: swarm 包路径。
+
+    Returns:
+        标准化可观测性条目。
+    """
     timestamp = event.get("timestamp")
     event_time = timestamp if isinstance(timestamp, str) else _utc_iso_from_epoch(timestamp if isinstance(timestamp, (int, float)) else None)
     action = str(event.get("action") or "runtime.event").strip() or "runtime.event"
@@ -426,6 +657,15 @@ def _run_event_to_observability_item(
     *,
     swarm_name: str,
 ) -> Dict[str, Any]:
+    """将运行事件转换为可观测性条目。
+
+    Args:
+        event: 原始事件字典。
+        swarm_name: 所属 swarm 名称。
+
+    Returns:
+        标准化可观测性条目。
+    """
     timestamp = event.get("timestamp")
     event_time = timestamp if isinstance(timestamp, str) else _utc_iso_from_epoch(timestamp if isinstance(timestamp, (int, float)) else None)
     event_type = str(event.get("event_type") or "run.event").strip() or "run.event"
@@ -453,6 +693,19 @@ def _run_event_to_observability_item(
 
 
 def _collect_observability_items(registry) -> List[Dict[str, Any]]:
+    """收集所有 swarm 的可观测性条目，按时间倒序排列。
+
+    数据来源包括：
+    1. runtime_info/events.jsonl（运行时事件）。
+    2. runtime_info/runs/*/events.jsonl（运行级持久化事件）。
+    3. 内存中运行记录的 events（尚未持久化的事件）。
+
+    Args:
+        registry: 运行时注册表。
+
+    Returns:
+        可观测性条目列表。
+    """
     items: List[Dict[str, Any]] = []
     for swarm in registry.swarms.values():
         package_path = Path(swarm.package_path)
@@ -491,6 +744,19 @@ def _filter_observability_items(
     to_time: Optional[str] = None,
     q: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    """对可观测性条目进行多维度过滤。
+
+    Args:
+        items: 条目列表。
+        level: 级别过滤。
+        source: 来源过滤。
+        from_time: 时间下限。
+        to_time: 时间上限。
+        q: 全文搜索关键词。
+
+    Returns:
+        过滤后的条目列表。
+    """
     normalized_level = str(level or "").strip().lower()
     normalized_source = str(source or "").strip().lower()
     normalized_query = str(q or "").strip().lower()
@@ -526,6 +792,14 @@ def _filter_observability_items(
 
 
 def _observability_stats(items: List[Dict[str, Any]]) -> Dict[str, int]:
+    """计算可观测性条目的基础统计。
+
+    Args:
+        items: 条目列表。
+
+    Returns:
+        包含 today、errors、warnings、infos 计数的字典。
+    """
     return {
         "today": len(items),
         "errors": sum(1 for item in items if str(item.get("level", "")).lower() == "error"),
@@ -535,6 +809,18 @@ def _observability_stats(items: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def _build_resource_usage_series(*, swarm_name: str, runs: List[Any], graph: Any) -> Dict[str, List[int]]:
+    """为指定 swarm 构建 CPU 与内存的时间序列。
+
+    将事件按时间排序后均分为 12 个桶，按桶内活动量估算资源使用。
+
+    Args:
+        swarm_name: 目标 swarm 名称。
+        runs: 运行记录列表。
+        graph: 执行图对象。
+
+    Returns:
+        包含 cpu_percent 与 memory_mb 序列的字典。
+    """
     bucket_count = 12
     cpu_series: List[int] = []
     memory_series: List[int] = []
@@ -551,6 +837,7 @@ def _build_resource_usage_series(*, swarm_name: str, runs: List[Any], graph: Any
                 all_events.append((parsed, str(event.get("event_type") or "")))
 
     if not all_events:
+        # 无事件时生成一个占位 idle 事件，确保序列非空
         all_events = [(datetime.now(timezone.utc), "idle")]
 
     all_events.sort(key=lambda item: item[0])

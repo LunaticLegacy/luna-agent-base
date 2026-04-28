@@ -1,3 +1,9 @@
+"""持久化内容存储（Knowledge / Memory）。
+
+ContentStore 以线程安全的方式管理知识库与记忆条目，支持从运行时
+注册表自动初始化种子数据，并提供过滤、分页与 CRUD 接口。
+数据以 JSON 文件形式落盘，采用写临时文件后替换的策略防止损坏。
+"""
 from __future__ import annotations
 
 import json
@@ -13,10 +19,21 @@ from web.utils import to_jsonable
 
 
 def _utc_now_iso() -> str:
+    """返回当前 UTC 时间的 ISO 格式字符串。"""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _parse_iso_timestamp(raw: Optional[str]) -> Optional[datetime]:
+    """将 ISO 时间字符串安全解析为 datetime 对象。
+
+    兼容含 "Z" 后缀的格式。
+
+    Args:
+        raw: 原始时间字符串。
+
+    Returns:
+        解析后的 datetime，或 None。
+    """
     if not raw:
         return None
     text = str(raw).strip()
@@ -29,6 +46,14 @@ def _parse_iso_timestamp(raw: Optional[str]) -> Optional[datetime]:
 
 
 def _read_json_list(path: Path) -> List[Dict[str, Any]]:
+    """从 JSON 文件读取字典列表。
+
+    Args:
+        path: 文件路径。
+
+    Returns:
+        字典列表；文件不存在或解析失败时返回空列表。
+    """
     if not path.exists():
         return []
     try:
@@ -41,6 +66,14 @@ def _read_json_list(path: Path) -> List[Dict[str, Any]]:
 
 
 def _write_json_list(path: Path, items: List[Dict[str, Any]]) -> None:
+    """将字典列表原子写入 JSON 文件。
+
+    先写入临时文件，再通过 replace 覆盖目标文件，避免写入中断导致原文件损坏。
+
+    Args:
+        path: 目标文件路径。
+        items: 待写入的字典列表。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(items, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
@@ -48,6 +81,14 @@ def _write_json_list(path: Path, items: List[Dict[str, Any]]) -> None:
 
 
 def _normalize_list(value: Any) -> List[str]:
+    """将任意值规范化为非空字符串列表。
+
+    Args:
+        value: 原始值（list、str 或其他）。
+
+    Returns:
+        字符串列表。
+    """
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     if isinstance(value, str) and value.strip():
@@ -56,6 +97,14 @@ def _normalize_list(value: Any) -> List[str]:
 
 
 def _json_size(value: Any) -> str:
+    """估算 JSON 序列化后的字节大小并返回人类可读字符串。
+
+    Args:
+        value: 待估算的 Python 对象。
+
+    Returns:
+        如 "1.2KB" 或 "3.5MB"。
+    """
     text = json.dumps(to_jsonable(value), ensure_ascii=False, indent=2)
     size = len(text.encode("utf-8"))
     if size < 1024:
@@ -67,7 +116,17 @@ def _json_size(value: Any) -> str:
 
 @dataclass
 class ContentStore:
-    """Persistent content store for knowledge and memory data."""
+    """持久化内容存储，管理知识库（knowledge）与记忆（memory）数据。
+
+    Attributes:
+        data_dir: 数据文件存放目录。
+        runtime_registry: 运行时注册表，用于种子数据初始化。
+        knowledge_filename: 知识库文件名。
+        memory_filename: 记忆文件名。
+        _lock: 线程锁，保护内部列表读写。
+        _knowledge: 内存中的知识库列表。
+        _memory: 内存中的记忆列表。
+    """
 
     data_dir: Path
     runtime_registry: Any
@@ -78,6 +137,7 @@ class ContentStore:
     _memory: List[Dict[str, Any]] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """初始化路径、加载已有数据；若为空则生成种子数据并持久化。"""
         self.data_dir = Path(self.data_dir).resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.knowledge_path = self.data_dir / self.knowledge_filename
@@ -93,6 +153,15 @@ class ContentStore:
 
     @classmethod
     def from_runtime_registry(cls, data_dir: Path, runtime_registry: Any) -> "ContentStore":
+        """工厂方法，从运行时注册表构建 ContentStore。
+
+        Args:
+            data_dir: 数据目录。
+            runtime_registry: 运行时注册表。
+
+        Returns:
+            ContentStore 实例。
+        """
         return cls(data_dir=Path(data_dir), runtime_registry=runtime_registry)
 
     def list_knowledge(
@@ -105,12 +174,36 @@ class ContentStore:
         page: int = 1,
         limit: int = 20,
     ) -> Dict[str, Any]:
+        """分页查询知识库条目。
+
+        Args:
+            type_filter: 按类型过滤。
+            source: 按来源过滤。
+            tag: 按标签过滤。
+            q: 全文搜索关键词。
+            page: 页码。
+            limit: 每页数量。
+
+        Returns:
+            包含 total、page、limit、items、stats 的字典。
+        """
         with self._lock:
             items = [deepcopy(item) for item in self._knowledge]
         filtered = self._filter_knowledge(items, type_filter=type_filter, source=source, tag=tag, q=q)
         return self._paginate_knowledge(filtered, page=page, limit=limit)
 
     def get_knowledge(self, knowledge_id: str) -> Dict[str, Any]:
+        """根据 ID 获取知识库条目。
+
+        Args:
+            knowledge_id: 知识条目 ID。
+
+        Returns:
+            知识条目字典。
+
+        Raises:
+            KeyError: 条目不存在时抛出。
+        """
         with self._lock:
             for item in self._knowledge:
                 if item.get("id") == knowledge_id:
@@ -118,6 +211,17 @@ class ContentStore:
         raise KeyError(f"Unknown knowledge id: {knowledge_id}")
 
     def create_knowledge(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """新建知识库条目。
+
+        Args:
+            payload: 知识条目字典。
+
+        Returns:
+            新建后的条目字典。
+
+        Raises:
+            ValueError: ID 已存在时抛出。
+        """
         with self._lock:
             item = self._normalize_knowledge(payload)
             if any(existing.get("id") == item["id"] for existing in self._knowledge):
@@ -127,6 +231,20 @@ class ContentStore:
             return deepcopy(item)
 
     def update_knowledge(self, knowledge_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """更新知识库条目。
+
+        禁止修改 id 与 created_at，其余字段增量合并。
+
+        Args:
+            knowledge_id: 目标条目 ID。
+            payload: 待合并的字段字典。
+
+        Returns:
+            更新后的条目字典。
+
+        Raises:
+            KeyError: 条目不存在时抛出。
+        """
         with self._lock:
             for index, existing in enumerate(self._knowledge):
                 if existing.get("id") == knowledge_id:
@@ -140,6 +258,17 @@ class ContentStore:
         raise KeyError(f"Unknown knowledge id: {knowledge_id}")
 
     def delete_knowledge(self, knowledge_id: str) -> Dict[str, Any]:
+        """删除知识库条目。
+
+        Args:
+            knowledge_id: 目标条目 ID。
+
+        Returns:
+            被删除的条目字典。
+
+        Raises:
+            KeyError: 条目不存在时抛出。
+        """
         with self._lock:
             for index, existing in enumerate(self._knowledge):
                 if existing.get("id") == knowledge_id:
@@ -157,12 +286,35 @@ class ContentStore:
         page: int = 1,
         limit: int = 20,
     ) -> Dict[str, Any]:
+        """分页查询记忆条目。
+
+        Args:
+            type_filter: 按类型过滤。
+            source: 按来源过滤。
+            q: 全文搜索关键词。
+            page: 页码。
+            limit: 每页数量。
+
+        Returns:
+            包含 total、page、limit、items、stats 的字典。
+        """
         with self._lock:
             items = [deepcopy(item) for item in self._memory]
         filtered = self._filter_memory(items, type_filter=type_filter, source=source, q=q)
         return self._paginate_memory(filtered, page=page, limit=limit)
 
     def get_memory(self, memory_id: str) -> Dict[str, Any]:
+        """根据 ID 获取记忆条目。
+
+        Args:
+            memory_id: 记忆条目 ID。
+
+        Returns:
+            记忆条目字典。
+
+        Raises:
+            KeyError: 条目不存在时抛出。
+        """
         with self._lock:
             for item in self._memory:
                 if item.get("id") == memory_id:
@@ -170,6 +322,17 @@ class ContentStore:
         raise KeyError(f"Unknown memory id: {memory_id}")
 
     def create_memory(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """新建记忆条目。
+
+        Args:
+            payload: 记忆条目字典。
+
+        Returns:
+            新建后的条目字典。
+
+        Raises:
+            ValueError: ID 已存在时抛出。
+        """
         with self._lock:
             item = self._normalize_memory(payload)
             if any(existing.get("id") == item["id"] for existing in self._memory):
@@ -179,6 +342,17 @@ class ContentStore:
             return deepcopy(item)
 
     def delete_memory(self, memory_id: str) -> Dict[str, Any]:
+        """删除记忆条目。
+
+        Args:
+            memory_id: 目标条目 ID。
+
+        Returns:
+            被删除的条目字典。
+
+        Raises:
+            KeyError: 条目不存在时抛出。
+        """
         with self._lock:
             for index, existing in enumerate(self._memory):
                 if existing.get("id") == memory_id:
@@ -188,12 +362,22 @@ class ContentStore:
         raise KeyError(f"Unknown memory id: {memory_id}")
 
     def _persist_knowledge(self) -> None:
+        """将当前知识库列表持久化到磁盘。"""
         _write_json_list(self.knowledge_path, self._knowledge)
 
     def _persist_memory(self) -> None:
+        """将当前记忆列表持久化到磁盘。"""
         _write_json_list(self.memory_path, self._memory)
 
     def _seed_knowledge(self) -> List[Dict[str, Any]]:
+        """基于已加载的 swarm 执行图生成知识库种子数据。
+
+        为每个 swarm 生成一张图概览文档，并为每个含 metadata 的节点
+        生成对应的 snippet 条目。
+
+        Returns:
+            种子知识条目列表。
+        """
         items: List[Dict[str, Any]] = []
         now = _utc_now_iso()
         for swarm in self.runtime_registry.swarms.values():
@@ -262,6 +446,14 @@ class ContentStore:
         return items
 
     def _seed_memory(self) -> List[Dict[str, Any]]:
+        """基于历史运行记录生成记忆种子数据。
+
+        为每个运行生成一条 episodic/working 记忆，并抽取前 3 个关键事件
+        生成额外的 working 记忆片段。
+
+        Returns:
+            种子记忆条目列表。
+        """
         items: List[Dict[str, Any]] = []
         for record in self.runtime_registry.runs.list_runs():
             snapshot = record.snapshot()
@@ -313,6 +505,17 @@ class ContentStore:
         return items
 
     def _normalize_knowledge(self, payload: Dict[str, Any], *, existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """将知识条目输入标准化为统一结构。
+
+        自动补全缺失字段，合并 meta 信息，并在 meta 中记录内容大小。
+
+        Args:
+            payload: 输入字典。
+            existing: 可选的已有条目，用于增量合并。
+
+        Returns:
+            标准化后的知识条目字典。
+        """
         now = _utc_now_iso()
         item_id = str(payload.get("id") or (existing or {}).get("id") or f"kb-{uuid.uuid4().hex[:8]}")
         meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
@@ -339,6 +542,15 @@ class ContentStore:
         }
 
     def _normalize_memory(self, payload: Dict[str, Any], *, existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """将记忆条目输入标准化为统一结构。
+
+        Args:
+            payload: 输入字典。
+            existing: 可选的已有条目，用于增量合并。
+
+        Returns:
+            标准化后的记忆条目字典。
+        """
         now = _utc_now_iso()
         item_id = str(payload.get("id") or (existing or {}).get("id") or f"mem-{uuid.uuid4().hex[:8]}")
         return {
@@ -362,6 +574,18 @@ class ContentStore:
         tag: Optional[str] = None,
         q: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """多维度过滤知识库条目。
+
+        Args:
+            items: 待过滤的条目列表。
+            type_filter: 类型过滤。
+            source: 来源过滤。
+            tag: 标签过滤。
+            q: 全文搜索关键词。
+
+        Returns:
+            过滤后按 created_at 倒序排列的列表。
+        """
         normalized_type = str(type_filter or "").strip().lower()
         normalized_source = str(source or "").strip().lower()
         normalized_tag = str(tag or "").strip().lower()
@@ -398,6 +622,17 @@ class ContentStore:
         source: Optional[str] = None,
         q: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """多维度过滤记忆条目。
+
+        Args:
+            items: 待过滤的条目列表。
+            type_filter: 类型过滤。
+            source: 来源过滤。
+            q: 全文搜索关键词。
+
+        Returns:
+            过滤后按 timestamp 倒序排列的列表。
+        """
         normalized_type = str(type_filter or "").strip().lower()
         normalized_source = str(source or "").strip().lower()
         normalized_query = str(q or "").strip().lower()
@@ -423,6 +658,16 @@ class ContentStore:
         return sorted(filtered, key=lambda item: str(item.get("timestamp") or ""), reverse=True)
 
     def _paginate_knowledge(self, items: List[Dict[str, Any]], *, page: int, limit: int) -> Dict[str, Any]:
+        """对知识库条目进行分页并附加统计信息。
+
+        Args:
+            items: 已过滤的条目列表。
+            page: 页码。
+            limit: 每页数量。
+
+        Returns:
+            包含分页结果与类型统计的字典。
+        """
         total = len(items)
         page = max(1, int(page or 1))
         limit = max(1, int(limit or 20))
@@ -442,6 +687,16 @@ class ContentStore:
         }
 
     def _paginate_memory(self, items: List[Dict[str, Any]], *, page: int, limit: int) -> Dict[str, Any]:
+        """对记忆条目进行分页并附加统计信息。
+
+        Args:
+            items: 已过滤的条目列表。
+            page: 页码。
+            limit: 每页数量。
+
+        Returns:
+            包含分页结果与活跃度、重要性、长期/工作记忆统计的字典。
+        """
         total = len(items)
         page = max(1, int(page or 1))
         limit = max(1, int(limit or 20))

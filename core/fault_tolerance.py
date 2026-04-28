@@ -1,3 +1,10 @@
+"""Fault-tolerance regulation for runtime failures.
+
+When a node or branch fails, the ``ArchitectureRegulator`` inspects the
+failure classification and node policy to decide whether to retry, reroute
+to a fallback, quarantine, or pause the entire run.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -12,11 +19,32 @@ if TYPE_CHECKING:
 
 
 def _utc_now_iso() -> str:
+    """Current UTC timestamp in ISO format."""
     return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
 class FailureEvent:
+    """Structured record of a runtime failure.
+
+    Attributes:
+        event_id: Unique identifier for this failure event.
+        run_id: The execution run during which the failure occurred.
+        swarm_name: Swarm context, if any.
+        graph_revision: Graph revision at the time of failure.
+        failure_scope: ``"node"``, ``"branch"``, ``"graph"``, or ``"swarm"``.
+        failure_kind: Canonical failure kind string.
+        node_id, node_name, node_type: Identity of the failing node, if applicable.
+        message: Human-readable error description.
+        state_snapshot: Serialisable execution state at failure time.
+        recent_changes: Recent mutation records for forensic context.
+        branch: Branch index, if the failure occurred inside a branch.
+        recoverable, retryable: Flags from the classifier.
+        suggested_action: Human-readable remediation hint.
+        detail: Arbitrary extra context.
+        timestamp: ISO timestamp of the event.
+    """
+
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     run_id: str = ""
     swarm_name: str = ""
@@ -37,6 +65,7 @@ class FailureEvent:
     timestamp: str = field(default_factory=_utc_now_iso)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict for logging and event emission."""
         return {
             "event_id": self.event_id,
             "run_id": self.run_id,
@@ -61,6 +90,20 @@ class FailureEvent:
 
 @dataclass
 class ArchitectureRegulation:
+    """Decision produced by the regulator in response to a failure.
+
+    Attributes:
+        action: Canonical action such as ``"pause_run"``, ``"retry_node"``,
+            ``"reroute_to_fallback"``, ``"degrade_node"``, ``"quarantine_node"``.
+        scope: Scope the action applies to.
+        message: Human-readable explanation.
+        applied: Whether the regulation was actually enacted.
+        quarantined_nodes: Node IDs placed in quarantine.
+        rerouted_from: Source node IDs for a reroute.
+        rerouted_to: Destination node ID for a reroute.
+        metadata_patch: Extra metadata written back to the affected node(s).
+    """
+
     action: str
     scope: str
     message: str
@@ -71,6 +114,7 @@ class ArchitectureRegulation:
     metadata_patch: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict for logging and event emission."""
         return {
             "action": self.action,
             "scope": self.scope,
@@ -87,6 +131,14 @@ class ArchitectureRegulator:
     """Classify failures and adjust the live execution graph in place."""
 
     def regulate(self, failure: FailureEvent, graph: Optional[ExecutionGraph] = None) -> ArchitectureRegulation:
+        """Produce a regulation decision for *failure* within *graph*.
+
+        The decision flow is:
+            1. If no graph is attached, pause the run.
+            2. Load the node's failure policy (retry budget, fallback node).
+            3. Based on failure kind and policy, choose retry, reroute,
+               degrade, quarantine, or pause.
+        """
         if graph is None:
             return ArchitectureRegulation(
                 action="pause_run",
@@ -150,6 +202,7 @@ class ArchitectureRegulator:
                 node.metadata["fault_tolerance"] = metadata_patch
 
         if normalized_scope in {"graph", "swarm"} or normalized_kind in {"mutation_error", "invariant_violation"}:
+            # Scope-wide or structural failures escalate to a full pause.
             action = "pause_run" if action == "retry_node" else action
             message = failure.message or "Graph-level failure detected."
             if node is not None:
@@ -170,6 +223,7 @@ class ArchitectureRegulator:
 
 
 def _node_failure_policy(node: Optional["Node"]) -> Dict[str, Any]:
+    """Extract the failure policy dict from a node's metadata, if any."""
     if node is None:
         return {}
     metadata = node.metadata if isinstance(node.metadata, dict) else {}
@@ -186,6 +240,7 @@ def _node_failure_policy(node: Optional["Node"]) -> Dict[str, Any]:
 
 
 def _safe_int(raw: Any, default: int) -> int:
+    """Coerce *raw* to int, falling back to *default* on any error."""
     try:
         return int(raw)
     except Exception:

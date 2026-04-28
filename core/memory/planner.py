@@ -1,3 +1,20 @@
+"""LLM-based planner for context selection, compression, and memory extraction.
+
+The :class:`MemoryPlanner` asks the agent's LLM to decide:
+
+1. Which episode nodes should be loaded into the current prompt.
+2. Which node chains should be compressed (packed) into summaries.
+3. Which new facts/formulas should be extracted as candidate memories.
+4. What keywords should be used to query the existing memory store.
+
+The planner is stateless and purely orchestrational; all durable state
+lives in :class:`MemoryStore` and :class:`EpisodeGraph`.
+
+Exports:
+    - :class:`PlannerDecision`
+    - :class:`MemoryPlanner`
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,6 +27,16 @@ from .types import EpisodeNode, KeyMemory
 
 @dataclass
 class PlannerDecision:
+    """Structured output of the memory planning LLM call.
+
+    Attributes:
+        reasoning: Human-readable explanation of the planning decision.
+        selected_node_ids: Episode nodes to include in the prompt context.
+        nodes_to_pack: Nodes whose ancestor chains should be compressed.
+        memories_to_extract: Raw dicts describing new candidate memories.
+        memory_queries: Keywords for searching the existing memory store.
+    """
+
     reasoning: str = ""
     selected_node_ids: List[str] = field(default_factory=list)
     nodes_to_pack: List[str] = field(default_factory=list)
@@ -21,6 +48,10 @@ class MemoryPlanner:
     """LLM-based planner for context selection, compression, and memory extraction.
 
     Uses the agent's own LLM handler (or a provided one) to make decisions.
+
+    Attributes:
+        max_context_nodes: Upper bound on how many episode nodes may be selected.
+        pack_keep_recent: How many recent turns to preserve when compressing a chain.
     """
 
     def __init__(
@@ -28,6 +59,12 @@ class MemoryPlanner:
         max_context_nodes: int = 6,
         pack_keep_recent: int = 2,
     ) -> None:
+        """Initialise the planner with its policy parameters.
+
+        Args:
+            max_context_nodes: Maximum number of episode nodes to load per round.
+            pack_keep_recent: Number of recent turns to keep uncompressed during packing.
+        """
         self.max_context_nodes = max_context_nodes
         self.pack_keep_recent = pack_keep_recent
 
@@ -37,6 +74,14 @@ class MemoryPlanner:
 
     @staticmethod
     def _format_nodes_for_decision(nodes: List[EpisodeNode]) -> str:
+        """Render episode nodes as a compact text block for the planner prompt.
+
+        Args:
+            nodes: Episode nodes available for selection.
+
+        Returns:
+            Multi-line string summarising each node.
+        """
         lines: List[str] = []
         for node in nodes:
             u = node.user_content.replace("\n", " ")[:80]
@@ -56,6 +101,14 @@ class MemoryPlanner:
 
     @staticmethod
     def _format_memories_for_decision(memories: List[KeyMemory]) -> str:
+        """Render committed memories as a compact text block for the planner prompt.
+
+        Args:
+            memories: Committed memories already in the store.
+
+        Returns:
+            Multi-line string summarising each memory, or a placeholder if empty.
+        """
         if not memories:
             return "（暂无已提取的关键记忆）"
         lines: List[str] = []
@@ -69,6 +122,17 @@ class MemoryPlanner:
 
     @staticmethod
     def _extract_json(raw: str) -> Dict[str, Any]:
+        """Strip markdown fences and parse the inner JSON.
+
+        Args:
+            raw: Raw LLM output which may be wrapped in `` ```json ... ``` ``.
+
+        Returns:
+            Parsed JSON dictionary.
+
+        Raises:
+            json.JSONDecodeError: If the cleaned text is not valid JSON.
+        """
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("```", 2)[1]
@@ -91,9 +155,32 @@ class MemoryPlanner:
     ) -> PlannerDecision:
         """Ask the LLM to decide context selection, packing, and memory extraction.
 
-        *llm_fetch_callback* is an async callable:
-            async def fetch(msg: str, system_prompt: Optional[str], temperature: float, max_tokens: int) -> str:
+        *llm_fetch_callback* is an async callable::
+
+            async def fetch(
+                msg: str,
+                system_prompt: Optional[str],
+                temperature: float,
+                max_tokens: int,
+            ) -> str:
                 return raw_text_response
+
+        The prompt sent to the LLM is fully self-documenting and includes
+        explicit rules for each field of the expected JSON response.
+
+        Args:
+            user_message: The incoming user message for this round.
+            episode_nodes: All episode nodes in the graph.
+            memories: All committed memories in the store.
+            llm_fetch_callback: Async callable that forwards a prompt to the LLM.
+            parent_node_ids: Optional set of parent nodes to use as fallback.
+
+        Returns:
+            A :class:`PlannerDecision` parsed from the LLM's JSON output.
+
+        Raises:
+            Exception: Only if both JSON parsing attempts fail; in that case a
+                fallback decision is returned instead of propagating the error.
         """
         node_text = self._format_nodes_for_decision(episode_nodes)
         memory_text = self._format_memories_for_decision(memories)
@@ -152,12 +239,13 @@ class MemoryPlanner:
                 )
             except Exception as exc:
                 if attempt == 0:
+                    # Append a corrective hint for the second attempt
                     planning_prompt += (
                         "\n\n注意：你上一次的输出不是合法 JSON，"
                         "请确保本次输出是严格的 JSON 对象，不要有任何额外文字。"
                     )
                     continue
-                # Fallback
+                # Fallback: use parent nodes or an empty decision so the round can continue
                 fallback_nodes = list(parent_node_ids or set())
                 return PlannerDecision(
                     reasoning=f"决策解析失败（{exc}），回退到默认最长链",

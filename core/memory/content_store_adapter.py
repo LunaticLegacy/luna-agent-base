@@ -1,3 +1,11 @@
+"""Bridge between the memory subsystem and the web ContentStore.
+
+``ContentStoreMemoryAdapter`` pushes committed KeyMemory items into the
+web-layer ContentStore so that the frontend can display them alongside
+other content.  This is a lightweight alpha-phase bridge; canonical
+persistence still happens via the JSON file backing MemoryRuntime.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -13,6 +21,10 @@ class ContentStoreMemoryAdapter:
 
     This is a lightweight bridge for the alpha phase; it does not
     replace the JSON file persistence in MemoryRuntime.
+
+    Attributes:
+        memory_store: Source of committed memories.
+        content_store: Optional web-layer sink.  If None, sync is a no-op.
     """
 
     def __init__(self, memory_store: MemoryStore, content_store: Optional["ContentStore"] = None) -> None:
@@ -22,7 +34,8 @@ class ContentStoreMemoryAdapter:
     def sync_committed(self) -> List[Dict[str, Any]]:
         """Push all committed memories into ContentStore.memory list.
 
-        Returns the list of synced items.
+        Returns:
+            The list of synced items (empty if no ContentStore is attached).
         """
         if self.content_store is None:
             return []
@@ -43,7 +56,7 @@ class ContentStoreMemoryAdapter:
             try:
                 self.content_store.create_memory(item)
             except Exception:
-                # If already exists or store rejects, skip
+                # If already exists or store rejects, skip rather than abort.
                 pass
             synced.append(item)
         return synced

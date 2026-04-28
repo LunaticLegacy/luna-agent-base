@@ -1,3 +1,10 @@
+"""Custom exception hierarchy for Angelus runtime failures.
+
+Each exception carries a canonical ``failure_kind`` string so that the
+failure classifier and regulator can act on it without fragile string
+matching against free-form messages.
+"""
+
 from __future__ import annotations
 
 import json
@@ -15,7 +22,13 @@ class ToolContractError(RuntimeError):
 
 
 class RequiredToolFailedError(RuntimeError):
-    """Raised when an external required tool request fails."""
+    """Raised when an external required tool request fails.
+
+    Attributes:
+        batch_result: The ToolBatchResult that caused the failure.
+        tool_name: First failed tool name, if any.
+        failed_results: Normalised list of failed tool result dicts.
+    """
 
     failure_kind = "required_tool_failed"
 
@@ -43,6 +56,7 @@ class RequiredToolFailedError(RuntimeError):
         super().__init__(detail)
 
     def to_detail(self) -> Dict[str, Any]:
+        """Return a serialisable detail dict for logging / event emission."""
         return {
             "tool_name": self.tool_name,
             "tool_batch_summary": getattr(self.batch_result, "summary", {}),
@@ -51,7 +65,15 @@ class RequiredToolFailedError(RuntimeError):
 
 
 class ToolPolicyDeniedError(PermissionError):
-    """Raised when a tool rejects an unsafe or unsupported command shape."""
+    """Raised when a tool rejects an unsafe or unsupported command shape.
+
+    Attributes:
+        tool_name: Name of the denying tool.
+        command: The command string that was blocked.
+        reason: Human-readable policy explanation.
+        blocked_tokens: Token substrings that triggered the block.
+        suggested_safe_calls: Safe alternatives, if any.
+    """
 
     failure_kind = "tool_policy_denied"
 
@@ -76,6 +98,7 @@ class ToolPolicyDeniedError(PermissionError):
         )
 
     def to_detail(self) -> Dict[str, Any]:
+        """Return a serialisable detail dict for logging / event emission."""
         return {
             "tool_name": self.tool_name,
             "command": self.command,
@@ -86,7 +109,14 @@ class ToolPolicyDeniedError(PermissionError):
 
 
 class OutputParseError(ValueError):
-    """Raised when an agent output must be structured but cannot be parsed."""
+    """Raised when an agent output must be structured but cannot be parsed.
+
+    Attributes:
+        raw_output: The original agent response text.
+        parser_stage: Identifier for the parsing layer that failed.
+        expected_schema: Optional schema hint for diagnostics.
+        line, column, pos: Source-location hints from JSONDecodeError, if any.
+    """
 
     failure_kind = "output_parse_error"
 
@@ -113,6 +143,7 @@ class OutputParseError(ValueError):
 
     @staticmethod
     def _near_error(raw_output: str, pos: Optional[int]) -> str:
+        """Extract a ~240-char snippet around the failure position."""
         if pos is None:
             return raw_output[:240]
         start = max(0, int(pos) - 120)
@@ -120,6 +151,7 @@ class OutputParseError(ValueError):
         return raw_output[start:end]
 
     def to_detail(self) -> Dict[str, Any]:
+        """Return a serialisable detail dict for logging / event emission."""
         return {
             "parser_stage": self.parser_stage,
             "expected_schema": self.expected_schema,

@@ -1,3 +1,33 @@
+"""Low-level utilities for swarm package loading.
+
+This module contains the nuts and bolts of module discovery, dynamic
+import, requirement installation, and configuration resolution.  Most
+callers should use the high-level functions in :mod:`core.swarm_loader_parts.build`
+instead of importing from here directly.
+
+Key responsibilities:
+
+* Requirement file collection and ``pip install`` invocation.
+* Dynamic module loading from package-local Python files.
+* Tool extraction from module ``TOOL`` / ``TOOLS`` exports.
+* LLM backend merging and handler construction.
+* Agent prompt resolution (skill -> file -> inline text).
+* Workspace path resolution with sandbox checks.
+
+Exports:
+    - Requirement helpers
+    - :func:`load_swarm_tools`
+    - :func:`load_swarm_apis`
+    - :func:`_load_module_from_entry`
+    - :func:`_load_module_from_path`
+    - :func:`_resolve_module_path`
+    - :func:`_merge_backends`
+    - :func:`_backend_to_agent_config`
+    - :func:`_resolve_agent_prompt`
+    - :func:`_resolve_workspace_defaults`
+    - :func:`_resolve_workspace_for_agent`
+"""
+
 from __future__ import annotations
 
 import importlib
@@ -19,7 +49,15 @@ def collect_tool_requirement_files(
     package_paths: Sequence[Path],
     manifest_entries: Sequence[Tuple[Path, SwarmManifest]],
 ) -> List[Path]:
-    """Collect adjacent tool requirement files for every declared tool."""
+    """Collect adjacent tool requirement files for every declared tool.
+
+    Args:
+        package_paths: Sequence of swarm package directories.
+        manifest_entries: Parallel sequence of ``(manifest_path, manifest)`` tuples.
+
+    Returns:
+        Sorted list of unique ``tool_requirements.txt`` paths.
+    """
     requirement_files: List[Path] = []
     seen: set[Path] = set()
 
@@ -39,7 +77,14 @@ def collect_tool_requirement_files(
 
 
 def install_tool_requirements(requirement_files: Sequence[Path]) -> None:
-    """Install all tool requirement files before tool modules are imported."""
+    """Install all tool requirement files before tool modules are imported.
+
+    Args:
+        requirement_files: Paths to ``requirements.txt`` files.
+
+    Raises:
+        SwarmLoaderError: If ``pip install`` fails.
+    """
     for requirement_file in requirement_files:
         if not requirement_file.exists():
             continue
@@ -64,7 +109,20 @@ def install_tool_requirements(requirement_files: Sequence[Path]) -> None:
 
 
 def load_swarm_tools(package_path: Path, manifest: SwarmManifest) -> tuple[Dict[str, ToolDefinition], List[Path]]:
-    """Load tool modules declared by a swarm package."""
+    """Load tool modules declared by a swarm package.
+
+    Each tool module must expose ``TOOL`` (single tool) or ``TOOLS`` (list).
+
+    Args:
+        package_path: Path to the swarm directory.
+        manifest: Parsed manifest.
+
+    Returns:
+        Tuple of ``(tools_dict, requirement_files)``.
+
+    Raises:
+        SwarmLoaderError: On duplicate tool names or malformed exports.
+    """
     tools: Dict[str, ToolDefinition] = {}
     requirement_files: List[Path] = []
     seen_requirements: set[Path] = set()
@@ -89,7 +147,18 @@ def collect_api_requirement_files(
     package_paths: Sequence[Path],
     manifest_entries: Sequence[Tuple[Path, SwarmManifest]],
 ) -> List[Path]:
-    """Collect adjacent API requirement files for every declared package API."""
+    """Collect adjacent API requirement files for every declared package API.
+
+    Native APIs (prefixed with ``native:``) are skipped because they are
+    assumed to be part of the base environment.
+
+    Args:
+        package_paths: Sequence of swarm package directories.
+        manifest_entries: Parallel sequence of ``(manifest_path, manifest)`` tuples.
+
+    Returns:
+        Sorted list of unique ``api_requirements.txt`` paths.
+    """
     requirement_files: List[Path] = []
     seen: set[Path] = set()
 
@@ -111,7 +180,14 @@ def collect_api_requirement_files(
 
 
 def install_api_requirements(requirement_files: Sequence[Path]) -> None:
-    """Install all API requirement files before API modules are imported."""
+    """Install all API requirement files before API modules are imported.
+
+    Args:
+        requirement_files: Paths to ``requirements.txt`` files.
+
+    Raises:
+        SwarmLoaderError: If ``pip install`` fails.
+    """
     for requirement_file in requirement_files:
         if not requirement_file.exists():
             continue
@@ -136,7 +212,23 @@ def install_api_requirements(requirement_files: Sequence[Path]) -> None:
 
 
 def load_swarm_apis(package_path: Path, manifest: SwarmManifest) -> tuple[Dict[str, Dict[str, Any]], List[Path]]:
-    """Load API modules declared by a swarm package."""
+    """Load API modules declared by a swarm package.
+
+    API entries may be:
+
+    * ``native:module.name`` — import from the Python environment.
+    * ``package:path/to/module.py`` — load from the swarm directory.
+
+    Args:
+        package_path: Path to the swarm directory.
+        manifest: Parsed manifest.
+
+    Returns:
+        Tuple of ``(apis_dict, requirement_files)``.
+
+    Raises:
+        SwarmLoaderError: On duplicate names or malformed entries.
+    """
     apis: Dict[str, Dict[str, Any]] = {}
     requirement_files: List[Path] = []
     seen_requirements: set[Path] = set()
@@ -176,6 +268,18 @@ def load_swarm_apis(package_path: Path, manifest: SwarmManifest) -> tuple[Dict[s
 
 
 def _load_module_from_entry(entry: str, package_path: Path):
+    """Load a module by entry string, trying package-local then global import.
+
+    Args:
+        entry: Module path (``.py`` file) or dotted module name.
+        package_path: Base directory for package-local resolution.
+
+    Returns:
+            The loaded module.
+
+    Raises:
+        SwarmLoaderError: If neither resolution strategy succeeds.
+    """
     module_path = _resolve_module_path(entry, package_path)
     if module_path is not None:
         return _load_module_from_path(module_path)
@@ -187,6 +291,21 @@ def _load_module_from_entry(entry: str, package_path: Path):
 
 
 def _load_module_from_path(path: Path):
+    """Dynamically load a Python file as a module.
+
+    If the file lives inside a package directory (i.e. an ``__init__.py``
+    exists in the parent), the parent package is registered in ``sys.modules``
+    so that relative imports work.
+
+    Args:
+        path: Absolute path to the Python file.
+
+    Returns:
+        The loaded module.
+
+    Raises:
+        SwarmLoaderError: If the file does not exist or cannot be loaded.
+    """
     if not path.exists():
         raise SwarmLoaderError(f"Python file not found: {path}")
 
@@ -222,6 +341,17 @@ def _load_module_from_path(path: Path):
 
 
 def _resolve_module_path(entry: str, package_path: Path) -> Optional[Path]:
+    """Resolve *entry* to an absolute file path within the package.
+
+    Falls back to ``importlib.util.find_spec`` for dotted module names.
+
+    Args:
+        entry: File path or dotted module name.
+        package_path: Base directory for relative resolution.
+
+    Returns:
+        Absolute :class:`Path` or ``None``.
+    """
     entry_path = Path(entry)
     if entry_path.suffix == ".py" or entry_path.exists():
         if entry_path.is_absolute():
@@ -240,6 +370,10 @@ def _resolve_module_path(entry: str, package_path: Path) -> Optional[Path]:
 
 
 def _parse_api_entry(entry: str) -> tuple[str, str]:
+    """Split an API entry string into ``(origin, module_entry)``.
+
+    Defaults to ``"package"`` if no prefix is present.
+    """
     raw = str(entry or "").strip()
     if raw.startswith("native:"):
         return "native", raw.removeprefix("native:").strip()
@@ -249,16 +383,19 @@ def _parse_api_entry(entry: str) -> tuple[str, str]:
 
 
 def _is_native_api_entry(entry: str) -> bool:
+    """Return whether *entry* is a native (environment) import."""
     return str(entry or "").strip().startswith("native:")
 
 
 def _resolve_api_module_path(entry: str, package_path: Path) -> Optional[Path]:
+    """Resolve an API module path, returning ``None`` for native entries."""
     if _is_native_api_entry(entry):
         return None
     return _resolve_module_path(entry, package_path)
 
 
 def _discover_api_requirement_file(module_path: Optional[Path]) -> Optional[Path]:
+    """Look for ``api_requirements.txt`` next to *module_path*."""
     if module_path is None:
         return None
     requirement_file = module_path.parent / "api_requirements.txt"
@@ -268,6 +405,10 @@ def _discover_api_requirement_file(module_path: Optional[Path]) -> Optional[Path
 
 
 def _resolve_api_name(module: Any, fallback: str) -> str:
+    """Resolve an API name from module attributes.
+
+    Prefers ``API_NAME``, then ``api_name`` / ``name`` in a dict, then *fallback*.
+    """
     explicit_name = getattr(module, "API_NAME", None)
     if isinstance(explicit_name, str) and explicit_name.strip():
         return explicit_name.strip()
@@ -279,6 +420,18 @@ def _resolve_api_name(module: Any, fallback: str) -> str:
 
 
 def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
+    """Resolve *value* relative to *package_path* and enforce sandbox containment.
+
+    Args:
+        package_path: The swarm package directory.
+        value: Relative or absolute path.
+
+    Returns:
+        Absolute :class:`Path`.
+
+    Raises:
+        SwarmLoaderError: If the resolved path escapes *package_path*.
+    """
     path = Path(value)
     resolved = path.resolve() if path.is_absolute() else (package_path / path).resolve()
     try:
@@ -289,6 +442,15 @@ def _resolve_package_local_path(package_path: Path, value: str | Path) -> Path:
 
 
 def _ensure_allowed_module_path(module_path: Path, package_path: Path) -> None:
+    """Enforce that *module_path* is inside the package or the tool root.
+
+    Args:
+        module_path: The module file path.
+        package_path: The swarm package directory.
+
+    Raises:
+        SwarmLoaderError: If the path is outside allowed roots.
+    """
     allowed_roots = [package_path.resolve(), (Path.cwd() / "tools").resolve()]
     for root in allowed_roots:
         try:
@@ -302,6 +464,7 @@ def _ensure_allowed_module_path(module_path: Path, package_path: Path) -> None:
 
 
 def _discover_module_requirement_file(module_path: Optional[Path]) -> Optional[Path]:
+    """Look for ``tool_requirements.txt`` next to *module_path*."""
     if module_path is None:
         return None
     requirement_file = module_path.parent / "tool_requirements.txt"
@@ -311,6 +474,19 @@ def _discover_module_requirement_file(module_path: Optional[Path]) -> Optional[P
 
 
 def _extract_tools_from_module(module) -> List[ToolDefinition]:
+    """Extract :class:`ToolDefinition` objects from a loaded module.
+
+    Supports ``TOOLS`` (list) and ``TOOL`` (single) exports.
+
+    Args:
+        module: The loaded module.
+
+    Returns:
+        List of tool definitions.
+
+    Raises:
+        SwarmLoaderError: If the export is missing or malformed.
+    """
     if hasattr(module, "TOOLS"):
         raw = getattr(module, "TOOLS")
         if not isinstance(raw, list):
@@ -334,6 +510,16 @@ def _extract_tools_from_module(module) -> List[ToolDefinition]:
 
 
 def _merge_backends(manifest: SwarmManifest) -> List[LLMBackendConfig]:
+    """Deduplicate and merge LLM backends from a manifest.
+
+    The default backend is always included first; backends are keyed by name.
+
+    Args:
+        manifest: Parsed manifest.
+
+    Returns:
+        List of unique :class:`LLMBackendConfig` objects.
+    """
     backends: List[LLMBackendConfig] = []
     if manifest.default_llm is not None:
         backends.append(manifest.default_llm)
@@ -346,6 +532,7 @@ def _merge_backends(manifest: SwarmManifest) -> List[LLMBackendConfig]:
 
 
 def _backend_to_agent_config(backend: LLMBackendConfig) -> AgentConfig:
+    """Convert an :class:`LLMBackendConfig` to an :class:`AgentConfig`."""
     return AgentConfig(
         api_url=str(backend.api_url or ""),
         api_key=backend.api_key,
@@ -361,6 +548,27 @@ def _resolve_agent_prompt(
     skill_by_name: Dict[str, SkillAsset],
     skill_by_path: Dict[Path, SkillAsset],
 ) -> str:
+    """Resolve the character prompt for an agent blueprint.
+
+    Resolution order:
+
+    1. ``character_prompt`` (inline).
+    2. ``prompt_text`` (inline).
+    3. ``skill_name`` (lookup in *skill_by_name*).
+    4. ``prompt_file`` (load from disk or *skill_by_path*).
+
+    Args:
+        blueprint: The agent blueprint.
+        package_path: The swarm package directory.
+        skill_by_name: Map of loaded skills by name.
+        skill_by_path: Map of loaded skills by absolute path.
+
+    Returns:
+        The resolved prompt string.
+
+    Raises:
+        SwarmLoaderError: If no prompt source is available.
+    """
     if blueprint.character_prompt:
         return blueprint.character_prompt
 
@@ -397,6 +605,27 @@ def _build_llm_handler(
     default_backend_name: Optional[str],
     limiter: Optional[Any] = None,
 ) -> LLMFetcher:
+    """Construct an :class:`LLMFetcher` for an agent blueprint.
+
+    Resolution order:
+
+    1. Inline ``api_key`` / ``model`` on the blueprint.
+    2. Named ``backend_name`` referencing a backend in *backends*.
+    3. ``default_backend_name`` if it exists in *backends*.
+    4. First available backend.
+
+    Args:
+        blueprint: The agent blueprint.
+        backends: Available LLM backends.
+        default_backend_name: Optional default backend name.
+        limiter: Optional concurrency limiter.
+
+    Returns:
+        Configured :class:`LLMFetcher`.
+
+    Raises:
+        SwarmLoaderError: If no backend can be resolved.
+    """
     if blueprint.api_key or blueprint.model:
         return LLMFetcher(
             api_url=blueprint.api_url,
@@ -425,6 +654,15 @@ def _build_llm_handler(
 
 
 def _resolve_workspace_defaults(package_path: Path, manifest: SwarmManifest) -> tuple[str, Path]:
+    """Resolve swarm-level workspace defaults.
+
+    Args:
+        package_path: The swarm package directory.
+        manifest: Parsed manifest.
+
+    Returns:
+        Tuple of ``(mode, root_path)``.
+    """
     workspace = manifest.workspace
     root_value = workspace.default_root if workspace.default_root is not None else "."
     return workspace.default_mode, _resolve_workspace_path(_workspace_base_path(package_path), root_value)
@@ -435,6 +673,19 @@ def _resolve_workspace_for_agent(
     manifest: SwarmManifest,
     blueprint: AgentBlueprint,
 ) -> tuple[str, Path]:
+    """Resolve workspace settings for a specific agent.
+
+    Agent-level overrides in ``manifest.workspace.agents`` take precedence,
+    followed by blueprint attributes, then swarm defaults.
+
+    Args:
+        package_path: The swarm package directory.
+        manifest: Parsed manifest.
+        blueprint: The agent blueprint.
+
+    Returns:
+        Tuple of ``(mode, root_path)``.
+    """
     workspace = manifest.workspace
     agent_override = workspace.agents.get(blueprint.agent_id)
 
@@ -458,10 +709,15 @@ def _resolve_workspace_for_agent(
 
 
 def _workspace_base_path(package_path: Path) -> Path:
+    """Return the default workspace base directory for a package."""
     return (package_path / "workspace").resolve()
 
 
 def _resolve_workspace_path(base_path: Path, value: str | Path) -> Path:
+    """Resolve a workspace path relative to *base_path*.
+
+    Absolute paths are returned as-is.
+    """
     path = Path(value)
     if path.is_absolute():
         return path.resolve()

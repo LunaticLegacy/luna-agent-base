@@ -1,3 +1,13 @@
+"""基于 DuckDuckGo 的网络搜索工具。
+
+本模块提供 ``WebSearchTool``，用于对给定查询执行网络搜索并返回标题、
+摘要与 URL 列表。结果数量上限被限制为 10 条，防止响应体过大。
+
+主要导出内容：
+    - :class:`WebSearchTool`: 网络搜索工具定义。
+    - ``TOOL``: 模块级单例实例。
+"""
+
 from __future__ import annotations
 
 import json
@@ -36,6 +46,16 @@ class WebSearchTool(ToolDefinition):
         *,
         context: Optional[ToolContext] = None,
     ) -> Any:
+        """使用 DuckDuckGo 执行网络搜索。
+
+        Args:
+            arguments: 工具入参，需包含 ``query``。
+            context: 工具执行上下文，用于校验 network_access 能力。
+
+        Returns:
+            Dict[str, Any]: 包含 query 与 results（列表）的结果字典；
+            出错时返回 ``{"error": ...}``。
+        """
         require_tool_capability(context, "network_access", self.tool_name)
         from duckduckgo_search import DDGS
 
@@ -43,6 +63,7 @@ class WebSearchTool(ToolDefinition):
         if not query:
             return {"error": "Query is required."}
 
+        # 将 max_results 硬上限设为 10，避免单次返回过多条目拖慢下游处理
         max_results = min(int(arguments.get("max_results", 5)), 10)
 
         try:

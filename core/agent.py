@@ -1,3 +1,20 @@
+"""Agent runtime implementation.
+
+Provides ``Agent``, the primary per-agent runtime object, together with
+``ManagedAgentContext`` (tiered memory: active window + compressed blocks)
+and ``RecallContextTool`` (built-in archive search).
+
+An agent owns:
+    * One LLM backend (via LLMFetcher).
+    * A private cognitive graph (thought state).
+    * An isolated workspace directory.
+    * Optional tool bindings and memory runtime hooks.
+
+The ``round_call`` method implements the ReAct loop: LLM → tool_calls →
+tool execution → results back to context → LLM again, until the assistant
+produces a final message or an external tool request is emitted.
+"""
+
 from __future__ import annotations
 
 import json
@@ -24,7 +41,14 @@ from .tool_prompt_serializer import serialize_tool_contracts
 
 @dataclass
 class ContextBlock:
-    """One compressed block of archived conversation history."""
+    """One compressed block of archived conversation history.
+
+    Attributes:
+        block_id: Unique identifier for this block.
+        summary: Condensed text of the archived messages.
+        keywords: Indexed tokens for fast retrieval.
+        archived_messages: Original message dicts (preserved for full recall).
+    """
 
     block_id: str
     summary: str
@@ -32,6 +56,7 @@ class ContextBlock:
     archived_messages: List[Dict[str, str]]
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict."""
         return {
             "block_id": self.block_id,
             "summary": self.summary,
@@ -41,6 +66,7 @@ class ContextBlock:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContextBlock":
+        """Deserialise from a plain dict."""
         return cls(
             block_id=str(data.get("block_id", "")),
             summary=str(data.get("summary", "")),
@@ -50,7 +76,13 @@ class ContextBlock:
 
 
 class ManagedAgentContext:
-    """Tiered agent context: active window + compressed blocks + archive."""
+    """Tiered agent context: active window + compressed blocks + archive.
+
+    Active messages are kept verbatim.  When the total message count
+    exceeds ``COMPRESSION_THRESHOLD`` and the active window is larger
+    than ``ACTIVE_WINDOW_SIZE``, older messages are compressed into a
+    ``ContextBlock``.
+    """
 
     ACTIVE_WINDOW_SIZE = 6
     COMPRESSION_THRESHOLD = 10
@@ -98,6 +130,7 @@ class ManagedAgentContext:
 
     @staticmethod
     def _extract_keywords(text: str) -> List[str]:
+        """Extract alphanumeric/CJK tokens, deduplicated, capped at 12."""
         tokens = re.findall(r"[a-zA-Z]{3,}|[\u4e00-\u9fff]{2,}", text.lower())
         seen: set[str] = set()
         result: List[str] = []
@@ -170,6 +203,7 @@ class RecallContextTool:
     }
 
     def get_openai_schema(self) -> Optional[Dict[str, Any]]:
+        """Return the OpenAI function-calling schema for this tool."""
         return {
             "type": "function",
             "function": {
@@ -181,7 +215,24 @@ class RecallContextTool:
 
 
 class Agent:
-    """Runtime agent with isolated context and one LLM backend."""
+    """Runtime agent with isolated context and one LLM backend.
+
+    Attributes:
+        agent_id: Canonical identifier.
+        name: Display name (falls back to agent_id).
+        llm_handler: Backend fetcher for LLM calls.
+        character_prompt: Base system prompt.
+        tools: Bound tool instances (RecallContextTool auto-injected).
+        core: Optional back-reference to the runtime Core.
+        cognitive_graph: Private thought graph for this agent.
+        workspace_mode: Workspace isolation level.
+        workspace_root: Filesystem root for workspace artifacts.
+        swarm_name: Swarm affiliation.
+        current_run_id: Run the agent is currently attached to.
+        tool_execution_mode: ``"internal"``, ``"external"``, or ``"disabled"``.
+        tool_contract_prompt_mode: How tool schemas are injected into prompts.
+        memory_runtime: Optional memory subsystem hook.
+    """
 
     def __init__(
         self,
@@ -249,7 +300,11 @@ class Agent:
         self.current_run_id = str(run_id).strip() if run_id else None
 
     def clone_for_runtime(self) -> "Agent":
-        """Create a fresh runtime instance from the same agent blueprint."""
+        """Create a fresh runtime instance from the same agent blueprint.
+
+        The cloned agent shares the same backend and tools but starts with
+        a blank cognitive graph and no run binding.
+        """
         cloned = Agent(
             agent_id=self.agent_id,
             llm_handler=self.llm_handler,
@@ -324,12 +379,14 @@ class Agent:
 
     @staticmethod
     def _merge_cognitive_graphs(target: CognitiveGraph, source: CognitiveGraph) -> None:
+        """Deep-copy all nodes and edges from *source* into *target*."""
         for node in source.nodes.values():
             target.add_node(node)
         for edge in source.edges:
             target.add_edge(edge)
 
     def _build_system_prompt(self, additional_prompt: Optional[str] = None) -> str:
+        """Compose the system prompt from character, extras, and tool contracts."""
         prompts = [self.character_prompt.strip()]
         if additional_prompt:
             prompts.append(additional_prompt.strip())
@@ -343,6 +400,7 @@ class Agent:
         return "\n\n".join(prompt for prompt in prompts if prompt)
 
     def _extract_assistant_message(self, response: Any) -> Optional[str]:
+        """Safely extract the assistant text from an LLM response object."""
         choices = getattr(response, "choices", None)
         if not choices:
             return None
@@ -377,7 +435,11 @@ class Agent:
         return content, tool_calls
 
     async def _execute_tool_call(self, tool_call: Any) -> str:
-        """Execute a single tool call from the LLM response."""
+        """Execute a single tool call from the LLM response.
+
+        Handles the built-in ``recall_context`` locally; all other tools
+        are dispatched through the core tool registry.
+        """
         if hasattr(tool_call, "function"):
             tool_name = getattr(tool_call.function, "name", None)
             arguments_str = getattr(tool_call.function, "arguments", "{}")
@@ -443,11 +505,62 @@ class Agent:
 
         If the agent has bound tools, this method enters a ReAct loop:
         LLM -> tool_calls -> execute tools -> results back to context -> LLM again.
+
+        Args:
+            rounds: Round counter (for bookkeeping).
+            user_message: The user's input text.
+            additional_prompt: Extra system prompt appended for this round only.
+
+        Returns:
+            An AgentRoundResult containing the final assistant message,
+            cognitive graph deltas, tool requests, and LLM input snapshot.
         """
         self.append_context("user", user_message)
         system_prompt = self._build_system_prompt(additional_prompt)
 
-        # Memory runtime hook: build context plan before the round
+        # 1. Prepare inputs --------------------------------------------------
+        memory_plan, prev_messages, tools_schemas, llm_input, runtime_prev_messages = await self._prepare_round_inputs(
+            rounds, user_message, system_prompt
+        )
+
+        # 2. ReAct loop ------------------------------------------------------
+        assistant_message, raw_response, tool_requests, round_cognitive_graph, last_content = await self._run_react_loop(
+            user_message, system_prompt, prev_messages, tools_schemas, runtime_prev_messages
+        )
+
+        # 3. Finalize and return ---------------------------------------------
+        return await self._finalize_round(
+            rounds=rounds,
+            user_message=user_message,
+            additional_prompt=additional_prompt,
+            assistant_message=assistant_message,
+            raw_response=raw_response,
+            tool_requests=tool_requests,
+            memory_plan=memory_plan,
+            llm_input=llm_input,
+            round_cognitive_graph=round_cognitive_graph,
+            last_content=last_content,
+        )
+
+    async def _prepare_round_inputs(
+        self,
+        rounds: int,
+        user_message: str,
+        system_prompt: str,
+    ) -> tuple:
+        """Prepare all inputs needed for the ReAct loop.
+
+        Handles the memory-runtime ``before_round`` hook, builds message
+        history, serialises tool schemas, and captures the LLM input snapshot.
+
+        Args:
+            rounds: Round counter.
+            user_message: Raw user input text.
+            system_prompt: Composed system prompt for this round.
+
+        Returns:
+            A tuple of *(memory_plan, prev_messages, tools_schemas, llm_input, runtime_prev_messages)*.
+        """
         memory_plan = None
         runtime_prev_messages: Optional[List[LLMContext]] = None
         if self.memory_runtime is not None and self.memory_runtime.config.enabled:
@@ -466,21 +579,21 @@ class Agent:
             prev_messages = runtime_prev_messages
         else:
             context_messages = self._context.build_messages()
-            prev_messages = [LLMContext(role=msg["role"], content=msg["content"]) for msg in context_messages[:-1]]
+            prev_messages = [
+                LLMContext(role=msg["role"], content=msg["content"])
+                for msg in context_messages[:-1]
+            ]
 
-        # Prepare tool schemas if tools are bound
         tools_schemas = None
         if self.tool_execution_mode != "disabled" and self.tools:
-            schemas = [t.get_openai_schema() for t in self.tools if getattr(t, "get_openai_schema", None) and t.get_openai_schema()]
+            schemas = [
+                t.get_openai_schema()
+                for t in self.tools
+                if getattr(t, "get_openai_schema", None) and t.get_openai_schema()
+            ]
             if schemas:
                 tools_schemas = schemas
 
-        assistant_message = None
-        raw_response = None
-        tool_requests: Optional[List[ToolRequest]] = None
-        round_cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}_round_{rounds}")
-
-        # Capture the LLM input for this round (initial call, before tool loop mutations).
         llm_input: Dict[str, Any] = {
             "system": system_prompt,
             "user": user_message,
@@ -493,7 +606,38 @@ class Agent:
         if memory_plan is not None:
             llm_input["memory_context_plan"] = memory_plan.to_dict()
 
+        return memory_plan, prev_messages, tools_schemas, llm_input, runtime_prev_messages
+
+    async def _run_react_loop(
+        self,
+        user_message: str,
+        system_prompt: str,
+        prev_messages: List[LLMContext],
+        tools_schemas: Optional[List[Dict[str, Any]]],
+        runtime_prev_messages: Optional[List[LLMContext]],
+    ) -> tuple:
+        """Run the ReAct loop: LLM -> tools -> LLM until no more tool calls.
+
+        Supports both ``internal`` and ``external`` tool execution modes.
+
+        Args:
+            user_message: The original user message (needed for runtime history).
+            system_prompt: System prompt for LLM calls.
+            prev_messages: Initial message history for the first LLM call.
+            tools_schemas: OpenAI-style tool schemas (None if disabled).
+            runtime_prev_messages: Optional memory-managed message list.
+
+        Returns:
+            A tuple of *(assistant_message, raw_response, tool_requests,
+            round_cognitive_graph, last_content)*.
+        """
+        assistant_message = None
+        raw_response = None
+        tool_requests = None
+        round_cognitive_graph = CognitiveGraph(graph_id=f"agent_{self.agent_id}_round_{0}")
         tool_round = 0
+        last_content = None
+
         while True:
             raw_response = await self.llm_handler.fetch(
                 msg=user_message if tool_round == 0 else "",
@@ -503,66 +647,171 @@ class Agent:
             )
 
             content, tool_calls = self._extract_message_and_tool_calls(raw_response)
+            last_content = content
 
-            if content:
-                self.append_context("assistant", content)
-            elif tool_calls:
-                tool_names = []
-                for tc in tool_calls:
-                    if hasattr(tc, "function"):
-                        tool_names.append(getattr(tc.function, "name", "?"))
-                    elif isinstance(tc, dict):
-                        tool_names.append(tc.get("function", {}).get("name", "?"))
-                self.append_context("assistant", f"[Calling tools: {tool_names}]")
-
-            # Ensure the user message is included in runtime history for subsequent fetches
-            if tool_round == 0 and runtime_prev_messages is not None:
-                runtime_prev_messages.append(LLMContext(role="user", content=user_message))
-
-            if runtime_prev_messages is not None:
-                if content:
-                    runtime_prev_messages.append(LLMContext(role="assistant", content=content))
-                elif tool_calls:
-                    runtime_prev_messages.append(LLMContext(role="assistant", content=f"[Calling tools: {tool_names}]"))
+            self._update_context_from_response(
+                content=content,
+                tool_calls=tool_calls,
+                tool_round=tool_round,
+                runtime_prev_messages=runtime_prev_messages,
+                user_message=user_message,
+            )
 
             if not tool_calls:
                 assistant_message = content
                 break
 
             if self.tool_execution_mode == "external":
-                tool_requests = []
-                for tc in tool_calls:
-                    tool_name = getattr(tc.function, "name", None) if hasattr(tc, "function") else tc.get("function", {}).get("name")
-                    arguments_str = getattr(tc.function, "arguments", "{}") if hasattr(tc, "function") else tc.get("function", {}).get("arguments", "{}")
-                    args = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
-                    tool_requests.append(ToolRequest(
-                        id=getattr(tc, "id", f"tc-{len(tool_requests)}"),
-                        tool=tool_name,
-                        args=args,
-                        on_success="continue",
-                        on_failure="return_to_agent",
-                    ))
+                tool_requests = self._build_external_tool_requests(tool_calls)
                 assistant_message = content or f"[External tool requests: {len(tool_requests)}]"
                 break
 
-            # Execute tool calls and feed results back into context
-            for tc in tool_calls:
-                result = await self._execute_tool_call(tc)
-                self.append_context("tool", result)
-                if runtime_prev_messages is not None:
-                    runtime_prev_messages.append(LLMContext(role="tool", content=result))
-                self._record_tool_call_in_cognitive_graph(tc, result, round_cognitive_graph)
+            await self._execute_internal_tool_round(
+                tool_calls=tool_calls,
+                runtime_prev_messages=runtime_prev_messages,
+                round_cognitive_graph=round_cognitive_graph,
+            )
 
             # Refresh prev_messages for the next LLM call
             if runtime_prev_messages is not None:
                 prev_messages = runtime_prev_messages
             else:
                 context_messages = self._context.build_messages()
-                prev_messages = [LLMContext(role=msg["role"], content=msg["content"]) for msg in context_messages]
+                prev_messages = [
+                    LLMContext(role=msg["role"], content=msg["content"])
+                    for msg in context_messages
+                ]
             tool_round += 1
 
+        return assistant_message, raw_response, tool_requests, round_cognitive_graph, last_content
+
+    def _update_context_from_response(
+        self,
+        content: Optional[str],
+        tool_calls: Optional[List[Any]],
+        tool_round: int,
+        runtime_prev_messages: Optional[List[LLMContext]],
+        user_message: str,
+    ) -> None:
+        """Append the LLM response (content or tool-calls placeholder) to context.
+
+        Also synchronises the runtime-managed message list if one exists.
+        """
+        if content:
+            self.append_context("assistant", content)
+        elif tool_calls:
+            tool_names = []
+            for tc in tool_calls:
+                if hasattr(tc, "function"):
+                    tool_names.append(getattr(tc.function, "name", "?"))
+                elif isinstance(tc, dict):
+                    tool_names.append(tc.get("function", {}).get("name", "?"))
+            self.append_context("assistant", f"[Calling tools: {tool_names}]")
+
+        # Ensure the user message is included in runtime history for subsequent fetches
+        if tool_round == 0 and runtime_prev_messages is not None:
+            runtime_prev_messages.append(LLMContext(role="user", content=user_message))
+
+        if runtime_prev_messages is not None:
+            if content:
+                runtime_prev_messages.append(LLMContext(role="assistant", content=content))
+            elif tool_calls:
+                runtime_prev_messages.append(
+                    LLMContext(role="assistant", content=f"[Calling tools: {tool_names}]")
+                )
+
+    def _build_external_tool_requests(
+        self,
+        tool_calls: List[Any],
+    ) -> List[ToolRequest]:
+        """Build :class:`ToolRequest` objects from raw LLM tool_calls for external mode.
+
+        Args:
+            tool_calls: Raw tool_call objects from the LLM response.
+
+        Returns:
+            List of ToolRequest records.
+        """
+        tool_requests: List[ToolRequest] = []
+        for tc in tool_calls:
+            tool_name = (
+                getattr(tc.function, "name", None)
+                if hasattr(tc, "function")
+                else tc.get("function", {}).get("name")
+            )
+            arguments_str = (
+                getattr(tc.function, "arguments", "{}")
+                if hasattr(tc, "function")
+                else tc.get("function", {}).get("arguments", "{}")
+            )
+            try:
+                args = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+            except json.JSONDecodeError:
+                args = {"error": f"Invalid JSON arguments for tool '{tool_name}': {arguments_str}"}
+            tool_requests.append(
+                ToolRequest(
+                    id=getattr(tc, "id", f"tc-{len(tool_requests)}"),
+                    tool=tool_name,
+                    args=args,
+                    on_success="continue",
+                    on_failure="return_to_agent",
+                )
+            )
+        return tool_requests
+
+    async def _execute_internal_tool_round(
+        self,
+        tool_calls: List[Any],
+        runtime_prev_messages: Optional[List[LLMContext]],
+        round_cognitive_graph: CognitiveGraph,
+    ) -> None:
+        """Execute all tool calls in ``internal`` mode and update context + cognitive graph.
+
+        Args:
+            tool_calls: Raw tool_call objects from the LLM response.
+            runtime_prev_messages: Optional memory-managed message list.
+            round_cognitive_graph: Cognitive graph for this round (accumulates tool nodes).
+        """
+        for tc in tool_calls:
+            result = await self._execute_tool_call(tc)
+            self.append_context("tool", result)
+            if runtime_prev_messages is not None:
+                runtime_prev_messages.append(LLMContext(role="tool", content=result))
+            self._record_tool_call_in_cognitive_graph(tc, result, round_cognitive_graph)
+
+    async def _finalize_round(
+        self,
+        *,
+        rounds: int,
+        user_message: str,
+        additional_prompt: Optional[str],
+        assistant_message: Optional[str],
+        raw_response: Any,
+        tool_requests: Optional[List[ToolRequest]],
+        memory_plan: Any,
+        llm_input: Dict[str, Any],
+        round_cognitive_graph: CognitiveGraph,
+        last_content: Optional[str],
+    ) -> AgentRoundResult:
+        """Finalize a completed round: extract cognitive graph, merge state, run after_round hook.
+
+        Args:
+            rounds: Round counter.
+            user_message: Original user message.
+            additional_prompt: Extra system prompt used this round.
+            assistant_message: Final assistant text (may be None if loop exited abnormally).
+            raw_response: Last raw LLM response object.
+            tool_requests: External tool requests (None in internal mode).
+            memory_plan: Memory context plan from before_round (None if disabled).
+            llm_input: Snapshot of the LLM input for this round.
+            round_cognitive_graph: Cognitive graph accumulated during the round.
+            last_content: The content field from the last LLM response.
+
+        Returns:
+            Populated :class:`AgentRoundResult`.
+        """
         if assistant_message is None:
-            assistant_message = content or "[Agent did not produce a final response]"
+            assistant_message = last_content or "[Agent did not produce a final response]"
 
         self._context.metadata["last_round"] = rounds
         self._context.metadata["turns"] = len(self._context.active_messages) + sum(
@@ -606,6 +855,7 @@ class Agent:
             tool_requests=tool_requests if self.tool_execution_mode == "external" else None,
             llm_input=llm_input,
         )
+
 
     def _record_tool_call_in_cognitive_graph(
         self,

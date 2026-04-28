@@ -1,3 +1,10 @@
+"""Failure classification utilities.
+
+Maps arbitrary exceptions to canonical ``FailureClassification`` records
+so that the fault-tolerance layer can decide whether to retry, reroute,
+or quarantine without parsing free-form error messages.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,6 +36,16 @@ FAILURE_KINDS = {
 
 @dataclass
 class FailureClassification:
+    """Canonical classification for a runtime failure.
+
+    Attributes:
+        failure_kind: Key into FAILURE_KINDS.
+        recoverable: Whether the failure can be recovered without user action.
+        retryable: Whether a blind retry is likely to succeed.
+        suggested_action: Human-readable remediation hint, if any.
+        detail: Arbitrary extra context (e.g. tool batch summary).
+    """
+
     failure_kind: str
     recoverable: bool = False
     retryable: bool = False
@@ -37,6 +54,11 @@ class FailureClassification:
 
 
 def classify_failure(exc: Exception) -> FailureClassification:
+    """Classify an exception into a FailureClassification record.
+
+    Checks for an explicit ``failure_kind`` attribute first, then falls
+    back to heuristic string matching on the exception name and message.
+    """
     explicit = getattr(exc, "failure_kind", None)
     if explicit:
         return _with_defaults(str(explicit), exc)
@@ -84,6 +106,11 @@ def classify_failure(exc: Exception) -> FailureClassification:
 
 
 def failure_detail(exc: Exception) -> Dict[str, Any]:
+    """Harvest structured detail from an exception for downstream logging.
+
+    Calls ``to_detail()`` if present, then collects known diagnostic
+    attributes (``parser_stage``, ``tool_name``, etc.).
+    """
     detail: Dict[str, Any] = {}
     to_detail = getattr(exc, "to_detail", None)
     if callable(to_detail):
@@ -102,6 +129,7 @@ def failure_detail(exc: Exception) -> Dict[str, Any]:
 
 
 def _with_defaults(kind: str, exc: Exception) -> FailureClassification:
+    """Build a FailureClassification with sensible defaults for *kind*."""
     normalized = kind if kind in FAILURE_KINDS else "unknown"
     retryable = normalized in {"timeout", "model_error", "runtime_exception", "optional_tool_failed", "tool_policy_denied", "tool_argument_error"}
     recoverable = normalized in {

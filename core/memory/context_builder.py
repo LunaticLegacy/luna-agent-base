@@ -1,3 +1,10 @@
+"""Build prompt messages from episode nodes and memories.
+
+``ContextBuilder`` assembles a ``MemoryContextPlan`` by partitioning
+eligible memories (pinned, timeline, semantic) and selected episode nodes
+(packed summaries vs. recent turns) into ordered system messages.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -7,7 +14,11 @@ from .lifecycle import can_inject_memory
 
 
 class ContextBuilder:
-    """Builds prompt messages from episode nodes and memories, partitioned by type."""
+    """Builds prompt messages from episode nodes and memories, partitioned by type.
+
+    Attributes:
+        max_context_nodes: Maximum number of episode nodes to include.
+    """
 
     def __init__(self, max_context_nodes: int = 6) -> None:
         self.max_context_nodes = max_context_nodes
@@ -22,7 +33,21 @@ class ContextBuilder:
         memory_queries: Optional[List[str]] = None,
         user_message: str = "",
     ) -> MemoryContextPlan:
-        """Construct a MemoryContextPlan with partitioned prompt messages."""
+        """Construct a MemoryContextPlan with partitioned prompt messages.
+
+        Args:
+            episode_graph_nodes: Full node pool from the episode graph.
+            selected_node_ids: Node IDs chosen by the planner/context policy.
+            memories: All committed memories from the memory store.
+            current_turn_id: Identifier for the current turn (used to filter
+                memories that are not yet eligible for injection).
+            memory_queries: Raw query strings that produced the selection.
+            user_message: The current turn's user message (reserved for future
+                expansion; not yet injected directly).
+
+        Returns:
+            A MemoryContextPlan ready for the agent's system context.
+        """
         memory_queries = memory_queries or []
 
         # Collect all nodes from selected ancestors
