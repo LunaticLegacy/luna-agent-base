@@ -403,6 +403,35 @@ async def create_run(swarm_name: str, request: Request):
     return await _execute_swarm_run(request, swarm_name, use_background=True)
 
 
+@router.post("/{swarm_name}/runs/stop")
+async def stop_swarm_runs(swarm_name: str, request: Request):
+    """Stop all active runs for a swarm.
+
+    Body: {"stop_type": "soft" | "hard"}  (default: soft)
+    """
+    swarm = _get_swarm_or_404(request, swarm_name)
+    body = await parse_json_body(request)
+    stop_type = str(body.get("stop_type", "soft")).strip().lower()
+    if stop_type not in {"soft", "hard"}:
+        raise ConflictError(f"Invalid stop_type: '{stop_type}'. Use 'soft' or 'hard'.")
+
+    registry = _get_runs_registry(request)
+    active_ids = registry.active_run_ids(swarm_name)
+    stopped = []
+    for run_id in active_ids:
+        record = registry.stop_run(run_id, stop_type=stop_type)
+        if record is not None:
+            stopped.append({"run_id": run_id, "status": record.status})
+
+    return {
+        "success": True,
+        "swarm": swarm_name,
+        "stop_type": stop_type,
+        "stopped": stopped,
+        "count": len(stopped),
+    }
+
+
 @router.delete("/{swarm_name}")
 async def unload_swarm(swarm_name: str, request: Request):
     registry = get_runtime_registry(request)

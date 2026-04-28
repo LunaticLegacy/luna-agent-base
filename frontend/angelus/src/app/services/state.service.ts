@@ -2134,17 +2134,29 @@ this.loadLogs(),
 
   async stopRun(stopType: 'soft' | 'hard' = 'soft'): Promise<void> {
     const run = this.activeRun();
-    if (!run) { return; }
     this.loading.set(true); this.error.set(null);
-    this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${run.run_id}`, 'STOP', '', 'info', { stopType });
-    try {
-      const response = await this.apiService.stopRun(this.baseUrl(), run.run_id, stopType);
-      this.pushFeed(`运行停止 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'success', response);
-      await this.refreshRunSnapshot(run.run_id);
-    } catch (error) {
-      this.error.set(formatErrorDetail(error));
-      this.pushFeed(`运行停止失败 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'error', { error: errorSummary(error) });
-    } finally { this.loading.set(false); }
+    if (run) {
+      this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${run.run_id}`, 'STOP', '', 'info', { stopType });
+      try {
+        const response = await this.apiService.stopRun(this.baseUrl(), run.run_id, stopType);
+        this.pushFeed(`运行停止 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'success', response);
+        await this.refreshRunSnapshot(run.run_id);
+      } catch (error) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`运行停止失败 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'error', { error: errorSummary(error) });
+      } finally { this.loading.set(false); }
+    } else {
+      const swarmName = this.selectedSwarmName();
+      if (!swarmName) { this.loading.set(false); return; }
+      this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${swarmName}`, 'STOP', '', 'info', { stopType });
+      try {
+        const response = await this.apiService.stopSwarmRuns(this.baseUrl(), swarmName, stopType);
+        this.pushFeed(`Swarm 停止 · ${swarmName} (${response.count} 个运行)`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs/stop`), 'success', response);
+      } catch (error) {
+        this.error.set(formatErrorDetail(error));
+        this.pushFeed(`Swarm 停止失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs/stop`), 'error', { error: errorSummary(error) });
+      } finally { this.loading.set(false); }
+    }
   }
 
   async runAgentRound(): Promise<void> {

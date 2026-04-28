@@ -330,6 +330,15 @@ export class ApiService {
     );
   }
 
+  stopSwarmRuns(baseUrl: string, swarmName: string, stopType: 'soft' | 'hard' = 'soft'): Promise<{ success: boolean; swarm: string; stop_type: string; stopped: Array<{ run_id: string; status: string }>; count: number }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; swarm: string; stop_type: string; stopped: Array<{ run_id: string; status: string }>; count: number }>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/runs/stop`),
+        { stop_type: stopType }
+      )
+    );
+  }
+
   runAgentRound(
     baseUrl: string,
     swarmName: string,
