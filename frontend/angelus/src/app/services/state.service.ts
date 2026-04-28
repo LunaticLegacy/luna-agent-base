@@ -1415,6 +1415,21 @@ this.loadLogs(),
       const response = await this.apiService.getSwarm(baseUrl, swarmName);
       this.selectedSwarm.set(response.swarm);
       this.ensureAgentSelection(response.swarm);
+      // Restore active run if any exists on the backend
+      const activeRunIds = (response.swarm as any)?.active_run_ids ?? [];
+      if (activeRunIds.length > 0) {
+        const latestRunId = activeRunIds[activeRunIds.length - 1];
+        try {
+          const runResponse = await this.apiService.getRun(baseUrl, latestRunId);
+          this.activeRun.set(runResponse.run);
+          this.pushFeed(`运行恢复 · ${latestRunId}`, 'GET', `${baseUrl}/runs/${latestRunId}`, 'info', runResponse);
+          if (runResponse.run.status === 'running') {
+            this.watchRun(runResponse.run);
+          }
+        } catch (runError) {
+          this.pushFeed(`运行恢复失败 · ${latestRunId}`, 'GET', `${baseUrl}/runs/${latestRunId}`, 'warn', { error: errorSummary(runError) });
+        }
+      }
       this.pushFeed(`Swarm 详情 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}`, 'success', response);
       await Promise.all([
         this.loadSelectedGraph(),

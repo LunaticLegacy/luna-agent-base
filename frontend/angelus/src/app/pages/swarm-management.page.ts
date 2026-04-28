@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { parse as parseMarkdown } from 'marked';
 import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
@@ -395,13 +396,13 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                                 @if (li['system']) {
                                   <div class="llm-input-section">
                                     <div class="llm-input-label">System Prompt</div>
-                                    <pre class="llm-input-block">{{ li['system'] }}</pre>
+                                    <div class="llm-input-block markdown-body" [innerHTML]="renderMarkdown(li['system'])"></div>
                                   </div>
                                 }
                                 @if (li['user']) {
                                   <div class="llm-input-section">
                                     <div class="llm-input-label">User Message</div>
-                                    <pre class="llm-input-block">{{ li['user'] }}</pre>
+                                    <div class="llm-input-block markdown-body" [innerHTML]="renderMarkdown(li['user'])"></div>
                                   </div>
                                 }
                                 @if (li['prev_messages']?.length) {
@@ -411,7 +412,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                                       @for (msg of li['prev_messages']; track $index) {
                                         <div class="llm-message-item">
                                           <span class="llm-message-role">{{ msg['role'] }}</span>
-                                          <pre class="llm-message-content">{{ msg['content'] }}</pre>
+                                          <div class="llm-message-content markdown-body" [innerHTML]="renderMarkdown(msg['content'])"></div>
                                         </div>
                                       }
                                     </div>
@@ -1369,8 +1370,62 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       color: #cbd5e1;
       font-size: 11px;
       line-height: 1.4;
-      white-space: pre-wrap;
+      white-space: normal;
       word-break: break-word;
+    }
+    .markdown-body {
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+    .markdown-body ::ng-deep h1, .markdown-body ::ng-deep h2, .markdown-body ::ng-deep h3, .markdown-body ::ng-deep h4, .markdown-body ::ng-deep h5, .markdown-body ::ng-deep h6 {
+      margin: 0.5em 0 0.25em;
+      font-weight: 600;
+      color: #f8fafc;
+      line-height: 1.3;
+    }
+    .markdown-body ::ng-deep h1 { font-size: 1rem; }
+    .markdown-body ::ng-deep h2 { font-size: 0.92rem; }
+    .markdown-body ::ng-deep h3, .markdown-body ::ng-deep h4, .markdown-body ::ng-deep h5, .markdown-body ::ng-deep h6 { font-size: 0.85rem; }
+    .markdown-body ::ng-deep p { margin: 0.35em 0; color: #cbd5e1; }
+    .markdown-body ::ng-deep ul, .markdown-body ::ng-deep ol { margin: 0.35em 0; padding-left: 1.2em; }
+    .markdown-body ::ng-deep li { margin: 0.15em 0; color: #cbd5e1; }
+    .markdown-body ::ng-deep code {
+      background: rgba(139, 123, 255, 0.10);
+      color: #A090FF;
+      padding: 0.15em 0.35em;
+      border-radius: 4px;
+      font-size: 0.9em;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    .markdown-body ::ng-deep pre {
+      background: rgba(10, 14, 26, 0.72);
+      border: 1px solid rgba(148,163,184,0.10);
+      border-radius: 8px;
+      padding: 8px 10px;
+      overflow: auto;
+      margin: 0.4em 0;
+    }
+    .markdown-body ::ng-deep pre code {
+      background: transparent;
+      padding: 0;
+      color: #cbd5e1;
+    }
+    .markdown-body ::ng-deep blockquote {
+      margin: 0.4em 0;
+      padding-left: 0.8em;
+      border-left: 3px solid rgba(139,92,246,0.35);
+      color: #94a3b8;
+    }
+    .markdown-body ::ng-deep hr {
+      border: none;
+      border-top: 1px solid rgba(148,163,184,0.12);
+      margin: 0.6em 0;
+    }
+    .markdown-body ::ng-deep a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    .markdown-body ::ng-deep a:hover {
+      text-decoration: underline;
     }
     .llm-tool-list {
       display: flex;
@@ -1547,6 +1602,16 @@ export class SwarmManagementPageComponent {
     if (lastNode) parts.push(`最后节点: ${lastNode}`);
     if (lastStatus && lastStatus !== 'ok') parts.push(`状态: ${lastStatus}`);
     return parts.join(' · ');
+  }
+
+  renderMarkdown(text: unknown): string {
+    if (typeof text !== 'string') return '';
+    try {
+      const html = parseMarkdown(text) as string;
+      return html;
+    } catch {
+      return String(text);
+    }
   }
 
   async copyEvent(event: unknown): Promise<void> {
