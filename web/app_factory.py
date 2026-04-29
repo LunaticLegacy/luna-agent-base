@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from core.swarm_loader import SwarmLoaderError
 from web.content_store import ContentStore
 from web.runtime import RuntimeRegistry
+from web.security import install_api_security
 
 from .errors import register_error_handlers
 from .routes import catalog_router, content_router, health_router, runs_router, settings_router, swarms_router
