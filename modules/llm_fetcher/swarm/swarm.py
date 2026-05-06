@@ -407,6 +407,21 @@ class AgentSwarm:
         self.execution_graph.set_node_timeout(node_id, seconds)
         return self
 
+    def request_soft_stop(self, reason: Optional[str] = None) -> "AgentSwarm":
+        """Request a soft stop for the currently running execution graph."""
+        self.execution_graph.request_soft_stop(reason=reason)
+        return self
+
+    def request_hard_stop(self, reason: Optional[str] = None) -> "AgentSwarm":
+        """Request a hard stop for the currently running execution graph."""
+        self.execution_graph.request_hard_stop(reason=reason)
+        return self
+
+    def clear_stop_requests(self) -> "AgentSwarm":
+        """Clear any pending stop requests on the execution graph."""
+        self.execution_graph.clear_stop_requests()
+        return self
+
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
@@ -516,62 +531,121 @@ class AgentSwarm:
             for tool in tool_pool.values():
                 swarm.add_tool(tool)
 
-        # Rebuild agents from swarm-level config, then add to graph
+        # Build agents as live objects (do *not* add to graph yet —
+        # ExecutionGraph.restore() will wire them into AgentNodes).
         agents_cfg = data.get("agents", {})
         for nid, cfg in agents_cfg.items():
             tool_names = cfg.get("tool_names", [])
-            agent_tools = [swarm.tool_registry._tools[n] for n in tool_names if n in swarm.tool_registry._tools]
-            swarm.add_agent(
-                node_id=nid,
+            agent_tools = [
+                swarm.tool_registry._tools[n]
+                for n in tool_names
+                if n in swarm.tool_registry._tools
+            ]
+            agent = Agent(
+                llm_handler=llm_fetcher,
                 system_prompt=cfg.get("system_prompt", ""),
-                extra_tools=agent_tools if agent_tools else None,
+                tools=agent_tools if agent_tools else None,
             )
+            swarm._agents[nid] = agent
 
-        # Restore remaining graph topology (edges, non-agent nodes, timeouts)
+        # Restore full topology via ExecutionGraph.restore() so version,
+        # edges, timeouts and node counter are reconstructed faithfully.
         graph_data = data.get("execution_graph")
         if graph_data:
-            # Re-create non-agent nodes from the snapshot
-            for nid, cfg in graph_data.get("nodes", {}).items():
-                if nid in swarm.execution_graph.nodes:
-                    continue  # agent node already created above
-                ntype = cfg.get("type")
-                if ntype == "tool":
-                    tname = cfg.get("tool_name", "")
-                    if tname in swarm.tool_registry._tools:
-                        swarm.execution_graph.add_tool_node(
-                            swarm.tool_registry._tools[tname], node_id=nid
-                        )
-                elif ntype == "router":
-                    routes = dict(cfg.get("routes", {}))
-                    default_route = cfg.get("default_route")
-                    swarm.execution_graph.add_router_node(
-                        routes=routes,
-                        default_route=default_route,
-                        node_id=nid,
-                    )
-                elif ntype == "input":
-                    swarm.execution_graph.add_input_node(node_id=nid)
-                elif ntype == "output":
-                    swarm.execution_graph.add_output_node(node_id=nid)
-                elif ntype == "join":
-                    swarm.execution_graph.add_join_node(
-                        strategy=cfg.get("strategy", "all"),
-                        node_id=nid,
-                    )
+            # A checkpoint file nests the config snapshot under "config".
+            # Normalise so we always pass a config dict to restore().
+            fmt = graph_data.get("format", "")
+            if fmt == "execution-graph/checkpoint":
+                config_data = graph_data.get("config", graph_data)
+                runtime_data = graph_data
+            else:
+                config_data = graph_data
+                runtime_data = None
 
-            # Wire edges
-            for edge_cfg in graph_data.get("edges", []):
-                swarm.execution_graph.connect(
-                    edge_cfg["source"],
-                    edge_cfg["target"],
-                    edge_cfg.get("label"),
-                )
+            restored_graph = ExecutionGraph.restore(
+                config_data,
+                llm_fetcher=llm_fetcher,
+                tool_pool=swarm.tool_registry._tools,
+                agent_map=swarm._agents,
+            )
+            swarm.execution_graph = restored_graph
+            # Ensure the graph's tool pool stays in sync with the swarm registry
+            swarm.execution_graph._tool_pool = dict(swarm.tool_registry._tools)
 
-            # Restore timeouts
-            for nid, seconds in graph_data.get("node_timeouts", {}).items():
-                swarm.execution_graph.set_node_timeout(nid, seconds)
+            # If the file was a checkpoint, resume runtime state as well.
+            if runtime_data is not None:
+                swarm._last_context = swarm.execution_graph.resume(runtime_data)
 
         return swarm
+
+    # ------------------------------------------------------------------
+    # Checkpoint / Resume
+    # ------------------------------------------------------------------
+
+    def checkpoint(
+        self,
+        ctx: Optional[GraphContext] = None,
+        path: Optional[str | Path] = None,
+    ) -> Dict[str, Any]:
+        """Create a runtime checkpoint of the swarm execution state.
+
+        Args:
+            ctx: The :class:`GraphContext` to checkpoint.  If ``None``, the
+                last execution context (:attr:`_last_context`) is used.
+            path: If given, write the checkpoint to disk as JSON.
+
+        Returns:
+            A dict containing the static snapshot plus runtime progress
+            (executed nodes, outputs, inputs).
+        """
+        target_ctx = ctx or self._last_context
+        if target_ctx is None:
+            raise RuntimeError(
+                "No execution context available to checkpoint. "
+                "Pass ``ctx`` explicitly or run the swarm first."
+            )
+
+        agent_configs: Dict[str, Dict[str, Any]] = {}
+        for nid, agent in self._agents.items():
+            tool_names = sorted(agent.tool_registry._tools.keys())
+            builtin = {"round_end"}
+            agent_configs[nid] = {
+                "system_prompt": agent._base_system_prompt,
+                "tool_names": [n for n in tool_names if n not in builtin],
+            }
+
+        payload = {
+            "spec": {
+                "name": self._spec.name,
+                "description": self._spec.description,
+                "version": self._spec.version,
+                "metadata": dict(self._spec.metadata),
+            },
+            "execution_graph": self.execution_graph.checkpoint(target_ctx),
+            "thinking_graph": self.thinking_graph.to_dict(),
+            "agents": agent_configs,
+            "run_count": self._run_count,
+        }
+        if path is not None:
+            Path(path).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+        return payload
+
+    def resume(self, checkpoint: Dict[str, Any]) -> GraphContext:
+        """Resume from a runtime checkpoint.
+
+        Args:
+            checkpoint: A dict previously produced by :meth:`checkpoint`.
+
+        Returns:
+            A :class:`GraphContext` primed with partial execution state.
+            You can feed this into ``run()`` by first restoring inputs/outputs
+            and then calling ``run()`` with an entry node that still has
+            unexecuted downstream nodes.
+        """
+        return self.execution_graph.resume(checkpoint["execution_graph"])
 
     # ------------------------------------------------------------------
     # Introspection

@@ -6,12 +6,13 @@ Implements the REST surface documented in API_DESIGN.md.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tomllib
 import traceback
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -60,6 +61,19 @@ class LoadSwarmResponse(BaseModel):
 class RunRequest(BaseModel):
     input: str
     context: Optional[Dict[str, Any]] = None
+
+
+class StopRequest(BaseModel):
+    mode: Literal["soft", "hard"] = "soft"
+    reason: Optional[str] = None
+
+
+class StopResponse(BaseModel):
+    name: str
+    mode: Literal["soft", "hard"]
+    requested: bool
+    reason: Optional[str] = None
+    stop_state: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RunResponse(BaseModel):
@@ -291,6 +305,7 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Swarm '{name}' not found.")
 
         async def event_stream() -> AsyncIterator[str]:
+            ctx: Any = None
             yield _sse_event("start", {"input": req.input})
             try:
                 ctx = await swarm.run(req.input)
@@ -310,6 +325,15 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
                 trace = _build_trace(ctx)
                 _core.record_run(name, req.input, output, trace)
                 yield _sse_event("result", {"output": output, "trace": trace})
+            except asyncio.CancelledError as exc:
+                stop_state = getattr(swarm.execution_graph, "stop_state", {})
+                payload: Dict[str, Any] = {
+                    "detail": str(exc) or "run cancelled",
+                    "stop_state": stop_state,
+                }
+                if ctx is not None:
+                    payload["trace"] = _build_trace(ctx)
+                yield _sse_event("stopped", payload)
             except Exception as exc:
                 yield _sse_event(
                     "error",
@@ -320,6 +344,29 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
         return StreamingResponse(
             event_stream(),
             media_type="text/event-stream",
+        )
+
+    @app.post("/swarms/{name}/stop", response_model=StopResponse)
+    async def stop_swarm(name: str, req: StopRequest) -> StopResponse:
+        try:
+            swarm = _core.get_swarm(name)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Swarm '{name}' not found.")
+
+        if req.mode == "soft":
+            swarm.request_soft_stop(reason=req.reason)
+        elif req.mode == "hard":
+            swarm.request_hard_stop(reason=req.reason)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported stop mode: {req.mode}")
+
+        stop_state = getattr(swarm.execution_graph, "stop_state", {})
+        return StopResponse(
+            name=name,
+            mode=req.mode,
+            requested=True,
+            reason=req.reason,
+            stop_state=dict(stop_state),
         )
 
     @app.get("/swarms/{name}/graph", response_model=GraphResponse)

@@ -78,10 +78,16 @@ def create_runtime_slot_tools(manager: RuntimeSlotManager) -> List[Tool]:
             return f"Cannot collect yet: {exc}"
 
     async def _slot_cancel(**kwargs: Any) -> str:
-        """Cancel a running slot."""
+        """Hard-stop a running slot."""
         slot_id = kwargs["slot_id"]
-        ok = await manager.cancel(slot_id)
-        return f"Slot {slot_id} cancel requested: {ok}"
+        ok = await manager.request_hard_stop(slot_id)
+        return f"Slot {slot_id} hard stop requested: {ok}"
+
+    async def _slot_soft_stop(**kwargs: Any) -> str:
+        """Soft-stop a running slot."""
+        slot_id = kwargs["slot_id"]
+        ok = await manager.request_soft_stop(slot_id)
+        return f"Slot {slot_id} soft stop requested: {ok}"
 
     return [
         Tool(
@@ -122,12 +128,22 @@ def create_runtime_slot_tools(manager: RuntimeSlotManager) -> List[Tool]:
         ),
         Tool(
             name="slot_cancel",
-            description="Cancel a running background slot.",
+            description="Hard-stop a running background slot.",
             parameters={
                 "type": "object",
                 "properties": {"slot_id": {"type": "string"}},
                 "required": ["slot_id"],
             },
             handler=_slot_cancel,
+        ),
+        Tool(
+            name="slot_soft_stop",
+            description="Soft-stop a running background slot.",
+            parameters={
+                "type": "object",
+                "properties": {"slot_id": {"type": "string"}},
+                "required": ["slot_id"],
+            },
+            handler=_slot_soft_stop,
         ),
     ]

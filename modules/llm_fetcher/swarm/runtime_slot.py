@@ -50,6 +50,7 @@ class RuntimeSlot:
     result: Any = None
     error: Optional[str] = None
     timeout: Optional[float] = None
+    stop_requested: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -69,6 +70,7 @@ class RuntimeSlot:
             "result": str(self.result)[:500] if self.result is not None else None,
             "error": self.error,
             "timeout": self.timeout,
+            "stop_requested": self.stop_requested,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
@@ -173,6 +175,17 @@ class RuntimeSlotManager:
                 else:
                     result = await coro
 
+            if slot.stop_requested is not None:
+                slot.status = SlotStatus.CANCELLED
+                if slot.stop_requested == "soft":
+                    slot.error = "Soft stop requested"
+                elif slot.stop_requested == "hard":
+                    slot.error = "Hard stop requested"
+                else:
+                    slot.error = "Stopped"
+                slot.completed_at = datetime.now(timezone.utc).isoformat()
+                return
+
             slot.result = result
             slot.status = SlotStatus.COMPLETED
             slot.completed_at = datetime.now(timezone.utc).isoformat()
@@ -200,7 +213,12 @@ class RuntimeSlotManager:
 
         except asyncio.CancelledError:
             slot.status = SlotStatus.CANCELLED
-            slot.error = "Cancelled by user/system"
+            if slot.stop_requested == "soft":
+                slot.error = "Soft stop requested"
+            elif slot.stop_requested == "hard":
+                slot.error = "Hard stop requested"
+            else:
+                slot.error = "Cancelled by user/system"
             slot.completed_at = datetime.now(timezone.utc).isoformat()
             raise  # propagate cancellation
 
@@ -282,13 +300,50 @@ class RuntimeSlotManager:
         self._slots.pop(slot_id, None)
         return result
 
-    async def cancel(self, slot_id: str) -> bool:
-        """Cancel a running slot. Returns True if cancelled."""
+    async def request_soft_stop(self, slot_id: str) -> bool:
+        """Request a soft stop for a running slot.
+
+        Soft stop is cooperative: we cancel the task and wait for it to unwind
+        so the coroutine has a chance to clean up before the manager returns.
+        """
+        if slot_id not in self._slots:
+            raise KeyError(f"Slot {slot_id} not found")
+        slot = self._slots[slot_id]
         task = self._tasks.get(slot_id)
         if task is None:
             return False
+        slot.stop_requested = "soft"
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return True
+
+    async def request_hard_stop(self, slot_id: str) -> bool:
+        """Request a hard stop for a running slot.
+
+        Hard stop is immediate from the manager's perspective: the task is
+        cancelled and this method returns without waiting for it to unwind.
+        """
+        if slot_id not in self._slots:
+            raise KeyError(f"Slot {slot_id} not found")
+        slot = self._slots[slot_id]
+        task = self._tasks.get(slot_id)
+        if task is None:
+            return False
+        slot.stop_requested = "hard"
         task.cancel()
         return True
+
+    async def cancel(self, slot_id: str) -> bool:
+        """Cancel a running slot. Alias for hard stop."""
+        return await self.request_hard_stop(slot_id)
+
+    async def soft_stop(self, slot_id: str) -> bool:
+        """Alias for request_soft_stop."""
+        return await self.request_soft_stop(slot_id)
+
+    async def hard_stop(self, slot_id: str) -> bool:
+        """Alias for request_hard_stop."""
+        return await self.request_hard_stop(slot_id)
 
     # ------------------------------------------------------------------
     # Snapshot
