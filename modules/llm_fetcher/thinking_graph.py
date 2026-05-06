@@ -1,11 +1,12 @@
 import asyncio
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Dict, Tuple, Set, Optional, Any
 from collections import defaultdict
 from numbers import Real
 import math
+from datetime import datetime, timezone
 
 class ThinkingNodeType(str, Enum):
     GOAL = "goal"                    # 总目标
@@ -59,6 +60,23 @@ class ThinkingGraphEdge(ThinkingGraphObject):
     source_id: int                   # 起始 ID
     target_id: int                     # 结束点 ID
     strength: float                 # 链接力度
+
+
+@dataclass
+class ThinkingGraphTransactionRecord:
+    """单次思考图变更记录。"""
+
+    transaction_id: int
+    operation: str
+    object_kind: str
+    object_id: int
+    before: Optional[Dict[str, Any]] = None
+    after: Optional[Dict[str, Any]] = None
+    version_before: int = 0
+    version_after: int = 0
+    created_by: str = "system"
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 # 边缘分组：规定某种边只允许连接特定类型的起点和终点。
@@ -303,6 +321,8 @@ class ThinkingGraph:
 
         # 图版本    
         self._version: int = 0
+        self._transaction_id: int = 0
+        self._transaction_log: List[ThinkingGraphTransactionRecord] = []
 
         # 锁
         self._lock = asyncio.Lock()
@@ -322,6 +342,11 @@ class ThinkingGraph:
         """
         return self._version
 
+    @property
+    def transaction_log(self) -> List[ThinkingGraphTransactionRecord]:
+        """返回只读事务日志快照。"""
+        return list(self._transaction_log)
+
     def to_dict(self) -> Dict[str, Any]:
         """
         将图全量序列化为字典。
@@ -339,6 +364,8 @@ class ThinkingGraph:
             "version": self._version,
             "node_count": len(self.node_dict),
             "edge_count": len(self.edge_dict),
+            "transaction_count": len(self._transaction_log),
+            "last_transaction_id": self._transaction_log[-1].transaction_id if self._transaction_log else None,
         }
 
     async def get_full_graph(self) -> Dict[str, Any]:
@@ -348,6 +375,57 @@ class ThinkingGraph:
         """
         async with self._lock:
             return self.to_dict()
+
+    @staticmethod
+    def _snapshot_object(obj: Optional[Any]) -> Optional[Dict[str, Any]]:
+        if obj is None:
+            return None
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        if isinstance(obj, dict):
+            return dict(obj)
+        return {"value": obj}
+
+    def _next_transaction_id(self) -> int:
+        tx_id = self._transaction_id
+        self._transaction_id += 1
+        return tx_id
+
+    def _record_transaction(
+        self,
+        *,
+        operation: str,
+        object_kind: str,
+        object_id: int,
+        before: Optional[Any],
+        after: Optional[Any],
+        created_by: str,
+        version_before: int,
+        version_after: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> ThinkingGraphTransactionRecord:
+        record = ThinkingGraphTransactionRecord(
+            transaction_id=self._next_transaction_id(),
+            operation=operation,
+            object_kind=object_kind,
+            object_id=object_id,
+            before=self._snapshot_object(before),
+            after=self._snapshot_object(after),
+            version_before=version_before,
+            version_after=version_after,
+            created_by=created_by,
+            metadata=dict(metadata or {}),
+        )
+        self._transaction_log.append(record)
+        return record
+
+    def clear_transaction_log(self) -> None:
+        """清空事务日志。"""
+        self._transaction_log.clear()
+
+    def get_transaction_log(self) -> List[ThinkingGraphTransactionRecord]:
+        """返回事务日志快照。"""
+        return list(self._transaction_log)
 
     @staticmethod
     def validate_edge_schema() -> None:
@@ -425,6 +503,7 @@ class ThinkingGraph:
 
         async with self._lock:
 
+            version_before = self._version
             node_id = self._alloc_id()
             node = ThinkingGraphNode(
                 id=node_id,
@@ -440,6 +519,19 @@ class ThinkingGraph:
             # 添加节点。
             self.node_dict[node_id] = node
             self._version += 1
+            self._record_transaction(
+                operation="add_node",
+                object_kind="node",
+                object_id=node_id,
+                before=None,
+                after=node,
+                created_by=created_by,
+                version_before=version_before,
+                version_after=self._version,
+                metadata={
+                    "node_type": node_type.value,
+                },
+            )
             return node_id
 
     async def _validate_node_input(
@@ -522,6 +614,7 @@ class ThinkingGraph:
 
         # 开始写入，上锁。
         async with self._lock:
+            version_before = self._version
             source_node = self.node_dict.get(source_id)
             target_node = self.node_dict.get(target_id)
 
@@ -554,8 +647,193 @@ class ThinkingGraph:
             )
             self.edge_dict[edge_id] = edge
             self._version += 1
+            self._record_transaction(
+                operation="add_edge",
+                object_kind="edge",
+                object_id=edge_id,
+                before=None,
+                after=edge,
+                created_by=created_by,
+                version_before=version_before,
+                version_after=self._version,
+                metadata={
+                    "edge_type": edge_type.value,
+                    "source_id": source_id,
+                    "target_id": target_id,
+                },
+            )
 
         return edge_id
+
+    async def modify_node(
+        self,
+        node_id: int,
+        *,
+        node_type: Optional[ThinkingNodeType] = None,
+        info: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        created_by: Optional[str] = None,
+        confidence: Optional[float] = None,
+        description: Optional[str] = None,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> ThinkingGraphNode:
+        """
+        修改现有节点的字段。
+
+        未传入的字段保持不变。修改会在写锁内完成，并在提交后递增版本号。
+        """
+        async with self._lock:
+            version_before = self._version
+            node = self.node_dict.get(node_id)
+            if node is None:
+                raise KeyError(f"Node {node_id} does not exist.")
+
+            new_node_type = node_type if node_type is not None else node.node_type
+            new_info = info if info is not None else node.info
+            new_tags = list(tags) if tags is not None else list(node.tags)
+            new_created_by = created_by if created_by is not None else node.created_by
+            new_confidence = confidence if confidence is not None else node.confidence
+            new_description = description if description is not None else node.description
+            new_payload = dict(payload) if payload is not None else dict(node.payload)
+
+            await self._validate_node_input(
+                node_type=new_node_type,
+                info=new_info.strip(),
+                tags=new_tags,
+                created_by=new_created_by,
+                confidence=max(0.0, min(1.0, new_confidence)),
+                payload=new_payload,
+            )
+
+            updated = ThinkingGraphNode(
+                id=node.id,
+                node_type=new_node_type,
+                info=new_info.strip(),
+                tags=new_tags,
+                created_by=new_created_by,
+                confidence=max(0.0, min(1.0, new_confidence)),
+                description=new_description,
+                payload=new_payload,
+            )
+            self.node_dict[node_id] = updated
+            self._version += 1
+            self._record_transaction(
+                operation="modify_node",
+                object_kind="node",
+                object_id=node_id,
+                before=node,
+                after=updated,
+                created_by=new_created_by,
+                version_before=version_before,
+                version_after=self._version,
+                metadata={
+                    "changed_fields": [
+                        name for name, old, new in [
+                            ("node_type", node.node_type, new_node_type),
+                            ("info", node.info, new_info),
+                            ("tags", node.tags, new_tags),
+                            ("created_by", node.created_by, new_created_by),
+                            ("confidence", node.confidence, new_confidence),
+                            ("description", node.description, new_description),
+                            ("payload", node.payload, new_payload),
+                        ]
+                        if old != new
+                    ]
+                },
+            )
+            return updated
+
+    async def modify_edge(
+        self,
+        edge_id: int,
+        *,
+        edge_type: Optional[ThinkingEdgeType] = None,
+        source_id: Optional[int] = None,
+        target_id: Optional[int] = None,
+        created_by: Optional[str] = None,
+        description: Optional[str] = None,
+        strength: Optional[float] = None,
+    ) -> ThinkingGraphEdge:
+        """
+        修改现有边的字段。
+
+        当修改 edge_type 或端点时，会重新校验 schema 合法性。
+        未传入的字段保持不变。
+        """
+        async with self._lock:
+            version_before = self._version
+            edge = self.edge_dict.get(edge_id)
+            if edge is None:
+                raise KeyError(f"Edge {edge_id} does not exist.")
+
+            new_edge_type = edge_type if edge_type is not None else edge.edge_type
+            new_source_id = source_id if source_id is not None else edge.source_id
+            new_target_id = target_id if target_id is not None else edge.target_id
+            new_created_by = created_by if created_by is not None else edge.created_by
+            new_description = description if description is not None else edge.description
+            new_strength = strength if strength is not None else edge.strength
+
+            await self._validate_edge_input(
+                edge_type=new_edge_type,
+                source_id=new_source_id,
+                target_id=new_target_id,
+                created_by=new_created_by,
+                strength=max(0.0, min(1.0, new_strength)),
+            )
+
+            source_node = self.node_dict.get(new_source_id)
+            target_node = self.node_dict.get(new_target_id)
+            if source_node is None:
+                raise KeyError(f"Source node {new_source_id} does not exist.")
+            if target_node is None:
+                raise KeyError(f"Target node {new_target_id} does not exist.")
+
+            if not await self._is_edge_allowed(
+                edge_type=new_edge_type,
+                source_type=source_node.node_type,
+                target_type=target_node.node_type,
+            ):
+                raise ValueError(
+                    "Invalid edge schema: "
+                    f"{source_node.node_type.value} -[{new_edge_type.value}]-> "
+                    f"{target_node.node_type.value}"
+                )
+
+            updated = ThinkingGraphEdge(
+                id=edge.id,
+                edge_type=new_edge_type,
+                source_id=new_source_id,
+                target_id=new_target_id,
+                created_by=new_created_by,
+                description=new_description,
+                strength=max(0.0, min(1.0, new_strength)),
+            )
+            self.edge_dict[edge_id] = updated
+            self._version += 1
+            self._record_transaction(
+                operation="modify_edge",
+                object_kind="edge",
+                object_id=edge_id,
+                before=edge,
+                after=updated,
+                created_by=new_created_by,
+                version_before=version_before,
+                version_after=self._version,
+                metadata={
+                    "changed_fields": [
+                        name for name, old, new in [
+                            ("edge_type", edge.edge_type, new_edge_type),
+                            ("source_id", edge.source_id, new_source_id),
+                            ("target_id", edge.target_id, new_target_id),
+                            ("created_by", edge.created_by, new_created_by),
+                            ("description", edge.description, new_description),
+                            ("strength", edge.strength, new_strength),
+                        ]
+                        if old != new
+                    ]
+                },
+            )
+            return updated
     
     async def _validate_edge_input(
         self,

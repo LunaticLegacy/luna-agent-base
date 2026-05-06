@@ -3,7 +3,7 @@
 from typing import Any, Dict, List, Optional
 
 from ..tool import Tool
-from .runtime_slot import RuntimeSlotManager, SlotStatus
+from ..swarm.runtime_slot import RuntimeSlotManager, SlotStatus
 
 
 def create_runtime_slot_tools(manager: RuntimeSlotManager) -> List[Tool]:

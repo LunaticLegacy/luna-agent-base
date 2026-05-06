@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional
-
-from openai.types.chat import ChatCompletion, ChatCompletionMessage
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .llm_fetcher import LLMFetcher
 from .llm_context import LLMContext, LLMContextHandler, LLMContextPair
 from .tool import Tool, ToolRegistry
 from .tools.builtin_tools import create_builtin_tools
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from openai.types.chat import ChatCompletion, ChatCompletionMessage
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,9 @@ class Agent:
         """初始化Agent，绑定LLM处理器、系统提示词和可选工具列表。"""
         self._base_system_prompt: str = system_prompt
         self.memory_list: List[str] = []
-        self.llm_context_hanlder = LLMContextHandler(llm_handler=self.llm_handler)
+        self.llm_handler = llm_handler
+        self.llm_context_handler = LLMContextHandler(llm_handler=self.llm_handler)
+        self.llm_context_hanlder = self.llm_context_handler
         self.tool_registry = ToolRegistry()
 
         # 注册内嵌工具（round_end 等），供 LLM 控制轮次生命周期
@@ -101,6 +104,7 @@ class Agent:
         # 建立本轮输入内容
         messages: Messages = await self._build_round_messages(msg)
         final_content: str = ""
+        last_turn_content: str = ""
 
         turn: int
         for turn in range(1, max_turns + 1):
@@ -117,6 +121,7 @@ class Agent:
             # 解析消息内容
             message: ChatCompletionMessage = response.choices[0].message
             content: str = message.content or ""
+            last_turn_content = content
             tool_calls: List[Dict[str, Any]] = self._parse_json_tool_calls(content)
 
             if verbose_info:
@@ -124,7 +129,6 @@ class Agent:
 
             # ---- 情况 A：无工具调用，说明 LLM 已给出最终回复 ----
             if not tool_calls:
-                final_content = content
                 break
 
             # ---- 情况 B：有 JSON 工具调用，执行工具并继续下一轮 ----
@@ -146,43 +150,55 @@ class Agent:
 
             # ---- 情况 C：LLM 主动 round_end，保存本轮 content 并停止 ----
             if has_round_end:
-                final_content = content
                 break
         else:
             # 达到 max_turns，取最后一轮 content（可能为空）
-            final_content = content
+            last_turn_content = last_turn_content or ""
 
         # ---- 兜底：无论 final_content 是否有内容，都强制获取最终回复 ----
         if verbose_info:
-            if not final_content.strip():
+            if not last_turn_content.strip():
                 print("[Agent] final_content 为空，发起兜底总结调用...")
             else:
                 print("[Agent] 发起最终总结调用...")
+        
         # 在 messages 末尾追加一条引导，让 LLM 输出最终回复
         fallback_messages: Messages = messages.copy()
         fallback_messages.append({
             "role": "user",
             "content": "请基于以上内容给出你的最终回复。",
         })
-        fallback_resp: ChatCompletion = self.llm_handler.fetch_stream(
-            msg="",
-            system_prompt=None,
-            prev_messages=fallback_messages,
-            tools=None,
-        )
-
-        async for char in fallback_resp:
-            print(char, end="", flush=True)
+        if stream:
+            chunks: List[str] = []
+            async for chunk in self.llm_handler.fetch_stream(
+                msg="",
+                system_prompt=None,
+                prev_messages=fallback_messages,
+                tools=None,
+            ):
+                chunks.append(chunk)
+                print(chunk, end="", flush=True)
+            final_content = "".join(chunks).strip()
+        else:
+            fallback_resp: ChatCompletion = await self.llm_handler.fetch(
+                msg="",
+                system_prompt=None,
+                prev_messages=fallback_messages,
+                tools=None,
+            )
+            final_content = fallback_resp.choices[0].message.content or last_turn_content
+            if verbose_info and not final_content.strip():
+                print("[Agent] fallback response 为空，保留上一轮内容。")
 
         # ---- 保存上下文 ----
         await self.llm_context_hanlder.add_context(
             LLMContextPair(
                 LLMContext(role="user", content=msg),
-                LLMContext(role="assistant", content=final_content),
+                LLMContext(role="assistant", content=final_content or last_turn_content),
             )
         )
 
-        return final_content
+        return final_content or last_turn_content
 
     # ------------------------------------------------------------------
     # 内部辅助方法

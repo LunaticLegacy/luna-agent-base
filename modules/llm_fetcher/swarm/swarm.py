@@ -30,6 +30,7 @@ from ..llm_fetcher import LLMFetcher
 from ..thinking_graph import ThinkingGraph
 from ..tool import Tool, ToolRegistry
 from .execution_graph import (
+    AgentNode,
     Edge,
     ExecutionGraph,
     ExecutionNode,
@@ -75,6 +76,8 @@ class AgentSwarm:
         swarm.connect("planner", "writer")
         swarm.connect("writer", "output")
         ctx = await swarm.run("帮我写篇文章", entry_node_id="input")
+    
+    TODO: Use multiple llm fetchers for each agent. Or create Agent Swarm via multiple Agents.
     """
 
     def __init__(
@@ -106,6 +109,104 @@ class AgentSwarm:
         # Runtime tracing (lightweight)
         self._run_count = 0
         self._last_context: Optional[GraphContext] = None
+
+    @classmethod
+    def from_existing(
+        cls,
+        *,
+        execution_graph: ExecutionGraph,
+        agents: Optional[Dict[str, Agent]] = None,
+        llm_fetcher: Optional[LLMFetcher] = None,
+        thinking_graph: Optional[ThinkingGraph] = None,
+        tool_registry: Optional[ToolRegistry] = None,
+        spec: Optional[SwarmSpec] = None,
+        name: str = "default",
+        max_concurrency: Optional[int] = None,
+    ) -> "AgentSwarm":
+        """Build a swarm from existing live objects.
+
+        This constructor is meant for runtime restoration / handoff cases:
+        you already have an ``ExecutionGraph`` and a set of ``Agent`` objects,
+        and want the swarm to adopt them instead of creating fresh ones.
+
+        Args:
+            execution_graph: Existing execution graph to reuse.
+            agents: Optional explicit agent registry. If omitted, agents are
+                inferred from ``execution_graph`` agent nodes.
+            llm_fetcher: Optional shared LLM fetcher. If omitted, the fetcher is
+                inferred from the agents or the existing graph.
+            thinking_graph: Optional shared thinking graph to reuse.
+            tool_registry: Optional existing global tool registry.
+            spec: Optional swarm spec.
+            name: Fallback swarm name when ``spec`` is absent.
+            max_concurrency: Retained for symmetry with ``__init__``; if the
+                existing graph already owns concurrency controls, it is left as is.
+
+        Raises:
+            ValueError: If no LLM fetcher can be resolved from the provided
+                objects.
+        """
+        resolved_agents = cls._merge_existing_agents(execution_graph, agents)
+        resolved_fetcher = llm_fetcher or cls._infer_llm_fetcher(
+            resolved_agents,
+            execution_graph,
+        )
+        if resolved_fetcher is None:
+            raise ValueError(
+                "Unable to infer llm_fetcher from existing agents or execution_graph; "
+                "pass llm_fetcher explicitly."
+            )
+
+        swarm = cls(
+            llm_fetcher=resolved_fetcher,
+            name=spec.name if spec is not None else name,
+            spec=spec,
+            max_concurrency=max_concurrency,
+        )
+
+        # Adopt caller-owned live objects instead of the fresh defaults created
+        # by __init__. We intentionally keep references, not copies.
+        swarm.execution_graph = execution_graph
+        swarm.thinking_graph = thinking_graph or swarm.thinking_graph
+        swarm.tool_registry = tool_registry or swarm.tool_registry
+        swarm._agents = resolved_agents
+        swarm._llm_fetcher = resolved_fetcher
+
+        if thinking_graph is not None:
+            swarm._thinking_tools = None
+        if tool_registry is None:
+            for tool in execution_graph.tool_pool.values():
+                if tool.name not in swarm.tool_registry._tools:
+                    swarm.tool_registry.register(tool)
+
+        # Ensure the reused execution graph also has the resolved fetcher for any
+        # future dynamic node creation / compatibility code paths.
+        execution_graph._llm_fetcher = resolved_fetcher
+        return swarm
+
+    @staticmethod
+    def _merge_existing_agents(
+        execution_graph: ExecutionGraph,
+        agents: Optional[Dict[str, Agent]],
+    ) -> Dict[str, Agent]:
+        merged: Dict[str, Agent] = {}
+        for node_id, node in execution_graph.nodes.items():
+            if isinstance(node, AgentNode):
+                merged[node_id] = node.agent
+        if agents:
+            merged.update(agents)
+        return merged
+
+    @staticmethod
+    def _infer_llm_fetcher(
+        agents: Dict[str, Agent],
+        execution_graph: ExecutionGraph,
+    ) -> Optional[LLMFetcher]:
+        for agent in agents.values():
+            handler = getattr(agent, "llm_handler", None)
+            if handler is not None:
+                return handler
+        return getattr(execution_graph, "_llm_fetcher", None)
 
     # ------------------------------------------------------------------
     # Properties

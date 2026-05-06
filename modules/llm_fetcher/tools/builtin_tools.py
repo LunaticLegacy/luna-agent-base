@@ -1,6 +1,6 @@
 """Built-in tools for Agent lifecycle management."""
 
-from typing import List
+from typing import Any, List
 
 from ..tool import Tool
 

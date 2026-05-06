@@ -79,8 +79,7 @@ async def _obscura_fetch_cli(**kwargs: Any) -> Dict[str, Any]:
 
 async def _obscura_scrape_cli(**kwargs: Any) -> Dict[str, Any]:
     """Batch scraping via CLI.
-
-    Recompiled obscura includes obscura-worker; batch mode is now available.
+    
     """
     urls = kwargs.get("urls", [])
     if isinstance(urls, str):
@@ -157,7 +156,8 @@ def create_obscura_tools() -> List[Tool]:
             description=(
                 "Fetch a single webpage using a headless browser and extract content. "
                 "Supports html/text/links output modes, CSS selectors, JavaScript evaluation, "
-                "and stealth mode."
+                "and stealth mode. "
+                "This beorser is the FASTEST headless browser for you to fetch a URL."
             ),
             parameters={
                 "type": "object",
