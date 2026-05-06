@@ -1,31 +1,11 @@
 [app]
 swarm_root = "agents"
 
-[app.memory_graph]
-enabled = true
-max_context_nodes = 6
-pack_keep_recent = 2
-enable_usage_trace = true
-enable_candidate_memory = true
-
 [api]
-base_url = "/api"
+base_url = "http://127.0.0.1:8899/api"
 timeout_seconds = 120
 sse_reconnect_interval_seconds = 5
 auto_reconnect = true
 require_auth = false
 api_token_env = "ANGELUS_API_TOKEN"
 cors_allowed_origins = ["http://localhost:4200", "http://127.0.0.1:4200", "http://localhost:5173", "http://127.0.0.1:5173"]
-
-[runtime.concurrency]
-max_parallel_llm_calls = 5
-max_parallel_tool_calls = 10
-max_parallel_branches = 3
-
-[runtime.branch_retry]
-max_retries = 4
-backoff_ms = 1000
-backoff_multiplier = 2.0
-retry_policy = "full_branch"
-
-
