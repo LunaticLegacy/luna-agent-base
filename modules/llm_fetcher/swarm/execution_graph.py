@@ -552,9 +552,32 @@ class ExecutionGraph:
         """Set the exit node."""
         pass  # exit is auto-detected
 
-    # --- 序列化 ---
+    # --- 序列化 / 反序列化 ---
+
+    def snapshot(self) -> Dict[str, Any]:
+        """Return a pure-data snapshot of the graph's *current state*.
+
+        Only captures what ExecutionGraph itself owns:
+        node topology, edges, timeouts, and tool pool names.
+        Agent internals (system_prompt, tools, etc.) are **not** saved here —
+        that is the responsibility of the layer above (e.g. AgentSwarm).
+        """
+        return {
+            "version": "1",
+            "nodes": {
+                nid: {"type": n.node_type}
+                for nid, n in self._nodes.items()
+            },
+            "edges": [
+                {"source": e.source_id, "target": e.target_id, "label": e.label}
+                for e in self._edges
+            ],
+            "node_timeouts": dict(self._node_timeouts),
+            "tool_names": sorted(self._tool_pool.keys()),
+        }
 
     def to_dict(self) -> Dict[str, Any]:
+        """Lightweight introspection dict (not round-trippable)."""
         return {
             "nodes": {
                 nid: {"type": n.node_type, "id": nid}

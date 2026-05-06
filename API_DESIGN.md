@@ -64,13 +64,9 @@ swarm.add_edge("critic", "outline", label="revise")  # 循环修订
 ### 运行
 
 ```python
-# 直接运行：输入 → 图执行 → 输出
+# 运行：输入 → 图执行 → 输出
 result = await swarm.run("写一首关于秋天的诗")
 print(result)  # str
-
-# 流式运行
-async for chunk in swarm.run_stream("写一首诗"):
-    print(chunk, end="")
 
 # 带上下文的运行
 result = await swarm.run("写第二章", context={"chapter": 2, "style": "古龙"})
@@ -96,8 +92,7 @@ swarm = Swarm.from_package("agents/novelist")
 | `GET /swarms` | 列出已加载的 swarm | `{swarms: [{name, agent_count, tool_count}]}` |
 | `POST /swarms/load` | 加载 swarm | `{source: "path/to/swarm.toml"}` → `{name, id}` |
 | `DELETE /swarms/{name}` | 卸载 swarm | |
-| `POST /swarms/{name}/run` | 执行 | `{input: "...", context?: {...}}` → `{output, trace}` |
-| `POST /swarms/{name}/run/stream` | SSE 流式执行 | 逐个输出 token |
+| `POST /swarms/{name}/run` | SSE 流式执行 | `{input: "...", context?: {...}}` → `event: start → result → done` |
 | `GET /swarms/{name}/graph` | 获取图结构 | 节点 + 边 |
 | `GET /swarms/{name}/history` | 运行历史 | 最近 N 次运行的 input/output |
 

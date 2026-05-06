@@ -1,26 +1,29 @@
-"""Angelus 内置工具聚合模块。
+"""Angelus built-in tools package.
 
-本模块统一导入并导出项目预置的核心工具单例，
-方便上层注册器一次性加载全部可用工具。
-
-导出内容：
-    - ``AGENT_MANAGER_TOOL``: Agent 生命周期管理工具。
-    - ``ECHO_TOOL``: 调试回显工具。
-    - ``FILE_WRITER_TOOL``: 文件写入工具。
-    - ``GRAPH_EDITOR_TOOL``: 执行图编辑工具。
-    - ``WEB_SEARCH_TOOL``: 网络搜索工具。
+All tools follow the ``llm_fetcher/tools`` format: each module exports a
+``create_*_tools()`` factory that returns a list of :class:`modules.llm_fetcher.tool.Tool`.
 """
 
-from .agent_manager_tool import TOOL as AGENT_MANAGER_TOOL
-from .echo_tool import TOOL as ECHO_TOOL
-from .file_writer_tool import TOOL as FILE_WRITER_TOOL
-from .graph_editor_tool import TOOL as GRAPH_EDITOR_TOOL
-from .web_search_tool import TOOL as WEB_SEARCH_TOOL
+from .agent_manager_tool import create_agent_manager_tools
+from .command_runner_tool import create_command_runner_tools
+from .echo_tool import create_echo_tools
+from .file_editor_tool import create_file_editor_tools
+from .file_reader_tool import create_file_reader_tools
+from .file_writer_tool import create_file_writer_tools
+from .graph_editor_tool import create_graph_editor_tools
+from .output_repair_tool import create_output_repair_tools
+from .search_tool import create_search_tools
+from .web_search_tool import create_web_search_tools
 
 __all__ = [
-    "AGENT_MANAGER_TOOL",
-    "ECHO_TOOL",
-    "FILE_WRITER_TOOL",
-    "GRAPH_EDITOR_TOOL",
-    "WEB_SEARCH_TOOL",
+    "create_agent_manager_tools",
+    "create_command_runner_tools",
+    "create_echo_tools",
+    "create_file_editor_tools",
+    "create_file_reader_tools",
+    "create_file_writer_tools",
+    "create_graph_editor_tools",
+    "create_output_repair_tools",
+    "create_search_tools",
+    "create_web_search_tools",
 ]

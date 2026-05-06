@@ -22,7 +22,9 @@ its shared memory.*
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from ..agent import Agent
@@ -76,8 +78,7 @@ class AgentSwarm:
         swarm.connect("planner", "writer")
         swarm.connect("writer", "output")
         ctx = await swarm.run("帮我写篇文章", entry_node_id="input")
-    
-    TODO: Use multiple llm fetchers for each agent. Or create Agent Swarm via multiple Agents.
+
     """
 
     def __init__(
@@ -87,6 +88,10 @@ class AgentSwarm:
         spec: Optional[SwarmSpec] = None,
         max_concurrency: Optional[int] = None,
     ) -> None:
+        """
+        Args:
+            max_concurrency: Set the max concurrency of execution.
+        """
         self._llm_fetcher = llm_fetcher
         self._spec = spec or SwarmSpec(name=name)
         self._name = self._spec.name
@@ -434,9 +439,146 @@ class AgentSwarm:
     # Introspection
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save(self, path: str | Path) -> None:
+        """Persist the swarm's current state to disk.
+
+        The snapshot is pure data (no callables).  ExecutionGraph state and
+        ThinkingGraph state are stored separately so each layer only saves
+        what it owns.
+        """
+        path = Path(path)
+        # Agent configurations are saved at the swarm level, not inside
+        # ExecutionGraph.snapshot(), because ExecutionGraph only owns topology.
+        agent_configs: Dict[str, Dict[str, Any]] = {}
+        for nid, agent in self._agents.items():
+            tool_names = sorted(agent.tool_registry._tools.keys())
+            builtin = {"round_end"}
+            agent_configs[nid] = {
+                "system_prompt": agent._base_system_prompt,
+                "tool_names": [n for n in tool_names if n not in builtin],
+            }
+
+        payload = {
+            "spec": {
+                "name": self._spec.name,
+                "description": self._spec.description,
+                "version": self._spec.version,
+                "metadata": dict(self._spec.metadata),
+            },
+            "execution_graph": self.execution_graph.snapshot(),
+            "thinking_graph": self.thinking_graph.to_dict(),
+            "agents": agent_configs,
+            "run_count": self._run_count,
+        }
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(
+        cls,
+        path: str | Path,
+        llm_fetcher: LLMFetcher,
+        tool_pool: Optional[Dict[str, Tool]] = None,
+    ) -> "AgentSwarm":
+        """Restore a swarm from a snapshot file.
+
+        Args:
+            path: Path written by :meth:`save`.
+            llm_fetcher: Fresh LLM backend to wire into restored agents.
+            tool_pool: Optional mapping of tool_name -> :class:`Tool` for
+                rebuilding agent toolsets and tool nodes.
+
+        Returns:
+            A fully reconstructed :class:`AgentSwarm`.
+        """
+        path = Path(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+        spec_data = data.get("spec", {})
+        spec = SwarmSpec(
+            name=spec_data.get("name", "restored"),
+            description=spec_data.get("description", ""),
+            version=spec_data.get("version", "0.1.0"),
+            metadata=dict(spec_data.get("metadata", {})),
+        )
+
+        swarm = cls(llm_fetcher=llm_fetcher, spec=spec)
+        swarm._run_count = data.get("run_count", 0)
+
+        # Pre-register tools
+        if tool_pool:
+            for tool in tool_pool.values():
+                swarm.add_tool(tool)
+
+        # Rebuild agents from swarm-level config, then add to graph
+        agents_cfg = data.get("agents", {})
+        for nid, cfg in agents_cfg.items():
+            tool_names = cfg.get("tool_names", [])
+            agent_tools = [swarm.tool_registry._tools[n] for n in tool_names if n in swarm.tool_registry._tools]
+            swarm.add_agent(
+                node_id=nid,
+                system_prompt=cfg.get("system_prompt", ""),
+                extra_tools=agent_tools if agent_tools else None,
+            )
+
+        # Restore remaining graph topology (edges, non-agent nodes, timeouts)
+        graph_data = data.get("execution_graph")
+        if graph_data:
+            # Re-create non-agent nodes from the snapshot
+            for nid, cfg in graph_data.get("nodes", {}).items():
+                if nid in swarm.execution_graph.nodes:
+                    continue  # agent node already created above
+                ntype = cfg.get("type")
+                if ntype == "tool":
+                    tname = cfg.get("tool_name", "")
+                    if tname in swarm.tool_registry._tools:
+                        swarm.execution_graph.add_tool_node(
+                            swarm.tool_registry._tools[tname], node_id=nid
+                        )
+                elif ntype == "router":
+                    routes = dict(cfg.get("routes", {}))
+                    default_route = cfg.get("default_route")
+                    swarm.execution_graph.add_router_node(
+                        routes=routes,
+                        default_route=default_route,
+                        node_id=nid,
+                    )
+                elif ntype == "input":
+                    swarm.execution_graph.add_input_node(node_id=nid)
+                elif ntype == "output":
+                    swarm.execution_graph.add_output_node(node_id=nid)
+                elif ntype == "join":
+                    swarm.execution_graph.add_join_node(
+                        strategy=cfg.get("strategy", "all"),
+                        node_id=nid,
+                    )
+
+            # Wire edges
+            for edge_cfg in graph_data.get("edges", []):
+                swarm.execution_graph.connect(
+                    edge_cfg["source"],
+                    edge_cfg["target"],
+                    edge_cfg.get("label"),
+                )
+
+            # Restore timeouts
+            for nid, seconds in graph_data.get("node_timeouts", {}).items():
+                swarm.execution_graph.set_node_timeout(nid, seconds)
+
+        return swarm
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
+
     def to_dict(self) -> Dict[str, Any]:
-        """Snapshot of the swarm (not fully round-trippable because Agents
-        carry live callables, but good for debugging / UI display)."""
+        """Lightweight snapshot for debugging / UI display (not round-trippable)."""
         return {
             "spec": {
                 "name": self._spec.name,
