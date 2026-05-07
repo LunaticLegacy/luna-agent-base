@@ -11,6 +11,7 @@
 - `joinUrl(baseUrl, path) -> string`
   - Normalizes API paths.
   - If `baseUrl` is empty, returns root-relative paths such as `/health`.
+  - Legacy `/api` base URLs are normalized away, including trailing-slash and full-URL variants.
 
 - `index(baseUrl = '') -> Promise<ApiIndexResponse>`
   - Synthesizes a root index from `/health` and `/swarms`.
@@ -51,6 +52,7 @@
 - `loadSettings()`
   - Reads local settings and normalizes the API base URL.
   - Uses empty-string base URLs by default, which maps to root-relative backend paths.
+  - Migrates stale `/api`-style localStorage values to the new root-relative form.
 
 - `baseUrl() -> string`
   - Returns the current API base URL, defaulting to `''`.

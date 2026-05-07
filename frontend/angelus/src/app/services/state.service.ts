@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ApiService, joinUrl } from '../api.service';
+import { ApiService, joinUrl, normalizeApiBaseUrl as normalizeApiBaseUrlInput } from '../api.service';
 import type {
   AgentCatalogItem,
   ApiIndexResponse,
@@ -341,8 +341,7 @@ export class StateService {
   private readonly LS_PREFIX = 'angelus_';
 
   private normalizeApiBaseUrl(value: string): string {
-    const trimmed = value.trim();
-    return trimmed === '/api' ? '' : trimmed;
+    return normalizeApiBaseUrlInput(value);
   }
 
   readonly totalAgents = computed(() => this.swarms().reduce((sum, s) => sum + s.agent_count, 0));
@@ -1065,7 +1064,16 @@ export class StateService {
   }
 
   loadSettings(): void {
-    this.apiBaseUrl.set(this.normalizeApiBaseUrl(this._loadString('apiBaseUrl', '')));
+    const storedApiBaseUrl = this._loadString('apiBaseUrl', '');
+    const normalizedApiBaseUrl = this.normalizeApiBaseUrl(storedApiBaseUrl);
+    this.apiBaseUrl.set(normalizedApiBaseUrl);
+    if (storedApiBaseUrl.trim() !== normalizedApiBaseUrl) {
+      try {
+        localStorage.setItem(`${this.LS_PREFIX}apiBaseUrl`, normalizedApiBaseUrl);
+      } catch {
+        // localStorage may be unavailable in some environments
+      }
+    }
     this.apiTimeout.set(this._loadNumber('apiTimeout', 30));
     this.reconnectInterval.set(this._loadNumber('reconnectInterval', 5));
     this.autoReconnect.set(this._loadBool('autoReconnect', true));
@@ -2456,7 +2464,7 @@ this.loadLogs(),
         return trimmedUrl;
       }
       if (trimmedUrl.startsWith('/api/')) {
-        return trimmedUrl;
+        return trimmedUrl.replace(/^\/api(?=\/|$)/i, '') || '/';
       }
       const normalizedBase = this.baseUrl().replace(/\/$/, '');
       return `${normalizedBase}${trimmedUrl.startsWith('/') ? trimmedUrl : `/${trimmedUrl}`}`;

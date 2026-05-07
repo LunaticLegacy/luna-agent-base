@@ -41,9 +41,29 @@ import type {
   RuntimeSwarmSummary,
 } from './api.types';
 
+export function normalizeApiBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const stripped = trimmed.replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(stripped)) {
+    try {
+      const parsed = new URL(stripped);
+      parsed.pathname = parsed.pathname.replace(/\/api$/i, '');
+      return parsed.toString().replace(/\/+$/, '');
+    } catch {
+      return stripped.replace(/\/api$/i, '');
+    }
+  }
+
+  return stripped.replace(/\/api$/i, '');
+}
+
 export function joinUrl(baseUrl: string, path: string): string {
-  const normalizedInput = baseUrl.trim();
-  const base = normalizedInput === '/api' ? '' : normalizedInput || '';
+  const normalizedInput = normalizeApiBaseUrl(baseUrl);
+  const base = normalizedInput || '';
   const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base;
   if (!path) {
     return normalizedBase;
