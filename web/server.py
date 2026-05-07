@@ -59,8 +59,10 @@ class LoadSwarmResponse(BaseModel):
 
 
 class RunRequest(BaseModel):
-    input: str
+    input: Any
     context: Optional[Dict[str, Any]] = None
+    rounds: Optional[int] = None
+    meta_mode: Optional[bool] = None
 
 
 class StopRequest(BaseModel):

@@ -24,7 +24,7 @@
 
 - Describes one discovered agent package.
 - `valid=True` records packages that passed manifest/path checks.
-- `swarm` is a placeholder `AgentSwarm` during startup inventory, and a fully built runtime swarm when loaded through the explicit load path.
+- `swarm` is a fully built runtime swarm when the manifest exposes a usable `llm.default` block; invalid packages are kept as records with `swarm=None`.
 
 ### `Core`
 
@@ -54,7 +54,7 @@
 
 - `initialize_agent_packages(swarm_root="agents") -> Dict[str, List[AgentPackageRecord]]`
   - Startup inventory pass.
-  - Reads manifests, checks required package files, creates `workspace/` folders, and registers placeholder swarms for valid packages.
+  - Reads manifests, checks required package files, creates `workspace/` folders, and registers fully configured swarms for valid packages.
   - Splits results into `valid` and `invalid`.
 
 - `load_swarm_from_source(source) -> AgentPackageRecord`
@@ -110,7 +110,7 @@
   - Alias for `from_dict(data)`.
 
 - `_resolve_fetcher_from_manifest(manifest, fallback_name) -> Optional[LLMFetcher]`
-  - Builds an `LLMFetcher` from `[llm.default]`.
+  - Builds an `LLMFetcher` from `[llm.default]` only when both `api_url` and `model` are present.
   - `llm.default.name` is optional; if omitted, the backend id falls back to the package/swarm name.
 
 - `_resolve_api_key(expr) -> str`
@@ -140,6 +140,7 @@
 - `load_swarm`, `unload_swarm`, `run_swarm`, `stop_swarm`, `get_execution_graph`, `get_thinking_graph`, `get_graph`, `get_thought_graph`, `get_history`
   - Route handlers that operate on the global `Core` registry.
   - `run_swarm` records run history and streams SSE events.
+  - `POST /swarms/{name}/run` accepts a JSON `input` payload and optional `rounds` / `meta_mode` compatibility fields from the frontend.
 
 ## `app.py`
 
@@ -165,5 +166,6 @@
 
 - Every agent package should keep its default workspace at `<package>/workspace/`.
 - `llm.default.name` is no longer required in `swarm.toml`.
+- `llm.default.api_url` and `llm.default.model` are required for a package to be considered valid at startup.
 - Existing packages can still use a package-level `name`, but backend naming is now derived when needed.
 - `GET /swarms/{name}/graph` remains as a compatibility alias for `execution_graph`, while `GET /swarms/{name}/thinking_graph` and `GET /swarms/{name}/thought-graph` expose the serialized thinking graph.

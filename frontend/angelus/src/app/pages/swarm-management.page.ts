@@ -4,7 +4,6 @@ import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
-import type { GraphSnapshot } from '../api.types';
 import { THOUGHT_NODE_LEGEND_ENTRIES, THOUGHT_RELATION_LEGEND_ENTRIES } from '../thought-graph.taxonomy';
 import { JsonViewerComponent } from '../json-viewer.component';
 import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent, ModalComponent } from '../shared';
@@ -73,10 +72,10 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       @switch (activeTab()) {
         @case ('概览') {
 
-      <!-- Agent Graph Canvas -->
+      <!-- Execution Graph Canvas -->
       <div class="topology-canvas">
         <div class="panel-header">
-          <h3>Agent 图</h3>
+          <h3>执行图</h3>
           <div class="panel-actions">
             <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
           </div>
@@ -85,7 +84,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
           @if (state.resolvedGraph()) {
             <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
           } @else {
-            <app-empty-state message="暂无 Agent 图数据"></app-empty-state>
+            <app-empty-state message="暂无执行图数据"></app-empty-state>
           }
         </div>
       </div>
@@ -93,7 +92,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       <!-- Main Content Grid -->
       <div class="main-grid">
         <!-- Left: Node Type Legend -->
-        <app-panel-card title="Agent 图例" [noPadding]="true">
+        <app-panel-card title="执行图例" [noPadding]="true">
           <div class="legend-list">
             @for (item of state.topologyLegendItems(); track item.label) {
               <div class="legend-item">
@@ -218,12 +217,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
 
       </div>
         }
-        @case ('Agent 图') {
+        @case ('执行图') {
           <div class="topology-shell topology-fullscreen">
             <div class="panel-header topology-header">
               <div>
-                <h3>Agent 图</h3>
-                <p class="panel-subtitle">展示当前 swarm 的 Agent 节点、路由关系和活跃路径。</p>
+                <h3>执行图</h3>
+                <p class="panel-subtitle">展示当前 swarm 的执行拓扑、路由关系和活跃路径。</p>
               </div>
               <div class="panel-actions">
                 <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
@@ -235,12 +234,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                   @if (state.resolvedGraph()) {
                     <app-graph-viewer [graph]="state.resolvedGraph()" [activeNodeId]="state.activeRunNodeId()"></app-graph-viewer>
                   } @else {
-                    <app-empty-state message="暂无 Agent 图数据"></app-empty-state>
+                    <app-empty-state message="暂无执行图数据"></app-empty-state>
                   }
                 </div>
                 <div class="topology-summary-strip">
                   <div class="summary-item">
-                    <span class="summary-label">Agent 节点</span>
+                    <span class="summary-label">执行节点</span>
                     <span class="summary-value">{{ state.resolvedGraph()?.nodes?.length ?? 0 }}</span>
                   </div>
                   <div class="summary-item">
@@ -277,7 +276,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     }
                   </div>
                 </app-panel-card>
-                <app-panel-card title="Agent 节点" [badge]="state.resolvedGraph()?.nodes?.length ?? 0" [noPadding]="true">
+                <app-panel-card title="执行节点" [badge]="state.resolvedGraph()?.nodes?.length ?? 0" [noPadding]="true">
                   <div class="topology-instance-list">
                     @for (node of state.resolvedGraph()?.nodes ?? []; track node.node_id) {
                       <div class="topology-instance-item">
@@ -289,7 +288,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                         <div class="topology-instance-detail">next: {{ node.next_node_ids.length ? node.next_node_ids.join(', ') : 'none' }}</div>
                       </div>
                     } @empty {
-                      <app-empty-state message="暂无 Agent 节点"></app-empty-state>
+                      <app-empty-state message="暂无执行节点"></app-empty-state>
                     }
                   </div>
                 </app-panel-card>
@@ -308,15 +307,6 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                 <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
               </div>
             </div>
-            <app-panel-card title="执行图" [noPadding]="true">
-              <div class="trace-graph-frame">
-                @if (executionGraph()) {
-                  <app-graph-viewer [graph]="executionGraph()" [activeNodeId]="executionGraphActiveNodeId()"></app-graph-viewer>
-                } @else {
-                  <app-empty-state message="当前没有可展示的执行图。"></app-empty-state>
-                }
-              </div>
-            </app-panel-card>
             <div class="trace-layout">
               <app-panel-card title="当前 Run" [noPadding]="true">
                 @if (state.selectedExecutionTrace()?.run; as run) {
@@ -476,15 +466,19 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                 <div class="thought-summary-strip">
                   <div class="summary-item">
                     <span class="summary-label">节点</span>
-                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.nodes?.length ?? 0 }}</span>
+                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.node_count ?? 0 }}</span>
                   </div>
                   <div class="summary-item">
                     <span class="summary-label">边</span>
-                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.edges?.length ?? 0 }}</span>
+                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.edge_count ?? 0 }}</span>
                   </div>
                   <div class="summary-item">
-                    <span class="summary-label">活跃子图</span>
-                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.active_subgraphs?.length ?? 0 }}</span>
+                    <span class="summary-label">事务</span>
+                    <span class="summary-value">{{ state.resolvedThoughtGraph()?.transaction_count ?? 0 }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="summary-label">版本</span>
+                    <span class="summary-value">#{{ state.resolvedThoughtGraph()?.version ?? 0 }}</span>
                   </div>
                 </div>
               </div>
@@ -517,16 +511,16 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                     </div>
                   </div>
                 </app-panel-card>
-                <app-panel-card title="活跃子图" [noPadding]="true">
+                <app-panel-card title="事务日志" [noPadding]="true">
                   <div class="thought-subgraph-list">
-                    @for (subgraph of state.resolvedThoughtGraph()?.active_subgraphs ?? []; track subgraph.subgraph_id) {
+                    @for (record of state.resolvedThoughtGraph()?.transaction_log ?? []; track record.transaction_id) {
                       <div class="thought-subgraph-item">
-                        <div class="thought-subgraph-title">{{ subgraph.purpose || subgraph.subgraph_id }}</div>
-                        <div class="thought-subgraph-meta mono">{{ subgraph.subgraph_id }}</div>
-                        <div class="thought-subgraph-detail">owner: {{ subgraph.owner_agent }} · status: {{ subgraph.status }}</div>
+                        <div class="thought-subgraph-title">{{ record.operation }} · {{ record.object_kind }}</div>
+                        <div class="thought-subgraph-meta mono">TX {{ record.transaction_id }} · OBJ {{ record.object_id }}</div>
+                        <div class="thought-subgraph-detail">{{ record.created_by }} · v{{ record.version_before }} → v{{ record.version_after }} · {{ record.timestamp }}</div>
                       </div>
                     } @empty {
-                      <app-empty-state message="暂无活跃子图"></app-empty-state>
+                      <app-empty-state message="暂无事务记录"></app-empty-state>
                     }
                   </div>
                 </app-panel-card>
@@ -1537,13 +1531,11 @@ export class SwarmManagementPageComponent {
   readonly state = inject(StateService);
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
-  readonly tabs = ['概览', 'Agent 图', '执行轨迹', '思维图谱', 'Agents', '后台任务', '知识', '记忆', '设置'];
+  readonly tabs = ['概览', '执行图', '执行轨迹', '思维图谱', 'Agents', '后台任务', '知识', '记忆', '设置'];
   readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
   readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
   readonly selectedEvent = signal<any>(null);
   readonly eventDetailTab = signal<'structured' | 'raw' | 'llm_input'>('structured');
-  readonly executionGraph = computed<GraphSnapshot | null>(() => this.buildExecutionGraph());
-  readonly executionGraphActiveNodeId = computed(() => this.resolveExecutionGraphActiveNodeId());
   readonly selectedEventIndex = computed(() => {
     const events = this.state.selectedExecutionTrace()?.events ?? [];
     const ev = this.selectedEvent();
@@ -1642,88 +1634,6 @@ export class SwarmManagementPageComponent {
       (typeof data?.['last_node_name'] === 'string' && data['last_node_name'].trim()) ||
       label;
     return `${index + 1}. ${nodeName}${meta ? ` · ${meta}` : ''}`;
-  }
-
-  private buildExecutionGraph(): GraphSnapshot | null {
-    const trace = this.state.selectedExecutionTrace();
-    const events = trace?.events ?? [];
-    if (events.length === 0) {
-      return null;
-    }
-
-    const nodes = events.map((event, index) => {
-      const label = this.traceEventNodeName(event, index);
-      const status = this.traceEventStatus(event);
-      const data = this.traceEventData(event);
-      const isFirst = index === 0;
-      const isLast = index === events.length - 1;
-      const eventType = this.traceEventLabel(event);
-      return {
-        node_id: index + 1,
-        node_name: label,
-        node_type: isFirst ? 'InputNode' : isLast ? 'OutputNode' : status === 'error' ? 'ErrorNode' : eventType || 'ExecutionNode',
-        next_node_ids: isLast ? [] : [index + 2],
-        metadata: {
-          event_index: index + 1,
-          event_type: eventType,
-          status,
-          timestamp: typeof this.traceEventRecord(event)?.['timestamp'] === 'string'
-            ? String(this.traceEventRecord(event)?.['timestamp'])
-            : null,
-          node_name:
-            (typeof this.traceEventRecord(event)?.['node_name'] === 'string' && String(this.traceEventRecord(event)?.['node_name'])) ||
-            (typeof data?.['node_name'] === 'string' && String(data['node_name'])) ||
-            null,
-        },
-        agent_id: typeof data?.['agent_id'] === 'string' ? data['agent_id'] : undefined,
-        tool_name: typeof data?.['tool_name'] === 'string' ? data['tool_name'] : undefined,
-        input_mapping: null,
-      };
-    });
-
-    return {
-      graph_name: this.state.selectedSwarmName() ? `${this.state.selectedSwarmName()}-execution` : 'execution-trace',
-      graph_kind: 'execution',
-      entry_node_id: nodes[0]?.node_id ?? null,
-      exit_node_id: nodes[nodes.length - 1]?.node_id ?? null,
-      node_count: nodes.length,
-      edge_count: Math.max(0, nodes.length - 1),
-      nodes,
-      edges: nodes.slice(0, -1).map((node, index) => ({
-        from_node_id: node.node_id,
-        to_node_id: node.node_id + 1,
-        label: this.traceEventLabel(events[index]) || null,
-        condition: null,
-        priority: index,
-      })),
-      revision: typeof trace?.run?.event_count === 'number' ? trace.run.event_count : nodes.length,
-      hash: `${this.state.selectedSwarmName() ?? 'execution'}:${nodes.length}:${trace?.run?.run_id ?? 'trace'}`,
-      updated_at: trace?.run?.finished_at ?? trace?.run?.started_at ?? new Date().toISOString(),
-      last_change: null,
-    };
-  }
-
-  private resolveExecutionGraphActiveNodeId(): number | null {
-    const trace = this.state.selectedExecutionTrace();
-    const graph = this.executionGraph();
-    const run = trace?.run;
-    if (!trace || !graph || !run) {
-      return null;
-    }
-
-    const currentNodeName = run.current_node_name?.trim().toLowerCase();
-    if (currentNodeName) {
-      const matched = graph.nodes.find((node) => node.node_name.toLowerCase().includes(currentNodeName) || currentNodeName.includes(node.node_name.toLowerCase()));
-      if (matched) {
-        return matched.node_id;
-      }
-    }
-
-    if (typeof run.current_node_id === 'number' && run.current_node_id >= 1 && run.current_node_id <= graph.node_count) {
-      return run.current_node_id;
-    }
-
-    return graph.exit_node_id;
   }
 
   traceSummaryText(event: unknown): string | null {

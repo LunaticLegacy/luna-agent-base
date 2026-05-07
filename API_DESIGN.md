@@ -92,7 +92,7 @@ swarm = Swarm.from_package("agents/novelist")
 | `GET /swarms` | 列出已加载的 swarm | `{swarms: [{name, agent_count, tool_count}]}` |
 | `POST /swarms/load` | 加载 swarm | `{source: "path/to/swarm.toml"}` → `{name, id}` |
 | `DELETE /swarms/{name}` | 卸载 swarm | |
-| `POST /swarms/{name}/run` | SSE 流式执行 | `{input: "...", context?: {...}}` → `event: start → result → done` |
+| `POST /swarms/{name}/run` | SSE 流式执行 | `{input: <JSON>, context?: {...}, rounds?: number, meta_mode?: boolean}` → `event: start → result → done` |
 | `GET /swarms/{name}/execution_graph` | 获取执行图结构 | 节点 + 边 |
 | `GET /swarms/{name}/thinking_graph` | 获取思考图结构 | 可序列化的思考图快照 |
 | `GET /swarms/{name}/graph` | 获取图结构（兼容别名） | 等同于 `execution_graph` |

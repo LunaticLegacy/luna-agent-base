@@ -791,7 +791,7 @@ export class StateService {
         { label: '正在运行', detail: `${runningCount} 个节点`, color: '#3B82F6', kind: 'dot' },
         { label: '在线', detail: `${onlineCount} 个节点`, color: '#10B981', kind: 'dot' },
         { label: '入口节点', detail: '—', color: '#8B5CF6', kind: 'dot' },
-        { label: 'Agent 节点', detail: '—', color: '#10B981', kind: 'dot' },
+        { label: '执行节点', detail: '—', color: '#10B981', kind: 'dot' },
         { label: 'Tool 节点', detail: '—', color: '#f59e0b', kind: 'dot' },
         { label: '退出节点', detail: '—', color: '#ef4444', kind: 'dot' },
         { label: '数据流', detail: '边', color: '#94a3b8', kind: 'line' },
@@ -805,7 +805,7 @@ export class StateService {
       { label: '正在运行', detail: `${runningCount} 个节点`, color: '#3B82F6', kind: 'dot' },
       { label: '在线', detail: `${onlineCount} 个节点`, color: '#10B981', kind: 'dot' },
       { label: '入口节点', detail: graph.entry_node_id !== null ? `ID ${graph.entry_node_id}` : '无', color: '#8B5CF6', kind: 'dot' },
-      { label: 'Agent 节点', detail: `${agentCount} 个`, color: '#10B981', kind: 'dot' },
+      { label: '执行节点', detail: `${agentCount} 个`, color: '#10B981', kind: 'dot' },
       { label: 'Tool 节点', detail: `${toolCount} 个`, color: '#f59e0b', kind: 'dot' },
       { label: '退出节点', detail: graph.exit_node_id !== null ? `ID ${graph.exit_node_id}` : '无', color: '#ef4444', kind: 'dot' },
       { label: '数据流', detail: `${graph.edge_count} 条边`, color: '#94a3b8', kind: 'line' },
@@ -1749,8 +1749,8 @@ this.loadLogs(),
     try {
       const baseUrl = this.baseUrl();
       const response = await this.apiService.getThoughtGraph(baseUrl, swarmName);
-      this.selectedThoughtGraph.set(response.thought_graph);
-      this.pushFeed(`思考图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/thought-graph`, 'info', response);
+      this.selectedThoughtGraph.set(response.thinking_graph);
+      this.pushFeed(`思考图快照 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}/thinking_graph`, 'info', response);
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
@@ -2136,9 +2136,15 @@ this.loadLogs(),
         meta_mode: this.metaMode(),
       }, this.baseUrl());
       this.eventSource = stream as unknown as EventSource;
+      let streamOpened = false;
       stream.onmessage = (event: MessageEvent<string>) => {
         try {
           const parsed = JSON.parse(event.data) as { event: string; data: unknown };
+          if (!streamOpened) {
+            streamOpened = true;
+            this.streamState.set('open');
+            this.streamNote.set(`实时运行流已开启: ${swarmName}`);
+          }
           if (parsed.event === 'start') {
             this.activeRun.update((run) => run ? { ...run, status: 'running', started_at: startedAt } : run);
           } else if (parsed.event === 'result') {

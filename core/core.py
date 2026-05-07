@@ -245,11 +245,11 @@ class Core:
                 if not agent_path.is_file():
                     raise FileNotFoundError(f"Agent file not found: {agent_path}")
 
-            llm_block = manifest.get("llm", {}).get("default", {})
-            if not llm_block.get("api_url") or not llm_block.get("model"):
+            fetcher = self._resolve_fetcher_from_manifest(manifest, fallback_name=package_name)
+            if fetcher is None:
                 raise ValueError("missing llm.default.api_url/model")
 
-            swarm = self.create_swarm(package_name, llm_fetcher=self._create_placeholder_fetcher(package_name))
+            swarm = self.create_swarm(package_name, llm_fetcher=fetcher)
             graph = self._load_package_execution_graph(package_root, graph_file, swarm)
             swarm.execution_graph = graph
             record = AgentPackageRecord(
@@ -466,7 +466,7 @@ class Core:
         fallback_name: str,
     ) -> Optional[LLMFetcher]:
         llm_block = manifest.get("llm", {}).get("default", {})
-        if llm_block.get("api_url"):
+        if llm_block.get("api_url") and llm_block.get("model"):
             backend = LLMBackendConfig(
                 name=str(llm_block.get("name") or fallback_name or "default"),
                 provider=llm_block.get("provider", "openai"),
@@ -476,17 +476,6 @@ class Core:
             )
             return LLMFetcher(backends=[backend])
         return None
-
-    @staticmethod
-    def _create_placeholder_fetcher(name: str) -> LLMFetcher:
-        backend = LLMBackendConfig(
-            name=name or "default",
-            provider="litellm",
-            api_url="",
-            api_key="",
-            model="",
-        )
-        return LLMFetcher(backends=[backend])
 
     @staticmethod
     def _resolve_api_key(expr: str) -> str:

@@ -178,7 +178,7 @@ class LLMFetcher:
     def _build_messages(
         self,
         msg: str,
-        prev_messages: Optional[List[LLMContext]] = None,
+        prev_messages: Optional[List[Any]] = None,
         system_prompt: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """构造发送给后端的消息列表。
@@ -195,7 +195,16 @@ class LLMFetcher:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         if prev_messages:
-            messages.extend({"role": item.role, "content": item.content} for item in prev_messages)
+            for item in prev_messages:
+                if isinstance(item, dict):
+                    role = str(item.get("role", ""))
+                    content = str(item.get("content", ""))
+                else:
+                    role = str(getattr(item, "role", ""))
+                    content = str(getattr(item, "content", ""))
+                if not role:
+                    continue
+                messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": msg})
         return messages
 

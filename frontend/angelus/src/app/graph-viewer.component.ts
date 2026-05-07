@@ -207,12 +207,12 @@ export class GraphViewerComponent {
 
   get ariaLabel(): string {
     const g = this.graph;
-    if (!g) return 'Agent 图可视化';
+    if (!g) return '执行图可视化';
     return `${this.graphKindLabel()} ${g.graph_name} with ${g.node_count} nodes and ${g.edge_count} edges`;
   }
 
   graphKindLabel(): string {
-    return this.graph?.graph_kind === 'execution' ? '执行图' : 'Agent 图';
+    return '执行图';
   }
 
   isCenterNode(node: GraphNodeSnapshot): boolean {

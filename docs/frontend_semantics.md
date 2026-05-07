@@ -68,8 +68,10 @@
   - Mirrors the backend stop result back into the local run snapshot.
 
 - `runAgentRound()`
-  - Uses `POST /swarms/{name}/run` with an agent-scoped input payload.
+  - Uses `POST /swarms/{name}/run` with an agent-scoped JSON payload.
   - The frontend only wraps the request body; the backend still owns execution.
+  - The payload shape includes the structured execution input plus optional `rounds` and `meta_mode` compatibility fields.
+  - The UI run stream state starts at `connecting` and should switch to `open` when the first SSE event is received.
 
 ### Client State And Compatibility
 
@@ -88,10 +90,6 @@
 - `watchGraphEvents()`
   - Uses client-side polling to keep the selected graph fresh.
   - Does not require a backend SSE endpoint such as `/graph/events/from/{revision}`.
-
-- `executionGraph` in the swarm-management page
-  - Synthesizes a linear execution graph from `selectedExecutionTrace().events`.
-  - Reuses the shared graph viewer to render the execution flow in the trace tab.
 
 ### Frontend-Derived Views
 
@@ -116,8 +114,9 @@
   - Pure presentation logic; it does not fetch or mutate backend state.
 
 - `ThoughtGraphViewerComponent`
-  - Renders a `ThoughtGraphSnapshot` with relation-aware styling and node taxonomy.
-  - Pure visualization logic for thought-graph data.
+  - Renders the serialized `ThinkingGraphSnapshot` returned by `GET /swarms/{name}/thinking_graph`.
+  - Treats `nodes`, `edges`, and `transaction_log` as the source of truth for LLM thought-pattern visualization.
+  - Pure visualization logic; it does not synthesize subgraphs or mutate backend state.
 
 - Shared layout components such as `PanelCardComponent`, `StatCardGridComponent`, `TabBarComponent`, `ModalComponent`, `EmptyStateComponent`, `SidebarComponent`, and `TopbarComponent`
   - Provide visual structure, navigation, and chrome.
@@ -133,7 +132,8 @@
 - The frontend should not assume a `/api` prefix.
 - If a reverse proxy is needed later, configure it explicitly in settings rather than baking it into the default.
 - Graph change tracking is an internal client concern unless the backend later exposes a dedicated event stream.
-- Execution graphs are currently a frontend visualization derived from trace events rather than a separate backend endpoint.
+- Execution graphs are read directly from `GET /swarms/{name}/execution_graph` and should not be re-synthesized from trace events in the UI.
+- Thinking graphs are read directly from `GET /swarms/{name}/thinking_graph` and should not be restructured into a separate frontend-owned semantic model.
 - In the agent-control path, frontend semantics should map one-to-one to backend routes; anything else belongs in derived-view or compatibility sections.
 - UI semantics describe presentation and interaction patterns only; they do not add new backend capabilities.
 - When the UI says `后台任务`, treat that as the frontend's RuntimeSlot vocabulary. Preserve compatibility names in code only if needed by older call sites.

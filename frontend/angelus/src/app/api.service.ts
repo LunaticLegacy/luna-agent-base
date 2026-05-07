@@ -379,7 +379,7 @@ export class ApiService {
   async getGraph(swarmName: string): Promise<GraphResponse>;
   async getGraph(baseUrlOrName: string, swarmName?: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot } | GraphResponse> {
     if (typeof swarmName !== 'string') {
-      const graph = await this.fetchGraphSnapshot('', baseUrlOrName);
+      const graph = await this.fetchGraphSnapshot('', baseUrlOrName, 'execution');
       return {
         name: graph.graph_name,
         nodes: graph.nodes.map((node) => ({
@@ -395,7 +395,7 @@ export class ApiService {
         })),
       };
     }
-    const graph = await this.fetchGraphSnapshot(baseUrlOrName, swarmName);
+    const graph = await this.fetchGraphSnapshot(baseUrlOrName, swarmName, 'execution');
     return {
       success: true,
       swarm: swarmName,
@@ -404,7 +404,7 @@ export class ApiService {
   }
 
   async getGraphState(baseUrl: string, swarmName: string, sinceRevision?: number): Promise<GraphStateResponse> {
-    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName);
+    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName, 'execution');
     return {
       success: true,
       swarm: swarmName,
@@ -427,7 +427,7 @@ export class ApiService {
   }
 
   async getGraphDiff(baseUrl: string, swarmName: string, sinceRevision: number): Promise<GraphDiffResponse> {
-    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName);
+    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName, 'execution');
     return {
       success: true,
       swarm: swarmName,
@@ -443,36 +443,10 @@ export class ApiService {
   }
 
   async getThoughtGraph(baseUrl: string, swarmName: string): Promise<ThoughtGraphResponse> {
-    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName);
-    return {
-      success: true,
-      swarm: swarmName,
-      thought_graph: {
-        graph_id: swarmName,
-        nodes: graph.nodes.map((node) => ({
-          node_id: String(node.node_id),
-          node_type: node.node_type,
-          content: node.node_name,
-          summary: node.node_name,
-          confidence: node.node_type === 'agent' ? 0.9 : 0.7,
-          evidence: [],
-          tags: [],
-          source: swarmName,
-          metadata: node.metadata,
-          created_at: graph.updated_at ?? new Date().toISOString(),
-          version: graph.revision ?? 0,
-        })),
-        edges: graph.edges.map((edge, index) => ({
-          edge_id: `${edge.from_node_id}-${edge.to_node_id}-${index}`,
-          source_id: String(edge.from_node_id),
-          target_id: String(edge.to_node_id),
-          relation: edge.label ?? 'edge',
-          strength: 1,
-          description: edge.label ?? '',
-          metadata: null,
-        })),
-      },
-    };
+    const response = await firstValueFrom(
+      this.http.get<ThoughtGraphResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/thinking_graph`))
+    );
+    return response;
   }
 
   async getExecutionTrace(baseUrl: string, swarmName: string, runId?: string): Promise<ExecutionTraceResponse> {
@@ -678,20 +652,21 @@ export class ApiService {
     return client;
   }
 
-  private async fetchGraphSnapshot(baseUrl: string, swarmName: string): Promise<GraphSnapshot> {
+  private async fetchGraphSnapshot(baseUrl: string, swarmName: string, graphKind: 'agent' | 'execution' = 'execution'): Promise<GraphSnapshot> {
     const response = await firstValueFrom(
       this.http.get<{ name: string; nodes: Record<string, RuntimeGraphNode>; edges: RuntimeGraphEdge[] }>(
         joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph`)
       )
     );
-    return this.normalizeGraphSnapshot(swarmName, response.name, response.nodes ?? {}, response.edges ?? []);
+    return this.normalizeGraphSnapshot(swarmName, response.name, response.nodes ?? {}, response.edges ?? [], graphKind);
   }
 
   private normalizeGraphSnapshot(
     swarmName: string,
     graphName: string,
     nodes: Record<string, RuntimeGraphNode>,
-    edges: RuntimeGraphEdge[]
+    edges: RuntimeGraphEdge[],
+    graphKind: 'agent' | 'execution' = 'execution'
   ): GraphSnapshot {
     const nodeEntries = Object.entries(nodes);
     const nodeIds = new Map<string, number>();
@@ -723,7 +698,7 @@ export class ApiService {
 
     return {
       graph_name: graphName || swarmName,
-      graph_kind: normalizedNodes.some((node) => node.node_type === 'agent') ? 'agent' : 'execution',
+      graph_kind: graphKind,
       entry_node_id: normalizedNodes[0]?.node_id ?? null,
       exit_node_id: normalizedNodes[normalizedNodes.length - 1]?.node_id ?? null,
       node_count: normalizedNodes.length,

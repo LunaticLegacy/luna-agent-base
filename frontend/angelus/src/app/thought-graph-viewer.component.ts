@@ -1,5 +1,10 @@
 import { ChangeDetectionStrategy, Component, ElementRef, Input, NgZone, afterNextRender, inject, signal } from '@angular/core';
-import type { ThoughtGraphEdgeSnapshot, ThoughtGraphNodeSnapshot, ThoughtGraphSnapshot } from './api.types';
+import type {
+  ThinkingGraphEdgeSnapshot,
+  ThinkingGraphNodeSnapshot,
+  ThinkingGraphSnapshot,
+  ThinkingGraphTransactionRecord,
+} from './api.types';
 import { thoughtRelationStyle } from './thought-graph.taxonomy';
 
 type ThoughtNodeShape = 'circle' | 'diamond' | 'hexagon' | 'rect';
@@ -15,7 +20,7 @@ interface ThoughtNodeTheme {
 }
 
 interface RenderNode {
-  node: ThoughtGraphNodeSnapshot;
+  node: ThinkingGraphNodeSnapshot;
   x: number;
   y: number;
   depth: number;
@@ -25,7 +30,7 @@ interface RenderNode {
 }
 
 interface RenderEdge {
-  edge: ThoughtGraphEdgeSnapshot;
+  edge: ThinkingGraphEdgeSnapshot;
   from: RenderNode | undefined;
   to: RenderNode | undefined;
   path: string;
@@ -47,8 +52,8 @@ interface RenderEdge {
         <button type="button" class="graph-toolbar-btn" (click)="resetView()">重置</button>
       </div>
       <div class="graph-status">
-        {{ graph?.nodes?.length ?? 0 }} 节点 · {{ graph?.edges?.length ?? 0 }} 边 ·
-        {{ graph?.active_subgraphs?.length ?? 0 }} 子图 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
+        {{ graph?.node_count ?? 0 }} 节点 · {{ graph?.edge_count ?? 0 }} 边 ·
+        {{ graph?.transaction_count ?? 0 }} 事务 · 缩放 {{ (zoom() * 100).toFixed(0) }}%
       </div>
       <svg
         #viewport
@@ -77,10 +82,11 @@ interface RenderEdge {
         </defs>
 
         <g [attr.transform]="contentTransform()">
-          @for (renderEdge of renderEdges(); track renderEdge.edge.edge_id) {
+          @for (renderEdge of renderEdges(); track renderEdge.edge.id) {
             @if (renderEdge.from && renderEdge.to) {
               <g
                 class="thought-edge-group"
+                [class.active]="isHighlightedEdge(renderEdge.edge)"
                 [style.--edge-stroke]="relationTheme(renderEdge.edge).stroke"
                 [style.--edge-glow]="relationTheme(renderEdge.edge).glow"
               >
@@ -103,15 +109,12 @@ interface RenderEdge {
             }
           }
 
-          @for (renderNode of renderNodes(); track renderNode.node.node_id) {
+          @for (renderNode of renderNodes(); track renderNode.node.id) {
             <g
               class="thought-node"
-              [class.active]="isActiveNode(renderNode.node)"
-              [class.root]="isRootNode(renderNode.node)"
-              [class.frontier]="isFrontierNode(renderNode.node)"
-              [class.execution-trace]="nodeType(renderNode.node) === 'execution_trace'"
-              [class.supported]="nodeType(renderNode.node) === 'fact' || nodeType(renderNode.node) === 'evidence' || nodeType(renderNode.node) === 'tool_result'"
-              [class.diagnostic]="nodeType(renderNode.node) === 'question' || nodeType(renderNode.node) === 'risk' || nodeType(renderNode.node) === 'counterevidence'"
+              [class.active]="isHighlightedNode(renderNode.node)"
+              [class.supported]="nodeType(renderNode.node) === 'evidence' || nodeType(renderNode.node) === 'observation' || nodeType(renderNode.node) === 'memory'"
+              [class.diagnostic]="nodeType(renderNode.node) === 'question' || nodeType(renderNode.node) === 'critique' || nodeType(renderNode.node) === 'error'"
               [style.--node-fill]="nodeTheme(renderNode.node).fill"
               [style.--node-stroke]="nodeTheme(renderNode.node).stroke"
               [style.--node-glow]="nodeTheme(renderNode.node).glow"
@@ -127,7 +130,7 @@ interface RenderEdge {
                 class="thought-node-shape thought-node-circle"
               />
 
-              @if (isActiveNode(renderNode.node)) {
+              @if (isHighlightedNode(renderNode.node)) {
                 <circle
                   [attr.cx]="renderNode.x"
                   [attr.cy]="renderNode.y"
@@ -156,7 +159,7 @@ interface RenderEdge {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ThoughtGraphViewerComponent {
-  @Input() graph: ThoughtGraphSnapshot | null = null;
+  @Input() graph: ThinkingGraphSnapshot | null = null;
 
   private readonly el = inject(ElementRef);
   private readonly ngZone = inject(NgZone);
@@ -190,43 +193,45 @@ export class ThoughtGraphViewerComponent {
 
   get ariaLabel(): string {
     const g = this.graph;
-    if (!g) return 'Thought graph visualization';
-    return `Thought graph ${g.graph_id} with ${g.nodes.length} nodes and ${g.edges.length} edges`;
+    if (!g) return '思维图谱可视化';
+    return `思维图谱版本 ${g.version}，包含 ${g.node_count} 个节点和 ${g.edge_count} 条边`;
   }
 
-  nodeType(node: ThoughtGraphNodeSnapshot): string {
+  nodeType(node: ThinkingGraphNodeSnapshot): string {
     return String(node.node_type || 'unknown').toLowerCase();
   }
 
-  nodeShape(node: ThoughtGraphNodeSnapshot): ThoughtNodeShape {
+  nodeShape(node: ThinkingGraphNodeSnapshot): ThoughtNodeShape {
     const type = this.nodeType(node);
-    if (['fact', 'evidence', 'tool_result'].includes(type)) return 'circle';
+    if (['evidence', 'observation', 'memory'].includes(type)) return 'circle';
     if (['goal', 'question', 'assumption'].includes(type)) return 'hexagon';
     if (['hypothesis', 'guess', 'risk', 'counterevidence'].includes(type)) return 'diamond';
     return 'rect';
   }
 
-  nodeTheme(node: ThoughtGraphNodeSnapshot): ThoughtNodeTheme {
+  nodeTheme(node: ThinkingGraphNodeSnapshot): ThoughtNodeTheme {
     const type = this.nodeType(node);
     switch (type) {
-      case 'fact':
-        return { shape: 'circle', fill: 'rgba(14, 116, 144, 0.26)', stroke: 'rgba(103, 232, 249, 0.96)', glow: 'rgba(34, 211, 238, 0.45)', accent: 'rgba(103, 232, 249, 0.96)', label: '#ecfeff', subtle: '#a5f3fc' };
-      case 'evidence':
-        return { shape: 'circle', fill: 'rgba(5, 150, 105, 0.24)', stroke: 'rgba(110, 231, 183, 0.94)', glow: 'rgba(16, 185, 129, 0.42)', accent: 'rgba(110, 231, 183, 0.94)', label: '#ecfdf5', subtle: '#a7f3d0' };
-      case 'tool_result':
-        return { shape: 'circle', fill: 'rgba(180, 83, 9, 0.24)', stroke: 'rgba(252, 211, 77, 0.96)', glow: 'rgba(245, 158, 11, 0.40)', accent: 'rgba(252, 211, 77, 0.96)', label: '#fffbeb', subtle: '#fde68a' };
-      case 'reasoning':
-        return { shape: 'rect', fill: 'rgba(79, 70, 229, 0.26)', stroke: 'rgba(165, 180, 252, 0.94)', glow: 'rgba(99, 102, 241, 0.38)', accent: 'rgba(165, 180, 252, 0.94)', label: '#eef2ff', subtle: '#c7d2fe' };
-      case 'claim':
-        return { shape: 'rect', fill: 'rgba(37, 99, 235, 0.24)', stroke: 'rgba(147, 197, 253, 0.94)', glow: 'rgba(59, 130, 246, 0.38)', accent: 'rgba(147, 197, 253, 0.94)', label: '#eff6ff', subtle: '#bfdbfe' };
-      case 'decision':
-        return { shape: 'rect', fill: 'rgba(22, 163, 74, 0.22)', stroke: 'rgba(134, 239, 172, 0.95)', glow: 'rgba(34, 197, 94, 0.40)', accent: 'rgba(134, 239, 172, 0.95)', label: '#f0fdf4', subtle: '#bbf7d0' };
       case 'goal':
         return { shape: 'hexagon', fill: 'rgba(124, 58, 237, 0.22)', stroke: 'rgba(221, 214, 254, 0.96)', glow: 'rgba(168, 85, 247, 0.42)', accent: 'rgba(221, 214, 254, 0.96)', label: '#faf5ff', subtle: '#e9d5ff' };
       case 'question':
         return { shape: 'hexagon', fill: 'rgba(192, 38, 211, 0.20)', stroke: 'rgba(244, 114, 182, 0.94)', glow: 'rgba(236, 72, 153, 0.38)', accent: 'rgba(244, 114, 182, 0.94)', label: '#fdf2f8', subtle: '#fbcfe8' };
       case 'assumption':
         return { shape: 'hexagon', fill: 'rgba(71, 85, 105, 0.26)', stroke: 'rgba(203, 213, 225, 0.94)', glow: 'rgba(148, 163, 184, 0.30)', accent: 'rgba(203, 213, 225, 0.94)', label: '#f8fafc', subtle: '#cbd5e1' };
+      case 'claim':
+        return { shape: 'rect', fill: 'rgba(37, 99, 235, 0.24)', stroke: 'rgba(147, 197, 253, 0.94)', glow: 'rgba(59, 130, 246, 0.38)', accent: 'rgba(147, 197, 253, 0.94)', label: '#eff6ff', subtle: '#bfdbfe' };
+      case 'decision':
+        return { shape: 'rect', fill: 'rgba(22, 163, 74, 0.22)', stroke: 'rgba(134, 239, 172, 0.95)', glow: 'rgba(34, 197, 94, 0.40)', accent: 'rgba(134, 239, 172, 0.95)', label: '#f0fdf4', subtle: '#bbf7d0' };
+      case 'plan':
+        return { shape: 'rect', fill: 'rgba(139, 92, 246, 0.24)', stroke: 'rgba(196, 181, 253, 0.96)', glow: 'rgba(168, 85, 247, 0.40)', accent: 'rgba(196, 181, 253, 0.96)', label: '#faf5ff', subtle: '#ddd6fe' };
+      case 'step':
+        return { shape: 'rect', fill: 'rgba(124, 58, 237, 0.22)', stroke: 'rgba(216, 180, 254, 0.96)', glow: 'rgba(192, 132, 252, 0.38)', accent: 'rgba(216, 180, 254, 0.96)', label: '#faf5ff', subtle: '#e9d5ff' };
+      case 'summary':
+        return { shape: 'rect', fill: 'rgba(10, 17, 30, 0.84)', stroke: 'rgba(94, 234, 212, 0.42)', glow: 'rgba(94, 234, 212, 0.24)', accent: 'rgba(94, 234, 212, 0.84)', label: '#e2e8f0', subtle: '#94a3b8' };
+      case 'evidence':
+        return { shape: 'circle', fill: 'rgba(14, 116, 144, 0.26)', stroke: 'rgba(103, 232, 249, 0.96)', glow: 'rgba(34, 211, 238, 0.45)', accent: 'rgba(103, 232, 249, 0.96)', label: '#ecfeff', subtle: '#a5f3fc' };
+      case 'observation':
+        return { shape: 'circle', fill: 'rgba(5, 150, 105, 0.24)', stroke: 'rgba(110, 231, 183, 0.94)', glow: 'rgba(16, 185, 129, 0.42)', accent: 'rgba(110, 231, 183, 0.94)', label: '#ecfdf5', subtle: '#a7f3d0' };
       case 'hypothesis':
         return { shape: 'diamond', fill: 'rgba(217, 119, 6, 0.24)', stroke: 'rgba(253, 230, 138, 0.96)', glow: 'rgba(245, 158, 11, 0.42)', accent: 'rgba(253, 230, 138, 0.96)', label: '#fffbeb', subtle: '#fde68a' };
       case 'guess':
@@ -235,76 +240,85 @@ export class ThoughtGraphViewerComponent {
         return { shape: 'diamond', fill: 'rgba(153, 27, 27, 0.26)', stroke: 'rgba(252, 165, 165, 0.96)', glow: 'rgba(248, 113, 113, 0.42)', accent: 'rgba(252, 165, 165, 0.96)', label: '#fef2f2', subtle: '#fecaca' };
       case 'counterevidence':
         return { shape: 'diamond', fill: 'rgba(159, 18, 57, 0.26)', stroke: 'rgba(251, 113, 133, 0.96)', glow: 'rgba(244, 63, 94, 0.40)', accent: 'rgba(251, 113, 133, 0.96)', label: '#fff1f2', subtle: '#fda4af' };
-      case 'execution_trace':
-        return { shape: 'rect', fill: 'rgba(10, 17, 30, 0.84)', stroke: 'rgba(94, 234, 212, 0.42)', glow: 'rgba(94, 234, 212, 0.24)', accent: 'rgba(94, 234, 212, 0.84)', label: '#e2e8f0', subtle: '#94a3b8' };
+      case 'memory':
+        return { shape: 'circle', fill: 'rgba(124, 58, 237, 0.20)', stroke: 'rgba(216, 180, 254, 0.94)', glow: 'rgba(192, 132, 252, 0.36)', accent: 'rgba(216, 180, 254, 0.94)', label: '#faf5ff', subtle: '#ddd6fe' };
+      case 'artifact':
+        return { shape: 'rect', fill: 'rgba(180, 83, 9, 0.24)', stroke: 'rgba(252, 211, 77, 0.96)', glow: 'rgba(245, 158, 11, 0.40)', accent: 'rgba(252, 211, 77, 0.96)', label: '#fffbeb', subtle: '#fde68a' };
+      case 'action':
+        return { shape: 'rect', fill: 'rgba(6, 182, 212, 0.20)', stroke: 'rgba(165, 243, 252, 0.94)', glow: 'rgba(34, 211, 238, 0.34)', accent: 'rgba(165, 243, 252, 0.94)', label: '#ecfeff', subtle: '#a5f3fc' };
+      case 'critique':
+        return { shape: 'diamond', fill: 'rgba(219, 39, 119, 0.24)', stroke: 'rgba(249, 168, 212, 0.96)', glow: 'rgba(236, 72, 153, 0.38)', accent: 'rgba(249, 168, 212, 0.96)', label: '#fdf2f8', subtle: '#fbcfe8' };
+      case 'error':
+        return { shape: 'diamond', fill: 'rgba(127, 29, 29, 0.26)', stroke: 'rgba(252, 165, 165, 0.96)', glow: 'rgba(248, 113, 113, 0.42)', accent: 'rgba(252, 165, 165, 0.96)', label: '#fef2f2', subtle: '#fecaca' };
       default:
         return { shape: this.nodeShape(node), fill: 'rgba(30, 41, 59, 0.28)', stroke: 'rgba(148, 163, 184, 0.9)', glow: 'rgba(148, 163, 184, 0.22)', accent: 'rgba(148, 163, 184, 0.9)', label: '#f8fafc', subtle: '#cbd5e1' };
     }
   }
 
-  labelForNode(node: ThoughtGraphNodeSnapshot, index = 0): string {
-    const text = (node.summary || node.content || node.node_id).trim().replace(/\s+/g, ' ');
+  labelForNode(node: ThinkingGraphNodeSnapshot, index = 0): string {
+    const text = (node.info || node.description || String(node.id)).trim().replace(/\s+/g, ' ');
     const clipped = text.length > 26 ? `${text.slice(0, 26)}…` : text;
     return `${index + 1}. ${clipped}`;
   }
 
-  typeLabel(node: ThoughtGraphNodeSnapshot): string {
+  typeLabel(node: ThinkingGraphNodeSnapshot): string {
     return this.nodeType(node).replace(/_/g, ' ').toUpperCase();
   }
 
-  relationLabel(edge: ThoughtGraphEdgeSnapshot): string {
-    return edge.relation.replace(/_/g, ' ');
+  relationLabel(edge: ThinkingGraphEdgeSnapshot): string {
+    return edge.edge_type.replace(/_/g, ' ');
   }
 
-  relationTheme(edge: ThoughtGraphEdgeSnapshot) {
-    return thoughtRelationStyle(edge.relation);
+  relationTheme(edge: ThinkingGraphEdgeSnapshot) {
+    return thoughtRelationStyle(edge.edge_type);
   }
 
-  nodeTitle(node: ThoughtGraphNodeSnapshot): string {
+  nodeTitle(node: ThinkingGraphNodeSnapshot): string {
     const parts = [
       `${this.typeLabel(node)} · confidence ${(node.confidence ?? 0).toFixed(2)}`,
-      node.summary ? `summary: ${node.summary}` : '',
-      node.content ? `content: ${node.content}` : '',
-      node.source ? `source: ${node.source}` : '',
+      node.created_by ? `created_by: ${node.created_by}` : '',
+      node.description ? `description: ${node.description}` : '',
+      node.info ? `info: ${node.info}` : '',
+      node.tags?.length ? `tags: ${node.tags.join(', ')}` : '',
+      node.payload ? `payload: ${JSON.stringify(node.payload)}` : '',
     ].filter(Boolean);
     return parts.join('\n');
   }
 
-  edgeTitle(edge: ThoughtGraphEdgeSnapshot): string {
-    const relation = edge.relation.replace(/_/g, ' ');
+  edgeTitle(edge: ThinkingGraphEdgeSnapshot): string {
+    const relation = edge.edge_type.replace(/_/g, ' ');
     const detail = edge.description ? ` · ${edge.description}` : '';
     return `${relation} · strength ${(edge.strength ?? 0).toFixed(2)}${detail}`;
   }
 
-  activeSubgraphs() {
-    return this.graph?.active_subgraphs ?? [];
+  latestTransaction(): ThinkingGraphTransactionRecord | null {
+    const log = this.graph?.transaction_log ?? [];
+    return log.length > 0 ? log[log.length - 1] : null;
   }
 
-  isRootNode(node: ThoughtGraphNodeSnapshot): boolean {
-    return this.activeSubgraphs().some((subgraph) => subgraph.root_node_ids.includes(node.node_id));
+  isHighlightedNode(node: ThinkingGraphNodeSnapshot): boolean {
+    const tx = this.latestTransaction();
+    return tx?.object_kind === 'node' && tx.object_id === node.id;
   }
 
-  isFrontierNode(node: ThoughtGraphNodeSnapshot): boolean {
-    return this.activeSubgraphs().some((subgraph) => subgraph.frontier_node_ids.includes(node.node_id));
+  isHighlightedEdge(edge: ThinkingGraphEdgeSnapshot): boolean {
+    const tx = this.latestTransaction();
+    return tx?.object_kind === 'edge' && tx.object_id === edge.id;
   }
 
-  isActiveNode(node: ThoughtGraphNodeSnapshot): boolean {
-    return this.isRootNode(node) || this.isFrontierNode(node);
+  isSupportEdge(edge: ThinkingGraphEdgeSnapshot): boolean {
+    return ['supports', 'verifies', 'produces', 'refines', 'evidence_for'].includes(edge.edge_type.toLowerCase());
   }
 
-  isSupportEdge(edge: ThoughtGraphEdgeSnapshot): boolean {
-    return ['supports', 'verifies', 'evidence_for', 'refines'].includes(edge.relation.toLowerCase());
+  isOpposeEdge(edge: ThinkingGraphEdgeSnapshot): boolean {
+    return ['opposes', 'disproves', 'questions', 'contradicts'].includes(edge.edge_type.toLowerCase());
   }
 
-  isOpposeEdge(edge: ThoughtGraphEdgeSnapshot): boolean {
-    return ['opposes', 'disproves', 'questions'].includes(edge.relation.toLowerCase());
+  isSpeculativeEdge(edge: ThinkingGraphEdgeSnapshot): boolean {
+    return ['speculates', 'relates', 'leads_to', 'depends_on', 'derives_from', 'requires', 'blocks', 'answers'].includes(edge.edge_type.toLowerCase());
   }
 
-  isSpeculativeEdge(edge: ThoughtGraphEdgeSnapshot): boolean {
-    return ['speculates', 'relates', 'leads_to', 'depends_on', 'derives_from'].includes(edge.relation.toLowerCase());
-  }
-
-  edgeDash(edge: ThoughtGraphEdgeSnapshot): string | null {
+  edgeDash(edge: ThinkingGraphEdgeSnapshot): string | null {
     return this.relationTheme(edge).dash;
   }
 
@@ -312,17 +326,17 @@ export class ThoughtGraphViewerComponent {
     return this.nodeRadius() + 16;
   }
 
-  radiusForNode(node: ThoughtGraphNodeSnapshot): number {
+  radiusForNode(node: ThinkingGraphNodeSnapshot): number {
     const type = this.nodeType(node);
     const base = this.nodeRadius();
-    if (['fact', 'evidence', 'tool_result'].includes(type)) return base + 2;
-    if (['execution_trace'].includes(type)) return base + 4;
-    if (['reasoning', 'claim', 'decision'].includes(type)) return base + 1;
+    if (['evidence', 'observation', 'memory'].includes(type)) return base + 2;
+    if (['action', 'artifact'].includes(type)) return base + 1;
+    if (['claim', 'decision', 'summary'].includes(type)) return base + 1;
     if (['goal', 'question', 'assumption', 'hypothesis', 'guess', 'risk', 'counterevidence'].includes(type)) return base + 3;
     return base;
   }
 
-  edgePath(from: RenderNode, to: RenderNode, edge: ThoughtGraphEdgeSnapshot): { path: string; labelX: number; labelY: number } {
+  edgePath(from: RenderNode, to: RenderNode, edge: ThinkingGraphEdgeSnapshot): { path: string; labelX: number; labelY: number } {
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const distance = Math.max(1, Math.hypot(dx, dy));
@@ -336,7 +350,7 @@ export class ThoughtGraphViewerComponent {
     const midY = (startY + endY) / 2;
     const normalX = -dy / distance;
     const normalY = dx / distance;
-    const curvatureSeed = `${edge.edge_id}:${edge.relation}:${edge.source_id}:${edge.target_id}`;
+    const curvatureSeed = `${edge.id}:${edge.edge_type}:${edge.source_id}:${edge.target_id}`;
     let hash = 0;
     for (let i = 0; i < curvatureSeed.length; i += 1) {
       hash = (hash * 33 + curvatureSeed.charCodeAt(i)) | 0;
@@ -398,7 +412,9 @@ export class ThoughtGraphViewerComponent {
 
   private recalculateLayout(): void {
     const g = this.graph;
-    if (!g || g.nodes.length === 0) {
+    const nodes = this.sortedNodes();
+    const edges = this.sortedEdges();
+    if (!g || nodes.length === 0) {
       this.renderNodes.set([]);
       this.renderEdges.set([]);
       this.zoom.set(1);
@@ -407,16 +423,14 @@ export class ThoughtGraphViewerComponent {
       return;
     }
 
-    const nodes = [...g.nodes];
     const svgW = this.svgWidth();
     const svgH = this.svgHeight();
     const pad = this.padding();
-    const nr = this.nodeRadius();
-    const fallbackOrder = new Map<string, number>(nodes.map((node, index) => [node.node_id, index]));
-    const incomingCounts = new Map<string, number>(nodes.map((node) => [node.node_id, 0]));
-    const outgoing = new Map<string, ThoughtGraphEdgeSnapshot[]>();
+    const fallbackOrder = new Map<number, number>(nodes.map((node, index) => [node.id, index]));
+    const incomingCounts = new Map<number, number>(nodes.map((node) => [node.id, 0]));
+    const outgoing = new Map<number, ThinkingGraphEdgeSnapshot[]>();
 
-    for (const edge of g.edges) {
+    for (const edge of edges) {
       if (incomingCounts.has(edge.target_id)) {
         incomingCounts.set(edge.target_id, (incomingCounts.get(edge.target_id) ?? 0) + 1);
       }
@@ -425,14 +439,13 @@ export class ThoughtGraphViewerComponent {
       outgoing.set(edge.source_id, list);
     }
 
-    const activeRoots = new Set(g.active_subgraphs?.flatMap((subgraph) => subgraph.root_node_ids) ?? []);
-    const seeds = Array.from(activeRoots.size > 0 ? activeRoots : nodes.filter((node) => (incomingCounts.get(node.node_id) ?? 0) === 0).map((node) => node.node_id));
+    const seeds = nodes.filter((node) => (incomingCounts.get(node.id) ?? 0) === 0).map((node) => node.id);
     if (seeds.length === 0 && nodes[0]) {
-      seeds.push(nodes[0].node_id);
+      seeds.push(nodes[0].id);
     }
 
-    const depths = new Map<string, number>();
-    const queue: { id: string; depth: number }[] = seeds.map((id) => ({ id, depth: 0 }));
+    const depths = new Map<number, number>();
+    const queue: { id: number; depth: number }[] = seeds.map((id) => ({ id, depth: 0 }));
     while (queue.length > 0) {
       const current = queue.shift()!;
       const knownDepth = depths.get(current.id);
@@ -448,21 +461,18 @@ export class ThoughtGraphViewerComponent {
     let maxDepth = 0;
     for (const depth of depths.values()) maxDepth = Math.max(maxDepth, depth);
     for (const node of nodes) {
-      if (!depths.has(node.node_id)) {
-        const bias = fallbackOrder.get(node.node_id) ?? 0;
-        depths.set(node.node_id, maxDepth + 1 + bias * 0.02);
+      if (!depths.has(node.id)) {
+        const bias = fallbackOrder.get(node.id) ?? 0;
+        depths.set(node.id, maxDepth + 1 + bias * 0.02);
       }
     }
 
     const sortedNodes = nodes.slice().sort((a, b) => {
-      const activeA = activeRoots.has(a.node_id) ? 0 : 1;
-      const activeB = activeRoots.has(b.node_id) ? 0 : 1;
-      if (activeA !== activeB) return activeA - activeB;
-      const depthDiff = (depths.get(a.node_id) ?? 0) - (depths.get(b.node_id) ?? 0);
+      const depthDiff = (depths.get(a.id) ?? 0) - (depths.get(b.id) ?? 0);
       if (depthDiff !== 0) return depthDiff;
       const confidenceDiff = (b.confidence ?? 0) - (a.confidence ?? 0);
       if (confidenceDiff !== 0) return confidenceDiff;
-      return a.node_id.localeCompare(b.node_id);
+      return a.id - b.id;
     });
 
     const centerX = svgW / 2;
@@ -470,17 +480,17 @@ export class ThoughtGraphViewerComponent {
     const depthStep = Math.min(160, Math.max(110, svgW * 0.14));
     const orbit = Math.min(svgW, svgH) * 0.22;
     const layerCounts = new Map<number, number>();
-    const initialState = new Map<string, { x: number; y: number; vx: number; vy: number }>();
+    const initialState = new Map<number, { x: number; y: number; vx: number; vy: number }>();
 
     for (let index = 0; index < sortedNodes.length; index += 1) {
       const node = sortedNodes[index];
-      const depth = Math.round(depths.get(node.node_id) ?? 0);
+      const depth = Math.round(depths.get(node.id) ?? 0);
       const layerIndex = layerCounts.get(depth) ?? 0;
       layerCounts.set(depth, layerIndex + 1);
 
       const angle = ((index + 1) / (sortedNodes.length + 1)) * Math.PI * 2;
       const radial = orbit + depth * depthStep * 0.42 + layerIndex * 10;
-      initialState.set(node.node_id, {
+      initialState.set(node.id, {
         x: centerX + Math.cos(angle) * radial,
         y: centerY + Math.sin(angle) * radial * 0.78,
         vx: 0,
@@ -488,16 +498,14 @@ export class ThoughtGraphViewerComponent {
       });
     }
 
-    const nodeRadiusById = new Map<string, number>();
     const renderedNodes = sortedNodes.map((node, index) => {
-      const depth = Math.round(depths.get(node.node_id) ?? 0);
+      const depth = Math.round(depths.get(node.id) ?? 0);
       const radius = this.radiusForNode(node);
       const label = this.labelForNode(node, index);
-      nodeRadiusById.set(node.node_id, radius);
       return {
         node,
-        x: initialState.get(node.node_id)?.x ?? centerX,
-        y: initialState.get(node.node_id)?.y ?? centerY,
+        x: initialState.get(node.id)?.x ?? centerX,
+        y: initialState.get(node.id)?.y ?? centerY,
         depth,
         index,
         label,
@@ -505,7 +513,7 @@ export class ThoughtGraphViewerComponent {
       };
     });
 
-    const states = new Map(renderedNodes.map((item) => [item.node.node_id, {
+    const states = new Map(renderedNodes.map((item) => [item.node.id, {
       x: item.x,
       y: item.y,
       vx: 0,
@@ -523,10 +531,10 @@ export class ThoughtGraphViewerComponent {
 
       for (let i = 0; i < renderedNodes.length; i += 1) {
         const a = renderedNodes[i];
-        const sa = states.get(a.node.node_id)!;
+        const sa = states.get(a.node.id)!;
         for (let j = i + 1; j < renderedNodes.length; j += 1) {
           const b = renderedNodes[j];
-          const sb = states.get(b.node.node_id)!;
+          const sb = states.get(b.node.id)!;
           const dx = sb.x - sa.x;
           const dy = sb.y - sa.y;
           const dist2 = Math.max(36, dx * dx + dy * dy);
@@ -541,7 +549,7 @@ export class ThoughtGraphViewerComponent {
         }
       }
 
-      for (const edge of g.edges) {
+      for (const edge of edges) {
         const source = states.get(edge.source_id);
         const target = states.get(edge.target_id);
         if (!source || !target) continue;
@@ -559,10 +567,10 @@ export class ThoughtGraphViewerComponent {
       }
 
       for (const item of renderedNodes) {
-        const state = states.get(item.node.node_id)!;
-        const rootBias = this.isRootNode(item.node) ? 0.022 : this.isFrontierNode(item.node) ? 0.016 : 0.010;
-        state.vx += (centerX - state.x) * centerPull * rootBias;
-        state.vy += (centerY - state.y) * centerPull * (rootBias * 0.9);
+        const state = states.get(item.node.id)!;
+        const highlightBias = this.isHighlightedNode(item.node) ? 0.022 : 0.010;
+        state.vx += (centerX - state.x) * centerPull * highlightBias;
+        state.vy += (centerY - state.y) * centerPull * (highlightBias * 0.9);
         state.x += state.vx;
         state.y += state.vy;
         state.vx *= 0.82;
@@ -576,16 +584,16 @@ export class ThoughtGraphViewerComponent {
     }
 
     for (const item of renderedNodes) {
-      const state = states.get(item.node.node_id)!;
+      const state = states.get(item.node.id)!;
       item.x = state.x;
       item.y = state.y;
     }
 
     this.renderNodes.set(renderedNodes);
     this.renderEdges.set(
-      g.edges.map((edge) => {
-        const from = renderedNodes.find((item) => item.node.node_id === edge.source_id);
-        const to = renderedNodes.find((item) => item.node.node_id === edge.target_id);
+      edges.map((edge) => {
+        const from = renderedNodes.find((item) => item.node.id === edge.source_id);
+        const to = renderedNodes.find((item) => item.node.id === edge.target_id);
         const pathInfo = from && to ? this.edgePath(from, to, edge) : { path: '', labelX: 0, labelY: 0 };
         return {
           edge,
@@ -608,6 +616,16 @@ export class ThoughtGraphViewerComponent {
   ngOnChanges(): void {
     this.needsFit = true;
     this.recalculateLayout();
+  }
+
+  private sortedNodes(): ThinkingGraphNodeSnapshot[] {
+    const entries = Object.values(this.graph?.nodes ?? {});
+    return entries.slice().sort((a, b) => a.id - b.id);
+  }
+
+  private sortedEdges(): ThinkingGraphEdgeSnapshot[] {
+    const entries = Object.values(this.graph?.edges ?? {});
+    return entries.slice().sort((a, b) => a.id - b.id);
   }
 
   contentTransform(): string {
