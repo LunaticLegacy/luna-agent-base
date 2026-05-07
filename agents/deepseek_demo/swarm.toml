@@ -29,7 +29,6 @@ command_runner = ["command_execute"]
 search = ["file_read"]
 
 [llm.default]
-name = "deepseek"
 provider = "openai"
 api_url = "https://api.deepseek.com"
 api_key = "${DEEPSEEK_API_KEY}"

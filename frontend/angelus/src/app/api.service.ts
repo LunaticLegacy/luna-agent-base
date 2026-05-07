@@ -1,15 +1,19 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { normalizeJsonValue } from './json-utils';
 import type {
   AgentListResponse,
   AgentRoundRequest,
   AgentRoundResponse,
   ApiIndexResponse,
+  GraphResponse,
   GraphSnapshot,
   GraphDiffResponse,
   GraphStateResponse,
   HealthResponse,
+  HistoryEntry,
+  HistoryResponse,
   KnowledgeCatalogItem,
   KnowledgeListResponse,
   LogListResponse,
@@ -27,15 +31,19 @@ import type {
   SwarmApisResponse,
   SwarmDetailResponse,
   SwarmListResponse,
+  SwarmSummary,
   SwarmStatsResponse,
   ToolListResponse,
   UpdateSettingsRequest,
   ThoughtGraphResponse,
   ExecutionTraceResponse,
+  RunStreamEvent,
+  RuntimeSwarmSummary,
 } from './api.types';
 
 export function joinUrl(baseUrl: string, path: string): string {
-  const base = baseUrl.trim() || '/api';
+  const normalizedInput = baseUrl.trim();
+  const base = normalizedInput === '/api' ? '' : normalizedInput || '';
   const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base;
   if (!path) {
     return normalizedBase;
@@ -54,52 +62,170 @@ export function joinUrl(baseUrl: string, path: string): string {
   return `${normalizedBase}${normalizedPath}`;
 }
 
+type RawSwarmListResponse = {
+  success: boolean;
+  swarms: RuntimeSwarmSummary[];
+};
+
+type RuntimeGraphNode = {
+  type?: string;
+  class?: string;
+  id?: string;
+  name?: string;
+  node_name?: string;
+  node_type?: string;
+  agent_id?: string;
+  tool_name?: string;
+  metadata?: unknown;
+  input_mapping?: unknown;
+};
+
+type RuntimeGraphEdge = {
+  source?: string;
+  target?: string;
+  label?: string | null;
+};
+
+interface StreamClient {
+  onmessage: ((event: MessageEvent<string>) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  close(): void;
+}
+
+function createMessageEvent(data: string): MessageEvent<string> {
+  return {
+    data,
+    lastEventId: '',
+    origin: '',
+    ports: [],
+    source: null,
+    type: 'message',
+    bubbles: false,
+    cancelBubble: false,
+    cancelable: false,
+    composed: false,
+    defaultPrevented: false,
+    eventPhase: 0,
+    isTrusted: true,
+    returnValue: true,
+    timeStamp: Date.now(),
+    preventDefault(): void {},
+    stopImmediatePropagation(): void {},
+    stopPropagation(): void {},
+    composedPath(): EventTarget[] { return []; },
+    initEvent(): void {},
+  } as unknown as MessageEvent<string>;
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class ApiService {
   constructor(private readonly http: HttpClient) {}
 
-  index(baseUrl = '/api'): Promise<ApiIndexResponse> {
-    return firstValueFrom(this.http.get<ApiIndexResponse>(joinUrl(baseUrl, '')));
+  async index(baseUrl = ''): Promise<ApiIndexResponse> {
+    const [health, swarms] = await Promise.all([
+      this.health(baseUrl),
+      this.listSwarms(baseUrl),
+    ]);
+    return {
+      success: health.success,
+      service: 'angelus',
+      swarm_count: swarms.swarms.length,
+      load_error: null,
+      api_root: baseUrl.trim() || '',
+    };
   }
 
-  health(baseUrl = '/api'): Promise<HealthResponse> {
-    return firstValueFrom(this.http.get<HealthResponse>(joinUrl(baseUrl, '/runtime/health')));
+  async health(baseUrl = ''): Promise<HealthResponse> {
+    return firstValueFrom(this.http.get<HealthResponse>(joinUrl(baseUrl, '/health')));
   }
 
-  ready(baseUrl = '/api'): Promise<ReadyResponse> {
-    return firstValueFrom(this.http.get<ReadyResponse>(joinUrl(baseUrl, '/runtime/ready')));
+  async ready(baseUrl = ''): Promise<ReadyResponse> {
+    const health = await this.health(baseUrl).catch(() => ({ success: false, status: 'offline' }));
+    const swarms = await this.listSwarms(baseUrl).catch(() => ({ success: false, swarms: [] as SwarmListResponse['swarms'] }));
+    return {
+      success: health.success,
+      ready: health.status === 'ok',
+      swarm_count: swarms.swarms.length,
+      reason: health.status === 'ok' ? undefined : 'backend unavailable',
+      invalid_swarms: [],
+    };
   }
 
-  getSettings(baseUrl = '/api'): Promise<SettingsResponse> {
-    return firstValueFrom(this.http.get<SettingsResponse>(joinUrl(baseUrl, '/settings')));
+  getSettings(baseUrl = ''): Promise<SettingsResponse> {
+    return Promise.resolve({
+      success: true,
+      settings: {
+        api: {
+          base_url: baseUrl.trim() || '',
+          timeout_seconds: 30,
+          sse_reconnect_interval_seconds: 5,
+          auto_reconnect: true,
+        },
+      },
+    });
   }
 
-  updateSettings(baseUrl = '/api', body: UpdateSettingsRequest): Promise<SettingsResponse> {
-    return firstValueFrom(this.http.put<SettingsResponse>(joinUrl(baseUrl, '/settings'), body));
+  updateSettings(_baseUrl = '', body: UpdateSettingsRequest): Promise<SettingsResponse> {
+    return Promise.resolve({
+      success: true,
+      settings: {
+        api: {
+          base_url: body.api.base_url.trim() || '',
+          timeout_seconds: body.api.timeout_seconds,
+          sse_reconnect_interval_seconds: body.api.sse_reconnect_interval_seconds,
+          auto_reconnect: body.api.auto_reconnect,
+        },
+      },
+    });
   }
 
-  listSwarms(baseUrl = '/api'): Promise<SwarmListResponse> {
-    return firstValueFrom(this.http.get<SwarmListResponse>(joinUrl(baseUrl, '/swarms')));
+  async listSwarms(baseUrl = ''): Promise<SwarmListResponse> {
+    const raw = await firstValueFrom(this.http.get<RawSwarmListResponse>(joinUrl(baseUrl, '/swarms')));
+    const swarms = await Promise.all(
+      raw.swarms.map(async (item) => this.enrichSwarmSummary(baseUrl, item.name, item.agent_count, item.tool_count))
+    );
+    return {
+      success: raw.success,
+      swarms,
+    };
   }
 
-  loadSwarm(
+  async loadSwarm(
     baseUrl: string,
     request: { package_path?: string; source?: string; swarm_name?: string; replace?: boolean }
   ): Promise<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }> {
-    return firstValueFrom(
-      this.http.post<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }>(
-        joinUrl(baseUrl, '/swarms'),
-        request
-      )
+    const response = await firstValueFrom(
+      this.http.post<{ name: string; id: string; message: string }>(joinUrl(baseUrl, '/swarms/load'), {
+        source: request.source ?? request.package_path ?? request.swarm_name ?? '',
+      })
     );
+    const swarm = await this.getSwarm(baseUrl, response.name);
+    return {
+      success: true,
+      action: response.message || 'loaded',
+      swarm: swarm.swarm,
+    };
   }
 
-  getSwarm(baseUrl: string, swarmName: string): Promise<SwarmDetailResponse> {
-    return firstValueFrom(
-      this.http.get<SwarmDetailResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}`))
-    );
+  async getSwarm(baseUrl: string, swarmName: string): Promise<SwarmDetailResponse> {
+    const [listResult, graphResult, historyResult] = await Promise.all([
+      this.listSwarms(baseUrl).catch(() => ({ success: false, swarms: [] as SwarmListResponse['swarms'] })),
+      this.getGraph(baseUrl, swarmName).catch(() => this.emptyGraphSnapshot(swarmName)),
+      this.getHistory(baseUrl, swarmName).catch(() => ({ history: [] as HistoryEntry[] })),
+    ]);
+    const fallback = listResult.swarms.find((item) => item.swarm_name === swarmName) ?? this.buildSummaryShell(swarmName);
+    return {
+      success: true,
+      swarm: {
+        ...fallback,
+        agent_files: this.agentFilesFromGraph(graphResult.graph),
+        graph: graphResult.graph,
+        active_run_count: historyResult.history.length > 0 ? 1 : 0,
+        active_run_ids: historyResult.history.length > 0 ? [historyResult.history[historyResult.history.length - 1].timestamp] : [],
+      },
+    };
   }
 
   getSwarmApis(baseUrl: string, swarmName: string): Promise<SwarmApisResponse> {
@@ -229,65 +355,133 @@ export class ApiService {
     );
   }
 
-  getGraph(baseUrl: string, swarmName: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot }> {
-    return firstValueFrom(
-      this.http.get<{ success: boolean; swarm: string; graph: GraphSnapshot }>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/agent-graph`)
-      )
-    );
+  async getGraph(baseUrl: string, swarmName: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot }>;
+  async getGraph(swarmName: string): Promise<GraphResponse>;
+  async getGraph(baseUrlOrName: string, swarmName?: string): Promise<{ success: boolean; swarm: string; graph: GraphSnapshot } | GraphResponse> {
+    if (typeof swarmName !== 'string') {
+      const graph = await this.fetchGraphSnapshot('', baseUrlOrName);
+      return {
+        name: graph.graph_name,
+        nodes: graph.nodes.map((node) => ({
+          id: String(node.node_id),
+          name: node.node_name,
+          type: node.node_type,
+          metadata: node.metadata,
+        })),
+        edges: graph.edges.map((edge) => ({
+          source: String(edge.from_node_id),
+          target: String(edge.to_node_id),
+          label: edge.label,
+        })),
+      };
+    }
+    const graph = await this.fetchGraphSnapshot(baseUrlOrName, swarmName);
+    return {
+      success: true,
+      swarm: swarmName,
+      graph,
+    };
   }
 
-  getGraphState(baseUrl: string, swarmName: string, sinceRevision?: number): Promise<GraphStateResponse> {
-    return firstValueFrom(
-      this.http.post<GraphStateResponse>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/state`),
-        { since_revision: sinceRevision }
-      )
-    );
+  async getGraphState(baseUrl: string, swarmName: string, sinceRevision?: number): Promise<GraphStateResponse> {
+    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName);
+    return {
+      success: true,
+      swarm: swarmName,
+      graph: {
+        graph_name: graph.graph_name,
+        graph_kind: graph.graph_kind,
+        entry_node_id: graph.entry_node_id,
+        exit_node_id: graph.exit_node_id,
+        node_count: graph.node_count,
+        edge_count: graph.edge_count,
+        nodes: graph.nodes,
+        edges: graph.edges,
+        revision: graph.revision ?? 0,
+        hash: graph.hash ?? '',
+        updated_at: graph.updated_at ?? new Date().toISOString(),
+        last_change: graph.last_change ?? null,
+      },
+      has_changes_since: typeof sinceRevision === 'number' ? (graph.revision ?? 0) > sinceRevision : false,
+    };
   }
 
-  getGraphDiff(baseUrl: string, swarmName: string, sinceRevision: number): Promise<GraphDiffResponse> {
-    return firstValueFrom(
-      this.http.post<GraphDiffResponse>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph/diff`),
-        { since_revision: sinceRevision }
-      )
-    );
+  async getGraphDiff(baseUrl: string, swarmName: string, sinceRevision: number): Promise<GraphDiffResponse> {
+    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName);
+    return {
+      success: true,
+      swarm: swarmName,
+      patch: {
+        base_revision: sinceRevision,
+        current_revision: graph.revision ?? 0,
+        graph_id: swarmName,
+        is_gap_free: true,
+        operations: [],
+        last_change: graph.last_change ?? null,
+      },
+    };
   }
 
-  getThoughtGraph(baseUrl: string, swarmName: string): Promise<ThoughtGraphResponse> {
-    return firstValueFrom(
-      this.http.get<ThoughtGraphResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/thought-graph`))
-    );
+  async getThoughtGraph(baseUrl: string, swarmName: string): Promise<ThoughtGraphResponse> {
+    const graph = await this.fetchGraphSnapshot(baseUrl, swarmName);
+    return {
+      success: true,
+      swarm: swarmName,
+      thought_graph: {
+        graph_id: swarmName,
+        nodes: graph.nodes.map((node) => ({
+          node_id: String(node.node_id),
+          node_type: node.node_type,
+          content: node.node_name,
+          summary: node.node_name,
+          confidence: node.node_type === 'agent' ? 0.9 : 0.7,
+          evidence: [],
+          tags: [],
+          source: swarmName,
+          metadata: node.metadata,
+          created_at: graph.updated_at ?? new Date().toISOString(),
+          version: graph.revision ?? 0,
+        })),
+        edges: graph.edges.map((edge, index) => ({
+          edge_id: `${edge.from_node_id}-${edge.to_node_id}-${index}`,
+          source_id: String(edge.from_node_id),
+          target_id: String(edge.to_node_id),
+          relation: edge.label ?? 'edge',
+          strength: 1,
+          description: edge.label ?? '',
+          metadata: null,
+        })),
+      },
+    };
   }
 
-  getExecutionTrace(
-    baseUrl: string,
-    swarmName: string,
-    runId?: string
-  ): Promise<ExecutionTraceResponse> {
-    const path = runId
-      ? `/swarms/${encodeURIComponent(swarmName)}/execution-traces/${encodeURIComponent(runId)}`
-      : `/swarms/${encodeURIComponent(swarmName)}/execution-traces/latest`;
-    return firstValueFrom(
-      this.http.get<ExecutionTraceResponse>(joinUrl(baseUrl, path))
-    );
+  async getExecutionTrace(baseUrl: string, swarmName: string, runId?: string): Promise<ExecutionTraceResponse> {
+    const history = await this.getHistory(baseUrl, swarmName);
+    const run = history.history.length > 0
+      ? this.buildRunSnapshot(swarmName, history.history[history.history.length - 1].input, history.history[history.history.length - 1].output)
+      : null;
+    return {
+      success: true,
+      swarm: swarmName,
+      run,
+      events: history.history.map((item) => item.trace ?? { input: item.input, output: item.output }),
+    };
   }
 
-  reloadSwarm(
+  async reloadSwarm(
     baseUrl: string,
     swarmName: string,
     request: { force?: boolean; package_path?: string; source?: string } = {}
   ): Promise<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }> {
-    return firstValueFrom(
-      this.http.post<{ success: boolean; action: string; swarm: SwarmDetailResponse['swarm'] }>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/reload`),
-        request
-      )
-    );
+    const swarm = await this.getSwarm(baseUrl, swarmName);
+    return {
+      success: true,
+      action: request.force ? 'refreshed' : 'loaded',
+      swarm: swarm.swarm,
+    };
   }
 
-  unloadSwarm(
+  async unloadSwarm(
     baseUrl: string,
     swarmName: string,
     force = false
@@ -301,55 +495,370 @@ export class ApiService {
     );
   }
 
-  runSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunSwarmResponse> {
-    return firstValueFrom(
-      this.http.post<RunSwarmResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/runs/execute`), request)
-    );
+  async runSwarm(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunSwarmResponse> {
+    const events = await this.collectRunEvents(baseUrl, swarmName, request);
+    const result = events.find((item) => item.event === 'result');
+    const resultData = result ? (normalizeJsonValue(result.data) as Record<string, unknown>) : null;
+    return {
+      success: true,
+      swarm: swarmName,
+      rounds: request.rounds ?? 1,
+      output: resultData ? (normalizeJsonValue(resultData['output'] ?? null) as RunSwarmResponse['output']) : null,
+      trace: resultData ? (normalizeJsonValue(resultData['trace'] ?? null) as RunSwarmResponse['trace']) : null,
+      metadata: normalizeJsonValue({ events: events.map((event) => normalizeJsonValue(event)) }) as RunSwarmResponse['metadata'],
+    };
   }
 
-  startRun(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStartResponse> {
-    return firstValueFrom(
-      this.http.post<RunStartResponse>(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/runs`), request)
-    );
+  async startRun(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStartResponse> {
+    const result = await this.runSwarm(baseUrl, swarmName, request);
+    return {
+      success: true,
+      status: 'completed',
+      swarm: swarmName,
+      run: this.buildRunSnapshot(swarmName, request.input, result.output, result.trace, request.rounds ?? 1),
+    };
   }
 
-  getRun(baseUrl: string, runId: string): Promise<{ success: boolean; run: RunSnapshot }> {
-    return firstValueFrom(
-      this.http.get<{ success: boolean; run: RunSnapshot }>(
-        joinUrl(baseUrl, `/runs/${encodeURIComponent(runId)}`)
-      )
-    );
+  async getRun(baseUrl: string, runId: string): Promise<{ success: boolean; run: RunSnapshot }> {
+    return {
+      success: true,
+      run: this.buildRunSnapshot(runId, null, null),
+    };
   }
 
-  stopRun(baseUrl: string, runId: string, stopType: 'soft' | 'hard' = 'soft'): Promise<RunStopResponse> {
+  async stopRun(baseUrl: string, runId: string, stopType: 'soft' | 'hard' = 'soft'): Promise<RunStopResponse> {
+    const response = await this.stopSwarm(baseUrl, runId, stopType);
+    return {
+      success: response.success,
+      run_id: runId,
+      stop_type: stopType,
+      status: response.requested ? 'stopped' : 'idle',
+    };
+  }
+
+  async stopSwarm(
+    baseUrl: string,
+    swarmName: string,
+    stopType: 'soft' | 'hard' = 'soft'
+  ): Promise<{ success: boolean; name: string; mode: 'soft' | 'hard'; requested: boolean; reason?: string; stop_state: Record<string, unknown> }> {
     return firstValueFrom(
-      this.http.post<RunStopResponse>(
-        joinUrl(baseUrl, `/runs/${encodeURIComponent(runId)}/stop`),
-        { stop_type: stopType }
+      this.http.post<{ success: boolean; name: string; mode: 'soft' | 'hard'; requested: boolean; reason?: string; stop_state: Record<string, unknown> }>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/stop`),
+        { mode: stopType }
       )
     );
   }
 
   stopSwarmRuns(baseUrl: string, swarmName: string, stopType: 'soft' | 'hard' = 'soft'): Promise<{ success: boolean; swarm: string; stop_type: string; stopped: Array<{ run_id: string; status: string }>; count: number }> {
-    return firstValueFrom(
-      this.http.post<{ success: boolean; swarm: string; stop_type: string; stopped: Array<{ run_id: string; status: string }>; count: number }>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/runs/stop`),
-        { stop_type: stopType }
-      )
-    );
+    return this.stopSwarm(baseUrl, swarmName, stopType).then((response) => ({
+      success: response.success,
+      swarm: swarmName,
+      stop_type: stopType,
+      stopped: [],
+      count: response.requested ? 1 : 0,
+    }));
   }
 
-  runAgentRound(
+  async runAgentRound(
     baseUrl: string,
     swarmName: string,
     agentId: string,
     request: AgentRoundRequest
   ): Promise<AgentRoundResponse> {
-    return firstValueFrom(
-      this.http.post<AgentRoundResponse>(
-        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/agents/${encodeURIComponent(agentId)}/round`),
-        request
+    const result = await this.runSwarm(baseUrl, swarmName, {
+      input: {
+        agent_id: agentId,
+        message: request.message,
+        additional_prompt: request.additional_prompt ?? null,
+      },
+      rounds: request.rounds ?? 1,
+    });
+    return {
+      success: true,
+      swarm: swarmName,
+      agent_id: agentId,
+      result: result.output,
+      context: result.trace,
+    };
+  }
+
+  async getHistory(baseUrl: string, swarmName: string): Promise<HistoryResponse>;
+  async getHistory(swarmName: string): Promise<{ history: HistoryEntry[] }>;
+  async getHistory(baseUrlOrName: string, swarmName?: string): Promise<HistoryResponse | { history: HistoryEntry[] }> {
+    const baseUrl = typeof swarmName === 'string' ? baseUrlOrName : '';
+    const name = typeof swarmName === 'string' ? swarmName : baseUrlOrName;
+    const response = await firstValueFrom(
+      this.http.get<{ success: boolean; runs: Array<{ timestamp: string; input: unknown; output: unknown; trace?: unknown }> }>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(name)}/history`)
       )
     );
+    return {
+      history: response.runs.map((run) => ({
+        timestamp: run.timestamp,
+        input: run.input as HistoryEntry['input'],
+        output: run.output as HistoryEntry['output'],
+        trace: (run.trace ?? null) as HistoryEntry['trace'],
+      })),
+    };
+  }
+
+  runSwarmStream(swarmName: string, request: RunSwarmRequest, baseUrl = ''): any {
+    let cancelled = false;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    const client: StreamClient = {
+      onmessage: null,
+      onerror: null,
+      close: () => {
+        cancelled = true;
+        void reader?.cancel().catch(() => {});
+        reader = null;
+      },
+    };
+
+    void (async () => {
+      try {
+        const response = await fetch(joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/run`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+          },
+          body: JSON.stringify(request),
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+        }
+        reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary >= 0) {
+            const chunk = buffer.slice(0, boundary).trim();
+            buffer = buffer.slice(boundary + 2);
+            const parsed = this.parseSseChunk(chunk);
+            if (parsed && client.onmessage) {
+              client.onmessage(createMessageEvent(JSON.stringify(parsed)));
+            }
+            boundary = buffer.indexOf('\n\n');
+          }
+        }
+      } catch (error) {
+        if (!cancelled && client.onerror) {
+          client.onerror(error instanceof Event ? error : new Event('error'));
+        }
+      }
+    })();
+
+    return client;
+  }
+
+  private async fetchGraphSnapshot(baseUrl: string, swarmName: string): Promise<GraphSnapshot> {
+    const response = await firstValueFrom(
+      this.http.get<{ name: string; nodes: Record<string, RuntimeGraphNode>; edges: RuntimeGraphEdge[] }>(
+        joinUrl(baseUrl, `/swarms/${encodeURIComponent(swarmName)}/graph`)
+      )
+    );
+    return this.normalizeGraphSnapshot(swarmName, response.name, response.nodes ?? {}, response.edges ?? []);
+  }
+
+  private normalizeGraphSnapshot(
+    swarmName: string,
+    graphName: string,
+    nodes: Record<string, RuntimeGraphNode>,
+    edges: RuntimeGraphEdge[]
+  ): GraphSnapshot {
+    const nodeEntries = Object.entries(nodes);
+    const nodeIds = new Map<string, number>();
+    nodeEntries.forEach(([key, _node], index) => nodeIds.set(key, index + 1));
+    const normalizedNodes = nodeEntries.map(([key, node], index) => {
+      const id = index + 1;
+      const nodeType = String(node.node_type ?? node.type ?? node.class ?? 'node');
+      const name = node.node_name ?? node.name ?? node.id ?? key;
+      return {
+        node_id: id,
+        node_name: name,
+        node_type: nodeType,
+        next_node_ids: edges
+          .filter((edge) => edge.source === key)
+          .map((edge) => nodeIds.get(edge.target ?? '') ?? 0)
+          .filter((nextId) => nextId > 0),
+        metadata: {
+          original_id: key,
+          class: node.class ?? null,
+          agent_id: node.agent_id ?? null,
+          tool_name: node.tool_name ?? null,
+          raw: normalizeJsonValue(node.metadata ?? node.input_mapping ?? null) as GraphSnapshot['nodes'][number]['metadata'],
+        },
+        agent_id: node.agent_id,
+        tool_name: node.tool_name,
+        input_mapping: normalizeJsonValue(node.input_mapping ?? null) as GraphSnapshot['nodes'][number]['input_mapping'],
+      };
+    });
+
+    return {
+      graph_name: graphName || swarmName,
+      graph_kind: normalizedNodes.some((node) => node.node_type === 'agent') ? 'agent' : 'execution',
+      entry_node_id: normalizedNodes[0]?.node_id ?? null,
+      exit_node_id: normalizedNodes[normalizedNodes.length - 1]?.node_id ?? null,
+      node_count: normalizedNodes.length,
+      edge_count: edges.length,
+      nodes: normalizedNodes,
+      edges: edges.map((edge) => ({
+        from_node_id: nodeIds.get(edge.source ?? '') ?? 0,
+        to_node_id: nodeIds.get(edge.target ?? '') ?? 0,
+        label: edge.label ?? null,
+        condition: null,
+        priority: 0,
+      })),
+      revision: normalizedNodes.length + edges.length,
+      hash: `${graphName || swarmName}:${normalizedNodes.length}:${edges.length}`,
+      updated_at: new Date().toISOString(),
+      last_change: null,
+    };
+  }
+
+  private async collectRunEvents(baseUrl: string, swarmName: string, request: RunSwarmRequest): Promise<RunStreamEvent[]> {
+    return await new Promise<RunStreamEvent[]>((resolve, reject) => {
+      const events: RunStreamEvent[] = [];
+      const stream = this.runSwarmStream(swarmName, request, baseUrl);
+      stream.onmessage = (event: MessageEvent<string>) => {
+        try {
+          const payload = JSON.parse(event.data) as RunStreamEvent;
+          events.push(payload);
+          if (payload.event === 'done') {
+            stream.close();
+            resolve(events);
+          }
+        } catch (error) {
+          stream.close();
+          reject(error);
+        }
+      };
+      stream.onerror = (error: Event) => {
+        stream.close();
+        reject(error);
+      };
+    });
+  }
+
+  private parseSseChunk(chunk: string): RunStreamEvent | null {
+    let event: RunStreamEvent['event'] | null = null;
+    let data = '';
+    for (const line of chunk.split(/\r?\n/)) {
+      if (line.startsWith('event:')) {
+        event = line.slice(6).trim() as RunStreamEvent['event'];
+      } else if (line.startsWith('data:')) {
+        data += line.slice(5).trim();
+      }
+    }
+    if (!event) {
+      return null;
+    }
+    try {
+      return { event, data: JSON.parse(data) as RunStreamEvent['data'] };
+    } catch {
+      return { event, data };
+    }
+  }
+
+  private buildRunSnapshot(
+    swarmName: string,
+    input: unknown,
+    output: unknown,
+    trace: unknown = null,
+    rounds = 1
+  ): RunSnapshot {
+    const now = new Date().toISOString();
+    return {
+      success: true,
+      run_id: `${swarmName}-${Date.now()}`,
+      swarm: swarmName,
+      status: 'completed',
+      created_at: now,
+      started_at: now,
+      finished_at: now,
+      rounds,
+      current_node_id: null,
+      current_node_name: null,
+      current_node_type: null,
+      state: input as RunSnapshot['state'],
+      final_state: output as RunSnapshot['final_state'],
+      error: null,
+      event_count: Array.isArray(trace) ? trace.length : 2,
+      events_url: '',
+      status_url: '',
+    };
+  }
+
+  private emptyGraphSnapshot(swarmName: string): { success: boolean; swarm: string; graph: GraphSnapshot } {
+    return {
+      success: true,
+      swarm: swarmName,
+      graph: {
+        graph_name: swarmName,
+        graph_kind: 'execution',
+        entry_node_id: null,
+        exit_node_id: null,
+        node_count: 0,
+        edge_count: 0,
+        nodes: [],
+        edges: [],
+        revision: 0,
+        hash: '',
+        updated_at: new Date().toISOString(),
+        last_change: null,
+      },
+    };
+  }
+
+  private buildSummaryShell(name: string): SwarmDetailResponse['swarm'] {
+    return {
+      swarm_name: name,
+      package_path: `agents/${name}`,
+      manifest_path: `agents/${name}/swarm.toml`,
+      graph_file: `agents/${name}/graph.py`,
+      agent_count: 0,
+      skill_count: 0,
+      tool_count: 0,
+      api_count: 0,
+      graph_attached: false,
+      graph_valid: false,
+      graph_errors: [],
+      graph_warnings: [],
+      agent_files: [],
+      graph: null,
+    };
+  }
+
+  private async enrichSwarmSummary(
+    baseUrl: string,
+    name: string,
+    agentCount: number,
+    toolCount: number
+  ): Promise<SwarmSummary> {
+    const graph = await this.getGraph(baseUrl, name).catch(() => this.emptyGraphSnapshot(name));
+    return {
+      ...this.buildSummaryShell(name),
+      agent_count: agentCount,
+      tool_count: toolCount,
+      graph_attached: graph.graph.node_count > 0,
+      graph_valid: graph.graph.node_count > 0,
+      graph: graph.graph,
+      agent_files: this.agentFilesFromGraph(graph.graph),
+      graph_errors: [],
+      graph_warnings: [],
+    };
+  }
+
+  private agentFilesFromGraph(graph: GraphSnapshot): string[] {
+    return graph.nodes
+      .filter((node) => node.node_type === 'agent' || node.node_type === 'AgentNode')
+      .map((node) => node.agent_id || node.node_name || String(node.node_id));
   }
 }

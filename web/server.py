@@ -127,6 +127,17 @@ def _sse_event(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+def _resolve_swarm_root(config_path: Optional[Path]) -> str | Path:
+    if config_path is None:
+        return "agents"
+    path = Path(config_path).expanduser().resolve()
+    if not path.is_file():
+        return "agents"
+    with path.open("rb") as fh:
+        config = tomllib.load(fh)
+    return config.get("app", {}).get("swarm_root", "agents")
+
+
 async def _load_swarm_from_source(source: str) -> tuple[str, Any]:
     """Best-effort swarm loading from a file-system path.
 
@@ -159,69 +170,17 @@ async def _load_swarm_from_source(source: str) -> tuple[str, Any]:
         return name, swarm
 
     # --- TOML / directory -------------------------------------------------
-    manifest: Dict[str, Any] = {}
-    if path.is_dir():
-        toml_path = path / "swarm.toml"
-        if toml_path.is_file():
-            with open(toml_path, "rb") as fh:
-                manifest = tomllib.load(fh)
-        package_root = path
-    elif path.is_file() and path.suffix == ".toml":
-        with open(path, "rb") as fh:
-            manifest = tomllib.load(fh)
-        package_root = path.parent
-    else:
-        raise ValueError(f"Unsupported swarm source: {source}")
-
-    swarm_cfg = manifest.get("swarm", {})
-    name = swarm_cfg.get("name", path.stem if path.is_file() else path.name)
-
-    fetcher = _resolve_fetcher_from_manifest(manifest)
-    swarm = _core.create_swarm(name, llm_fetcher=fetcher)
-
-    # --- Optional graph.py ------------------------------------------------
-    graph_file = swarm_cfg.get("graph_file", "graph.py")
-    graph_path = package_root / graph_file
-    if graph_path.is_file() and fetcher is not None:
-        try:
-            import importlib.util
-
-            mod_name = f"_angelus_swarm_graph_{name}"
-            spec = importlib.util.spec_from_file_location(mod_name, graph_path)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                if hasattr(mod, "build_graph"):
-                    graph = mod.build_graph(swarm)
-                    if isinstance(graph, ExecutionGraph):
-                        swarm.execution_graph = graph
-        except Exception as exc:
-            _core.record_runtime_change(
-                action="load_graph_skipped",
-                subject_kind="swarm",
-                subject_id=name,
-                detail={"reason": str(exc), "graph_file": str(graph_path)},
-            )
-
-    # --- Global variables -------------------------------------------------
-    globals_cfg = manifest.get("globals")
-    if globals_cfg is not None:
-        _core.set_global_variables(globals_cfg)
-
-    # --- Tool capabilities ------------------------------------------------
-    tool_caps = manifest.get("tool_capabilities", {})
-    for tool_name, caps in tool_caps.items():
-        if isinstance(caps, list):
-            _core.set_tool_capabilities(tool_name, caps)
-
-    return name, swarm
+    record = _core.load_swarm_from_source(path)
+    if record.swarm is None:
+        raise ValueError(record.reason or f"Unsupported swarm source: {source}")
+    return record.package_name, record.swarm
 
 
 def _resolve_fetcher_from_manifest(manifest: Dict[str, Any]) -> Optional[LLMFetcher]:
     llm_block = manifest.get("llm", {}).get("default", {})
     if llm_block.get("api_url"):
         backend = LLMBackendConfig(
-            name=llm_block.get("name", "default"),
+            name=str(llm_block.get("name") or "default"),
             provider=llm_block.get("provider", "openai"),
             api_url=llm_block["api_url"],
             api_key=_resolve_api_key(llm_block.get("api_key", "")),
@@ -268,6 +227,8 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
         description="Thin REST layer over the Angelus swarm runtime.",
         version="2.0.0",
     )
+    swarm_root = _resolve_swarm_root(config_path)
+    app.state.agent_packages = _core.initialize_agent_packages(swarm_root)
 
     # ------------------------------------------------------------------
     # Routes

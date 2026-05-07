@@ -81,7 +81,7 @@ def _resolve_api_token(config: Dict[str, Any]) -> str | None:
     return os.environ.get(env_name)
 
 
-def build_app(config: Dict[str, Any]) -> FastAPI:
+def build_app(config: Dict[str, Any], config_path: Path | None = None) -> FastAPI:
     """Assemble the main ASGI application.
 
     * Creates the business-route app via :func:`web.create_app`.
@@ -92,7 +92,7 @@ def build_app(config: Dict[str, Any]) -> FastAPI:
     api_cfg = config.get("api", {})
 
     # Business routes (thin REST layer over the runtime)
-    app = create_app(config_path=None)
+    app = create_app(config_path=config_path)
 
     # CORS
     cors_origins = api_cfg.get("cors_allowed_origins", [])
@@ -135,7 +135,7 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
 
-    app = build_app(config)
+    app = build_app(config, config_path=args.config)
 
     host = args.host or app.state.host
     port = args.port or app.state.port

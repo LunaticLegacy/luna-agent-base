@@ -7,7 +7,9 @@ Core acts as the registry, loader, and lifecycle manager.
 
 from __future__ import annotations
 
+import os
 import json
+import importlib.util
 import time
 import tomllib
 from collections import defaultdict
@@ -17,7 +19,17 @@ from typing import Any, Dict, List, Optional, Set
 
 from modules.llm_fetcher import LLMBackendConfig, LLMFetcher
 from modules.llm_fetcher.agent import Agent
-from modules.llm_fetcher.swarm.execution_graph import ExecutionGraph
+from modules.llm_fetcher.swarm.execution_graph import (
+    AgentNode,
+    Edge,
+    ExecutionGraph,
+    ExecutionNode,
+    InputNode,
+    JoinNode,
+    OutputNode,
+    RouterNode,
+    ToolNode,
+)
 from modules.llm_fetcher.swarm.swarm import AgentSwarm, SwarmSpec
 from modules.llm_fetcher.thinking_graph import ThinkingGraph
 from modules.llm_fetcher.tool import Tool, ToolRegistry
@@ -61,6 +73,20 @@ class RuntimeChangeRecord:
     detail: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class AgentPackageRecord:
+    """Snapshot of one discovered agent package."""
+
+    package_name: str
+    package_root: Path
+    manifest_path: Path
+    workspace_root: Path
+    valid: bool
+    reason: str = ""
+    swarm_name: Optional[str] = None
+    swarm: Optional[AgentSwarm] = None
+
+
 # ---------------------------------------------------------------------------
 # Core — multi-swarm manager
 # ---------------------------------------------------------------------------
@@ -82,6 +108,8 @@ class Core:
         self._history: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self._global_variables = GlobalVariablesConfig()
         self._tool_capabilities: Dict[str, Set[str]] = {}
+        self.valid_agent_packages: Dict[str, AgentPackageRecord] = {}
+        self.invalid_agent_packages: Dict[str, AgentPackageRecord] = {}
         self.architecture_manager: Dict[str, Any] = {
             "runtime_changes": [],
         }
@@ -150,6 +178,176 @@ class Core:
             for tool in tools:
                 swarm.add_tool(tool)
         return swarm
+
+    def discover_agent_package_roots(self, swarm_root: str | Path = "agents") -> List[Path]:
+        """Return all package directories under ``swarm_root`` that contain ``swarm.toml``."""
+        root = Path(swarm_root).expanduser().resolve()
+        if not root.exists():
+            return []
+        packages: List[Path] = []
+        for entry in sorted(root.iterdir()):
+            if entry.is_dir() and (entry / "swarm.toml").is_file():
+                packages.append(entry.resolve())
+        return packages
+
+    def initialize_agent_packages(self, swarm_root: str | Path = "agents") -> Dict[str, List[AgentPackageRecord]]:
+        """Load every agent package found under ``swarm_root`` and classify it."""
+        self.valid_agent_packages.clear()
+        self.invalid_agent_packages.clear()
+        for package_root in self.discover_agent_package_roots(swarm_root):
+            record = self._inspect_agent_package(package_root)
+            target = self.valid_agent_packages if record.valid else self.invalid_agent_packages
+            target[record.package_name] = record
+        return {
+            "valid": list(self.valid_agent_packages.values()),
+            "invalid": list(self.invalid_agent_packages.values()),
+        }
+
+    def load_swarm_from_source(self, source: str | Path) -> AgentPackageRecord:
+        """Load one swarm package from a directory or ``swarm.toml`` file."""
+        path = Path(source).expanduser().resolve()
+        if path.is_dir():
+            package_root = path
+        elif path.is_file() and path.suffix == ".toml":
+            package_root = path.parent
+        else:
+            raise ValueError(f"Unsupported swarm source: {source}")
+
+        record = self._build_runtime_swarm_from_package(package_root)
+        if not record.valid or record.swarm is None:
+            raise ValueError(record.reason or f"Failed to load swarm package: {package_root}")
+        return record
+
+    def _inspect_agent_package(self, package_root: Path) -> AgentPackageRecord:
+        manifest_path = package_root / "swarm.toml"
+        workspace_root = (package_root / "workspace").resolve()
+        workspace_root.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with manifest_path.open("rb") as handle:
+                manifest = tomllib.load(handle)
+            swarm_block = manifest.get("swarm", {})
+            package_name = str(swarm_block.get("name") or package_root.name)
+            graph_file = str(swarm_block.get("graph_file") or "").strip()
+            agent_files = swarm_block.get("agent_files", [])
+            if not graph_file:
+                raise ValueError("missing swarm.graph_file")
+            if not isinstance(agent_files, list) or not agent_files:
+                raise ValueError("missing swarm.agent_files")
+
+            graph_path = package_root / graph_file
+            if not graph_path.is_file():
+                raise FileNotFoundError(f"Graph file not found: {graph_path}")
+
+            for rel_path in agent_files:
+                agent_path = (package_root / str(rel_path)).resolve()
+                if not agent_path.is_file():
+                    raise FileNotFoundError(f"Agent file not found: {agent_path}")
+
+            llm_block = manifest.get("llm", {}).get("default", {})
+            if not llm_block.get("api_url") or not llm_block.get("model"):
+                raise ValueError("missing llm.default.api_url/model")
+
+            swarm = self.create_swarm(package_name, llm_fetcher=self._create_placeholder_fetcher(package_name))
+            record = AgentPackageRecord(
+                package_name=package_name,
+                package_root=package_root,
+                manifest_path=manifest_path,
+                workspace_root=workspace_root,
+                valid=True,
+                swarm_name=package_name,
+                swarm=swarm,
+            )
+            return record
+        except Exception as exc:
+            return AgentPackageRecord(
+                package_name=package_root.name,
+                package_root=package_root,
+                manifest_path=manifest_path,
+                workspace_root=workspace_root,
+                valid=False,
+                reason=str(exc),
+            )
+
+    def _build_runtime_swarm_from_package(self, package_root: Path) -> AgentPackageRecord:
+        manifest_path = package_root / "swarm.toml"
+        workspace_root = (package_root / "workspace").resolve()
+        workspace_root.mkdir(parents=True, exist_ok=True)
+        package_name = package_root.name
+        swarm: Optional[AgentSwarm] = None
+
+        try:
+            with manifest_path.open("rb") as handle:
+                manifest = tomllib.load(handle)
+            swarm_block = manifest.get("swarm", {})
+            package_name = str(swarm_block.get("name") or package_root.name)
+            graph_file = str(swarm_block.get("graph_file") or "").strip()
+            agent_files = swarm_block.get("agent_files", [])
+            if not graph_file:
+                raise ValueError("missing swarm.graph_file")
+            if not isinstance(agent_files, list) or not agent_files:
+                raise ValueError("missing swarm.agent_files")
+
+            fetcher = self._resolve_fetcher_from_manifest(manifest, fallback_name=package_name)
+            if fetcher is None:
+                raise ValueError("missing llm.default.api_url/api_key/model")
+
+            swarm = self.create_swarm(package_name, llm_fetcher=fetcher)
+
+            graph_path = package_root / graph_file
+            if not graph_path.is_file():
+                raise FileNotFoundError(f"Graph file not found: {graph_path}")
+
+            spec = importlib.util.spec_from_file_location(
+                f"_angelus_swarm_graph_{package_name}",
+                graph_path,
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Cannot load graph file: {graph_path}")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, "build_graph"):
+                raise AttributeError(f"Graph file does not define build_graph(): {graph_path}")
+
+            graph = module.build_graph(swarm)
+            if graph is None:
+                graph = getattr(swarm, "execution_graph", None)
+            if not isinstance(graph, ExecutionGraph):
+                raise TypeError(f"build_graph() did not return an ExecutionGraph for {package_name}")
+
+            swarm.execution_graph = graph
+
+            globals_cfg = manifest.get("globals")
+            if globals_cfg is not None:
+                self.set_global_variables(globals_cfg)
+
+            tool_caps = manifest.get("tool_capabilities", {})
+            for tool_name, caps in tool_caps.items():
+                if isinstance(caps, list):
+                    self.set_tool_capabilities(tool_name, caps)
+
+            record = AgentPackageRecord(
+                package_name=package_name,
+                package_root=package_root,
+                manifest_path=manifest_path,
+                workspace_root=workspace_root,
+                valid=True,
+                swarm_name=package_name,
+                swarm=swarm,
+            )
+            self.register_swarm(package_name, swarm)
+            return record
+        except Exception as exc:
+            if swarm is not None:
+                self.swarms.pop(package_name, None)
+            return AgentPackageRecord(
+                package_name=package_root.name,
+                package_root=package_root,
+                manifest_path=manifest_path,
+                workspace_root=workspace_root,
+                valid=False,
+                reason=str(exc),
+            )
 
     # ------------------------------------------------------------------
     # History
@@ -247,6 +445,41 @@ class Core:
             data["node_count"] = len(node_items)
         return json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
 
+    def _resolve_fetcher_from_manifest(
+        self,
+        manifest: Dict[str, Any],
+        *,
+        fallback_name: str,
+    ) -> Optional[LLMFetcher]:
+        llm_block = manifest.get("llm", {}).get("default", {})
+        if llm_block.get("api_url"):
+            backend = LLMBackendConfig(
+                name=str(llm_block.get("name") or fallback_name or "default"),
+                provider=llm_block.get("provider", "openai"),
+                api_url=llm_block["api_url"],
+                api_key=self._resolve_api_key(llm_block.get("api_key", "")),
+                model=llm_block.get("model", ""),
+            )
+            return LLMFetcher(backends=[backend])
+        return None
+
+    @staticmethod
+    def _create_placeholder_fetcher(name: str) -> LLMFetcher:
+        backend = LLMBackendConfig(
+            name=name or "default",
+            provider="litellm",
+            api_url="",
+            api_key="",
+            model="",
+        )
+        return LLMFetcher(backends=[backend])
+
+    @staticmethod
+    def _resolve_api_key(expr: str) -> str:
+        if expr.startswith("${") and expr.endswith("}"):
+            return os.environ.get(expr[2:-1], "")
+        return expr
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
@@ -286,15 +519,24 @@ class Core:
 
 __all__ = [
     "Agent",
+    "AgentNode",
+    "AgentPackageRecord",
     "AgentSwarm",
+    "Edge",
     "Core",
     "ExecutionGraph",
+    "ExecutionNode",
     "GlobalVariablesConfig",
     "LLMBackendConfig",
     "LLMFetcher",
+    "InputNode",
+    "JoinNode",
     "RuntimeChangeRecord",
+    "OutputNode",
+    "RouterNode",
     "SwarmSpec",
     "ThinkingGraph",
     "Tool",
     "ToolRegistry",
+    "ToolNode",
 ]

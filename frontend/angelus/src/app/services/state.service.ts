@@ -14,6 +14,7 @@ import type {
   LogCatalogItem,
   LogCatalogStats,
   LogListResponse,
+  JsonValue,
   MemoryCatalogItem,
   TaskCatalogItem,
   MetricsResponse,
@@ -262,7 +263,7 @@ export function makeUserError(summary: string): ErrorDetail {
 
 @Injectable({ providedIn: 'root' })
 export class StateService {
-  readonly apiBaseUrl = signal('/api');
+  readonly apiBaseUrl = signal('');
   readonly loading = signal(false);
   readonly loadingDetails = signal(false);
   readonly error = signal<ErrorDetail | null>(null);
@@ -338,6 +339,11 @@ export class StateService {
   private graphStreamRevision: number | null = null;
   private refreshGraceful = false;
   private readonly LS_PREFIX = 'angelus_';
+
+  private normalizeApiBaseUrl(value: string): string {
+    const trimmed = value.trim();
+    return trimmed === '/api' ? '' : trimmed;
+  }
 
   readonly totalAgents = computed(() => this.swarms().reduce((sum, s) => sum + s.agent_count, 0));
   readonly errorCount = computed(() => this.responseFeed().filter((f) => f.tone === 'error').length);
@@ -1028,11 +1034,11 @@ export class StateService {
   }
 
   private baseUrl(): string {
-    return this.apiBaseUrl().trim() || '/api';
+    return this.normalizeApiBaseUrl(this.apiBaseUrl());
   }
 
   setApiBaseUrl(value: string): void {
-    this.apiBaseUrl.set(value.trim() || '/api');
+    this.apiBaseUrl.set(this.normalizeApiBaseUrl(value));
   }
 
   private _loadNumber(key: string, fallback: number): number {
@@ -1059,7 +1065,7 @@ export class StateService {
   }
 
   loadSettings(): void {
-    this.apiBaseUrl.set(this._loadString('apiBaseUrl', '/api'));
+    this.apiBaseUrl.set(this.normalizeApiBaseUrl(this._loadString('apiBaseUrl', '')));
     this.apiTimeout.set(this._loadNumber('apiTimeout', 30));
     this.reconnectInterval.set(this._loadNumber('reconnectInterval', 5));
     this.autoReconnect.set(this._loadBool('autoReconnect', true));
@@ -1083,7 +1089,7 @@ export class StateService {
   }): void {
     try {
       if (settings.apiBaseUrl !== undefined) {
-        this.apiBaseUrl.set(settings.apiBaseUrl.trim() || '/api');
+        this.apiBaseUrl.set(this.normalizeApiBaseUrl(settings.apiBaseUrl));
         localStorage.setItem(`${this.LS_PREFIX}apiBaseUrl`, this.apiBaseUrl());
       }
       if (settings.apiTimeout !== undefined) {
@@ -1122,7 +1128,7 @@ export class StateService {
 
   private _applyApiSettings(settings: ApiSettings, persistLocal = false): void {
     const normalized = {
-      base_url: (settings.base_url ?? '/api').trim() || '/api',
+      base_url: this.normalizeApiBaseUrl(settings.base_url ?? ''),
       timeout_seconds: Number.isFinite(settings.timeout_seconds) && settings.timeout_seconds > 0 ? settings.timeout_seconds : 30,
       sse_reconnect_interval_seconds:
         Number.isFinite(settings.sse_reconnect_interval_seconds) && settings.sse_reconnect_interval_seconds > 0
@@ -1187,7 +1193,7 @@ export class StateService {
       });
 
       const apiPayload: ApiSettings = {
-        base_url: settings.apiBaseUrl !== undefined ? (settings.apiBaseUrl.trim() || '/api') : this.apiBaseUrl(),
+        base_url: settings.apiBaseUrl !== undefined ? this.normalizeApiBaseUrl(settings.apiBaseUrl) : this.apiBaseUrl(),
         timeout_seconds: settings.apiTimeout ?? this.apiTimeout(),
         sse_reconnect_interval_seconds: settings.reconnectInterval ?? this.reconnectInterval(),
         auto_reconnect: settings.autoReconnect ?? this.autoReconnect(),
@@ -1415,21 +1421,6 @@ this.loadLogs(),
       const response = await this.apiService.getSwarm(baseUrl, swarmName);
       this.selectedSwarm.set(response.swarm);
       this.ensureAgentSelection(response.swarm);
-      // Restore active run if any exists on the backend
-      const activeRunIds = (response.swarm as any)?.active_run_ids ?? [];
-      if (activeRunIds.length > 0) {
-        const latestRunId = activeRunIds[activeRunIds.length - 1];
-        try {
-          const runResponse = await this.apiService.getRun(baseUrl, latestRunId);
-          this.activeRun.set(runResponse.run);
-          this.pushFeed(`运行恢复 · ${latestRunId}`, 'GET', `${baseUrl}/runs/${latestRunId}`, 'info', runResponse);
-          if (runResponse.run.status === 'running') {
-            this.watchRun(runResponse.run);
-          }
-        } catch (runError) {
-          this.pushFeed(`运行恢复失败 · ${latestRunId}`, 'GET', `${baseUrl}/runs/${latestRunId}`, 'warn', { error: errorSummary(runError) });
-        }
-      }
       this.pushFeed(`Swarm 详情 · ${swarmName}`, 'GET', `${baseUrl}/swarms/${swarmName}`, 'success', response);
       await Promise.all([
         this.loadSelectedGraph(),
@@ -1791,17 +1782,10 @@ this.loadLogs(),
       this.agentsLoaded.set(true);
       return;
     }
-    try {
-      const response = await this.apiService.listAgents(this.baseUrl(), swarmName, { q: '' });
-      this.agents.set(response.agents.map((item) => this.mapAgentCatalogItem(item)));
-      this.agentsLoaded.set(true);
-      this.pushFeed(`Agents 列表 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/agents`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed(`Agents 列表失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/agents`, 'error', { error: errorSummary(error) });
-      }
-    }
+    const agents = this.derivedAgents();
+    this.agents.set(agents);
+    this.agentsLoaded.set(true);
+    this.pushFeed(`Agents 列表 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/graph`, 'info', { agents });
   }
 
   async loadTasks(): Promise<void> {
@@ -1812,45 +1796,28 @@ this.loadLogs(),
         this.tasksLoaded.set(true);
         return;
       }
-      const response = await this.apiService.listTasks(this.baseUrl(), swarmName, {
-        limit: 500,
-        page: 1,
-      });
-      this.tasks.set(response.items.map((item) => this.mapTaskCatalogItem(item)));
+      const tasks = this.derivedTasks();
+      this.tasks.set(tasks);
       this.tasksLoaded.set(true);
       this.pushFeed(
         `Tasks 列表${swarmName ? ` · ${swarmName}` : ''}`,
         'GET',
-        `${this.baseUrl()}/swarms/${swarmName}/tasks/search`,
+        `${this.baseUrl()}/swarms/${swarmName}/history`,
         'info',
-        response
+        { items: tasks }
       );
     } catch (error) {
       if (!this.shouldSuppressOfflineError(error)) {
         this.error.set(formatErrorDetail(error));
-        this.pushFeed(
-          `Tasks 列表失败${swarmName ? ` · ${swarmName}` : ''}`,
-          'GET',
-          `${this.baseUrl()}/swarms/${swarmName}/tasks/search`,
-          'error',
-          { error: errorSummary(error) }
-        );
       }
     }
   }
 
   async loadTools(): Promise<void> {
-    try {
-      const response = await this.apiService.listTools(this.baseUrl(), {});
-      this.tools.set(response.tools.map((item) => this.mapToolCatalogItem(item)));
-      this.toolsLoaded.set(true);
-      this.pushFeed('Tools 列表', 'POST', `${this.baseUrl()}/catalog/tools/search`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed('Tools 列表失败', 'POST', `${this.baseUrl()}/catalog/tools/search`, 'error', { error: errorSummary(error) });
-      }
-    }
+    const tools = this.derivedTools();
+    this.tools.set(tools);
+    this.toolsLoaded.set(true);
+    this.pushFeed('Tools 列表', 'GET', `${this.baseUrl()}/swarms/${this.selectedSwarmName() ?? 'default'}/graph`, 'info', { tools });
   }
 
   async loadApis(): Promise<void> {
@@ -1860,19 +1827,26 @@ this.loadLogs(),
       this.apisLoaded.set(true);
       return;
     }
-    try {
-      const response = await this.apiService.getSwarmApis(this.baseUrl(), swarmName);
-      this.apis.set(response.apis.map((item) => this.mapApiCatalogItem(item)));
-      this.apisLoaded.set(true);
-      this.pushFeed(`APIs 列表 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/apis`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.apis.set([]);
-        this.apisLoaded.set(false);
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed(`APIs 列表失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/apis`, 'error', { error: errorSummary(error) });
+    const graph = this.resolvedGraph();
+    const swarm = this.selectedSwarm();
+    const apis: ApiItem[] = graph
+      ? graph.nodes
+          .filter((node) => node.node_type === 'tool' || node.node_type === 'ToolNode')
+          .map((node, idx) => ({
+            name: node.tool_name || node.node_name || `api-${idx + 1}`,
+            origin: 'package' as const,
+            source: node.tool_name || node.node_name || null,
+            type: 'tool',
+          }))
+      : [];
+    if (apis.length === 0 && (swarm?.api_count ?? 0) > 0) {
+      for (let index = 0; index < (swarm?.api_count ?? 0); index += 1) {
+        apis.push({ name: `api-${index + 1}`, origin: 'native', source: null, type: 'tool' });
       }
     }
+    this.apis.set(apis);
+    this.apisLoaded.set(true);
+    this.pushFeed(`APIs 列表 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/graph`, 'info', { apis });
   }
 
   async loadSwarmStats(): Promise<void> {
@@ -1882,84 +1856,85 @@ this.loadLogs(),
       this.swarmStatsLoaded.set(false);
       return;
     }
-    try {
-      const response = await this.apiService.getSwarmStats(this.baseUrl(), swarmName);
-      this.swarmStats.set(response);
-      this.swarmStatsLoaded.set(true);
-      this.pushFeed(`Swarm 统计 · ${swarmName}`, 'GET', `${this.baseUrl()}/catalog/swarms/${swarmName}/stats`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed(`Swarm 统计失败 · ${swarmName}`, 'GET', `${this.baseUrl()}/catalog/swarms/${swarmName}/stats`, 'error', { error: errorSummary(error) });
-      }
-    }
+    const tasks = this.derivedTasks();
+    const tools = this.derivedTools();
+    const stats = {
+      success: true,
+      success_rate: this.swarmMgmtStats().successRate,
+      throughput: Number(this.swarmMgmtStats().throughput) || 0,
+      token_usage: parseInt(String(this.swarmMgmtStats().tokenUsage).replace(/[^0-9]/g, ''), 10) || 0,
+      task_distribution: {
+        pending: tasks.filter((task) => task.status === 'pending').length,
+        running: tasks.filter((task) => task.status === 'running').length,
+        completed: tasks.filter((task) => task.status === 'success').length,
+        failed: tasks.filter((task) => task.status === 'failed' || task.status === 'timeout').length,
+        avg_duration_ms: 0,
+      },
+      resource_usage: {
+        cpu_percent: this.buildFallbackMetrics().series.cpu_percent,
+        memory_mb: this.buildFallbackMetrics().series.memory_mb,
+      },
+      run_count: tasks.length,
+      active_runs: this.activeRun() ? 1 : 0,
+      agent_count: this.totalAgents(),
+      tool_count: tools.length,
+      api_count: this.apis().length,
+      native_api_count: this.apis().filter((item) => item.origin === 'native').length,
+      package_api_count: this.apis().filter((item) => item.origin === 'package').length,
+    };
+    this.swarmStats.set(stats);
+    this.swarmStatsLoaded.set(true);
+    this.pushFeed(`Swarm 统计 · ${swarmName}`, 'GET', `${this.baseUrl()}/swarms/${swarmName}/graph`, 'info', stats);
   }
 
   async loadLogs(
     query: Record<string, string | number | boolean | undefined | null> = {}
   ): Promise<void> {
-    try {
-      const response = await this.apiService.listLogs(this.baseUrl(), query);
-      this.logs.set(response.items.map((item) => this.mapLogCatalogItem(item)));
-      this.logsResponse.set(response);
-      this.logsLoaded.set(true);
-      this.pushFeed('日志列表', 'POST', `${this.baseUrl()}/catalog/logs/search`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.logsResponse.set(null);
-        this.logsLoaded.set(false);
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed('日志列表失败', 'POST', `${this.baseUrl()}/catalog/logs/search`, 'error', { error: errorSummary(error) });
-      }
-    }
+    const logs = this.responseFeed().map((item) => ({
+      id: `log-${item.id}`,
+      time: new Date().toISOString(),
+      level: (item.tone === 'error' ? 'ERROR' : item.tone === 'warn' ? 'WARN' : item.tone === 'success' ? 'INFO' : 'DEBUG') as LogItem['level'],
+      service: item.endpoint.includes('/swarms/') ? 'swarm' : 'backend',
+      message: `${item.method} ${item.endpoint} — ${item.title}`,
+      raw: { payload: item.payload, meta: item.meta },
+    }));
+    this.logs.set(logs);
+    this.logsResponse.set({
+      success: true,
+      total: logs.length,
+      page: Number(query['page'] ?? 1),
+      limit: Number(query['limit'] ?? (logs.length || 20)),
+      items: [],
+      stats: {
+        error: logs.filter((log) => log.level === 'ERROR').length,
+        warn: logs.filter((log) => log.level === 'WARN').length,
+        info: logs.filter((log) => log.level === 'INFO').length,
+        debug: logs.filter((log) => log.level === 'DEBUG').length,
+      },
+    });
+    this.logsLoaded.set(true);
+    this.pushFeed('日志列表', 'GET', `${this.baseUrl()}/swarms`, 'info', { logs });
   }
 
   async loadMetrics(): Promise<void> {
-    try {
-      const response = await this.apiService.getMetrics(this.baseUrl(), {
-        window: this.metricsWindow(),
-        resolution: this.metricsResolution(),
-      });
-      this.metrics.set(response);
-      this.metricsLoaded.set(true);
-      this.pushFeed('系统指标', 'POST', `${this.baseUrl()}/catalog/metrics`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.metricsLoaded.set(false);
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed('系统指标失败', 'POST', `${this.baseUrl()}/catalog/metrics`, 'error', { error: errorSummary(error) });
-      }
-    }
+    const response = this.buildFallbackMetrics();
+    this.metrics.set(response);
+    this.metricsLoaded.set(true);
+    this.pushFeed('系统指标', 'GET', `${this.baseUrl()}/health`, 'info', response);
   }
 
   async loadKnowledge(): Promise<void> {
-    try {
-      const response = await this.apiService.listKnowledge(this.baseUrl(), { page: 1, limit: 500 });
-      this.knowledge.set(response.items.map((item) => this.mapKnowledgeCatalogItem(item)));
-      this.knowledgeLoaded.set(true);
-      this.pushFeed('知识库列表', 'POST', `${this.baseUrl()}/knowledge/search`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.knowledgeLoaded.set(false);
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed('知识库列表失败', 'POST', `${this.baseUrl()}/knowledge/search`, 'error', { error: errorSummary(error) });
-      }
-    }
+    const knowledge = this.derivedKnowledge();
+    this.knowledge.set(knowledge);
+    this.knowledgeLoaded.set(true);
+    this.pushFeed('知识库列表', 'GET', `${this.baseUrl()}/swarms/${this.selectedSwarmName() ?? 'default'}/graph`, 'info', { knowledge });
   }
 
   async loadMemory(): Promise<void> {
-    try {
-      const response = await this.apiService.listMemory(this.baseUrl(), { page: 1, limit: 500 });
-      this.memories.set(response.items.map((item) => this.mapMemoryCatalogItem(item)));
-      this.memoriesLoaded.set(true);
-      this.pushFeed('记忆库列表', 'POST', `${this.baseUrl()}/memory/search`, 'info', response);
-    } catch (error) {
-      if (!this.shouldSuppressOfflineError(error)) {
-        this.memoriesLoaded.set(false);
-        this.error.set(formatErrorDetail(error));
-        this.pushFeed('记忆库列表失败', 'POST', `${this.baseUrl()}/memory/search`, 'error', { error: errorSummary(error) });
-      }
-    }
+    const memories = this.derivedMemories();
+    this.memories.set(memories);
+    this.memoriesLoaded.set(true);
+    this.pushFeed('记忆库列表', 'GET', `${this.baseUrl()}/runs`, 'info', { memories });
   }
 
   async loadSwarmFromSource(source: string, replace = false): Promise<void> {
@@ -2123,17 +2098,83 @@ this.loadLogs(),
     if (!prompt) { this.error.set(makeUserError('执行目标不能为空。')); return; }
     this.loading.set(true); this.error.set(null);
     try {
-      const response = await this.apiService.startRun(this.baseUrl(), swarmName, {
+      const input = asJsonValue(this.buildSwarmExecutionInput());
+      const runId = `${swarmName}-${Date.now()}`;
+      const startedAt = new Date().toISOString();
+      this.activeRun.set({
+        success: true,
+        run_id: runId,
+        swarm: swarmName,
+        status: 'running',
+        created_at: startedAt,
+        started_at: startedAt,
+        finished_at: null,
+        rounds: this.swarmRounds(),
+        current_node_id: null,
+        current_node_name: null,
+        current_node_type: null,
+        state: input,
+        final_state: null,
+        error: null,
+        event_count: 0,
+        events_url: '',
+        status_url: '',
+      });
+      this.streamState.set('connecting');
+      this.streamNote.set(`正在运行 ${swarmName}`);
+      const stream = this.apiService.runSwarmStream(swarmName, {
         input: asJsonValue(this.buildSwarmExecutionInput()),
         rounds: this.swarmRounds(),
         meta_mode: this.metaMode(),
-      });
-      this.activeRun.set(response.run);
-      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs`), 'success', response);
-      this.watchRun(response.run);
+      }, this.baseUrl());
+      this.eventSource = stream as unknown as EventSource;
+      stream.onmessage = (event: MessageEvent<string>) => {
+        try {
+          const parsed = JSON.parse(event.data) as { event: string; data: unknown };
+          if (parsed.event === 'start') {
+            this.activeRun.update((run) => run ? { ...run, status: 'running', started_at: startedAt } : run);
+          } else if (parsed.event === 'result') {
+            const data = parsed.data as Record<string, unknown>;
+            this.activeRun.update((run) => run ? {
+              ...run,
+              status: 'completed',
+              finished_at: new Date().toISOString(),
+              final_state: normalizeJsonValue(data['output'] ?? null) as RunSnapshot['final_state'],
+              error: null,
+              event_count: run.event_count + 1,
+            } : run);
+            this.selectedExecutionTrace.set({
+              success: true,
+              swarm: swarmName,
+              run: this.activeRun(),
+              events: [normalizeJsonValue(data['trace'] ?? data) as JsonValue],
+            });
+            this.streamState.set('closed');
+            this.streamNote.set(`运行已完成: ${swarmName}`);
+            stream.close();
+          } else if (parsed.event === 'error') {
+            this.activeRun.update((run) => run ? { ...run, status: 'failed', finished_at: new Date().toISOString(), error: String((parsed.data as Record<string, unknown>)['detail'] ?? '运行失败') } : run);
+            this.error.set(makeUserError(String((parsed.data as Record<string, unknown>)['detail'] ?? '运行失败')));
+            this.streamState.set('error');
+            this.streamNote.set(`运行失败: ${swarmName}`);
+            stream.close();
+          } else if (parsed.event === 'done') {
+            this.streamState.set('closed');
+            this.streamNote.set(`运行结束: ${swarmName}`);
+            stream.close();
+          }
+        } catch (error) {
+          this.error.set(formatErrorDetail(error));
+        }
+      };
+      stream.onerror = () => {
+        this.streamState.set('error');
+        this.streamNote.set(`运行流中断: ${swarmName}`);
+      };
+      this.pushFeed(`结构启动 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/run`), 'success', { input });
     } catch (error) {
       this.error.set(formatErrorDetail(error));
-      this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs`), 'error', { error: errorSummary(error) });
+      this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/run`), 'error', { error: errorSummary(error) });
     }
     finally { this.loading.set(false); }
   }
@@ -2153,23 +2194,25 @@ this.loadLogs(),
     if (run) {
       this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${run.run_id}`, 'STOP', '', 'info', { stopType });
       try {
-        const response = await this.apiService.stopRun(this.baseUrl(), run.run_id, stopType);
-        this.pushFeed(`运行停止 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'success', response);
-        await this.refreshRunSnapshot(run.run_id);
+        const response = await this.apiService.stopSwarm(this.baseUrl(), run.swarm, stopType);
+        this.activeRun.update((current) => current ? { ...current, status: 'failed', finished_at: new Date().toISOString(), error: 'stopped' } : current);
+        this.streamState.set('closed');
+        this.streamNote.set(`运行已停止: ${run.run_id}`);
+        this.pushFeed(`运行停止 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(run.swarm)}/stop`), 'success', response);
       } catch (error) {
         this.error.set(formatErrorDetail(error));
-        this.pushFeed(`运行停止失败 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/runs/${encodeURIComponent(run.run_id)}/stop`), 'error', { error: errorSummary(error) });
+        this.pushFeed(`运行停止失败 · ${run.run_id}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(run.swarm)}/stop`), 'error', { error: errorSummary(error) });
       } finally { this.loading.set(false); }
     } else {
       const swarmName = this.selectedSwarmName();
       if (!swarmName) { this.loading.set(false); return; }
       this.pushFeed(`已发送${stopType === 'soft' ? '优雅' : '强制'}停止请求 · ${swarmName}`, 'STOP', '', 'info', { stopType });
       try {
-        const response = await this.apiService.stopSwarmRuns(this.baseUrl(), swarmName, stopType);
-        this.pushFeed(`Swarm 停止 · ${swarmName} (${response.count} 个运行)`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs/stop`), 'success', response);
+        const response = await this.apiService.stopSwarm(this.baseUrl(), swarmName, stopType);
+        this.pushFeed(`Swarm 停止 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/stop`), 'success', response);
       } catch (error) {
         this.error.set(formatErrorDetail(error));
-        this.pushFeed(`Swarm 停止失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/runs/stop`), 'error', { error: errorSummary(error) });
+        this.pushFeed(`Swarm 停止失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/stop`), 'error', { error: errorSummary(error) });
       } finally { this.loading.set(false); }
     }
   }

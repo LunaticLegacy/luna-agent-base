@@ -52,7 +52,6 @@ graph_file = "graph.py"
 agent_files = ["agents/agent.py"]
 
 [llm.default]
-name = "tmp"
 provider = "openai"
 api_url = "https://example.com"
 api_key = "key"
@@ -137,7 +136,6 @@ agent_files = ["agents/agent.py"]
 api_files = ["apis/metrics_api.py"]
 
 [llm.default]
-name = "tmp"
 provider = "openai"
 api_url = "https://example.com"
 api_key = "key"
@@ -195,7 +193,6 @@ graph_file = "graph.py"
 agent_files = ["agents/agent.py"]
 
 [llm.default]
-name = "tmp"
 provider = "openai"
 api_url = "https://example.com"
 api_key = "key"

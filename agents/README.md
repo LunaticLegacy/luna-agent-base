@@ -83,7 +83,6 @@ release_channel = "beta"
 release_channel = ["orchestrator", "planner", "reviewer"]
 
 [llm.default]
-name = "deepseek"
 provider = "openai"
 api_url = "https://api.deepseek.com"
 api_key = "YOUR_DEEPSEEK_API_KEY"
@@ -107,6 +106,10 @@ model = "deepseek-reasoner"
 - `graph_file` 和 `agent_files` 是必需的
 - `skill_files`、`tool_files` 和 `api_files` 是可选的
 - `default_backend` 只在你有多个 backend 时特别有用
+
+补充：
+
+- `llm.default` 不再需要 `name` 字段；运行时会根据 swarm/package 名称推导后端标识
 
 ## Workspace 配置
 

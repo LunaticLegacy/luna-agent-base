@@ -26,7 +26,6 @@ tool_files = [
 file_writer = ["file_write"]
 
 [llm.default]
-name = "kimi"
 provider = "litellm"
 api_url = "https://api.moonshot.ai/v1"
 api_key = "${MOONSHOT_API_KEY}"

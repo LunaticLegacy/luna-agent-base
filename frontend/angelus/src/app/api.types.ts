@@ -9,6 +9,47 @@ export interface HealthResponse {
   status: string;
 }
 
+export interface RuntimeSwarmSummary {
+  name: string;
+  agent_count: number;
+  tool_count: number;
+}
+
+export interface GraphResponseNode {
+  id: string;
+  name: string;
+  type: string;
+  metadata?: JsonValue;
+}
+
+export interface GraphResponseEdge {
+  source: string;
+  target: string;
+  label?: string | null;
+}
+
+export interface GraphResponse {
+  name: string;
+  nodes: GraphResponseNode[];
+  edges: GraphResponseEdge[];
+}
+
+export interface HistoryEntry {
+  timestamp: string;
+  input: JsonValue;
+  output: JsonValue;
+  trace?: JsonValue | null;
+}
+
+export interface HistoryResponse {
+  history: HistoryEntry[];
+}
+
+export interface RunStreamEvent {
+  event: 'start' | 'result' | 'stopped' | 'error' | 'done';
+  data: JsonValue;
+}
+
 export interface ApiIndexResponse {
   success: boolean;
   service: string;

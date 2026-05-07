@@ -83,7 +83,6 @@ release_channel = "beta"
 release_channel = ["orchestrator", "planner", "reviewer"]
 
 [llm.default]
-name = "deepseek"
 provider = "openai"
 api_url = "https://api.deepseek.com"
 api_key = "YOUR_DEEPSEEK_API_KEY"
@@ -107,6 +106,10 @@ Notes:
 - `graph_file` and `agent_files` are required
 - `skill_files`, `tool_files`, and `api_files` are optional
 - `default_backend` is most useful when multiple backends exist
+
+Note:
+
+- `llm.default` no longer needs a `name` field; the runtime derives the backend identifier from the swarm/package name
 
 ## Workspace Configuration
 
