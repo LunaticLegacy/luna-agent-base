@@ -327,6 +327,45 @@ class ThinkingGraph:
         # 锁
         self._lock = asyncio.Lock()
 
+    @staticmethod
+    def _serialize_value(value: Any) -> Any:
+        if dataclasses.is_dataclass(value):
+            return {
+                field.name: ThinkingGraph._serialize_value(getattr(value, field.name))
+                for field in dataclasses.fields(value)
+            }
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, dict):
+            return {str(key): ThinkingGraph._serialize_value(val) for key, val in value.items()}
+        if isinstance(value, list):
+            return [ThinkingGraph._serialize_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [ThinkingGraph._serialize_value(item) for item in value]
+        if isinstance(value, set):
+            return [ThinkingGraph._serialize_value(item) for item in sorted(value, key=repr)]
+        return value
+
+    @staticmethod
+    def _deserialize_payload(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: ThinkingGraph._deserialize_payload(val) for key, val in value.items()}
+        if isinstance(value, list):
+            return [ThinkingGraph._deserialize_payload(item) for item in value]
+        return value
+
+    @staticmethod
+    def _deserialize_node_type(value: Any) -> ThinkingNodeType:
+        if isinstance(value, ThinkingNodeType):
+            return value
+        return ThinkingNodeType(str(value))
+
+    @staticmethod
+    def _deserialize_edge_type(value: Any) -> ThinkingEdgeType:
+        if isinstance(value, ThinkingEdgeType):
+            return value
+        return ThinkingEdgeType(str(value))
+
     def _alloc_id(self) -> int:
         """
         得到一个 id。
@@ -347,26 +386,117 @@ class ThinkingGraph:
         """返回只读事务日志快照。"""
         return list(self._transaction_log)
 
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        将图全量序列化为字典。
-        包含所有节点和边的完整字段。
-        """
+    def serialize(self) -> Dict[str, Any]:
+        """Return a JSON-safe snapshot of the thinking graph."""
         return {
+            "format": "thinking-graph/config",
+            "schema_version": "1.0",
+            "version": self._version,
+            "next_object_id": self._next_object_id,
+            "transaction_id": self._transaction_id,
             "nodes": {
-                nid: dataclasses.asdict(node)
+                str(nid): ThinkingGraph._serialize_value(node)
                 for nid, node in self.node_dict.items()
             },
             "edges": {
-                eid: dataclasses.asdict(edge)
+                str(eid): ThinkingGraph._serialize_value(edge)
                 for eid, edge in self.edge_dict.items()
             },
-            "version": self._version,
+            "transaction_log": [
+                ThinkingGraph._serialize_value(record)
+                for record in self._transaction_log
+            ],
             "node_count": len(self.node_dict),
             "edge_count": len(self.edge_dict),
             "transaction_count": len(self._transaction_log),
-            "last_transaction_id": self._transaction_log[-1].transaction_id if self._transaction_log else None,
+            "last_transaction_id": (
+                self._transaction_log[-1].transaction_id if self._transaction_log else None
+            ),
         }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Backward-compatible alias for :meth:`serialize`."""
+        return self.serialize()
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ThinkingGraph":
+        """Restore a thinking graph from :meth:`serialize` output."""
+        if not isinstance(data, dict):
+            raise TypeError("ThinkingGraph.from_dict expects a dict.")
+        schema_version = data.get("schema_version")
+        if schema_version not in (None, "1.0"):
+            raise ValueError(f"Unsupported thinking graph schema version: {schema_version}")
+
+        graph = cls()
+        graph._version = int(data.get("version", 0) or 0)
+        graph._next_object_id = int(data.get("next_object_id", 0) or 0)
+        graph._transaction_id = int(data.get("transaction_id", 0) or 0)
+
+        graph.node_dict.clear()
+        graph.edge_dict.clear()
+        graph._transaction_log.clear()
+
+        for raw_id, node_data in data.get("nodes", {}).items():
+            node_id = int(raw_id)
+            if not isinstance(node_data, dict):
+                raise TypeError(f"Invalid node payload for id {raw_id!r}")
+            graph.node_dict[node_id] = ThinkingGraphNode(
+                id=int(node_data["id"]),
+                node_type=cls._deserialize_node_type(node_data["node_type"]),
+                info=str(node_data.get("info", "")),
+                tags=[str(tag) for tag in (node_data.get("tags") or [])],
+                created_by=str(node_data.get("created_by") or "system"),
+                confidence=float(node_data.get("confidence", 1.0)),
+                description=str(node_data.get("description", "")),
+                payload=cls._deserialize_payload(dict(node_data.get("payload") or {})),
+            )
+
+        for raw_id, edge_data in data.get("edges", {}).items():
+            edge_id = int(raw_id)
+            if not isinstance(edge_data, dict):
+                raise TypeError(f"Invalid edge payload for id {raw_id!r}")
+            graph.edge_dict[edge_id] = ThinkingGraphEdge(
+                id=int(edge_data["id"]),
+                edge_type=cls._deserialize_edge_type(edge_data["edge_type"]),
+                source_id=int(edge_data["source_id"]),
+                target_id=int(edge_data["target_id"]),
+                created_by=str(edge_data.get("created_by", "system")),
+                description=str(edge_data.get("description", "")),
+                strength=float(edge_data.get("strength", 1.0)),
+            )
+
+        for record_data in data.get("transaction_log", []):
+            if not isinstance(record_data, dict):
+                raise TypeError("Invalid transaction record payload.")
+            graph._transaction_log.append(
+                ThinkingGraphTransactionRecord(
+                    transaction_id=int(record_data["transaction_id"]),
+                    operation=str(record_data.get("operation", "")),
+                    object_kind=str(record_data.get("object_kind", "")),
+                    object_id=int(record_data.get("object_id", 0)),
+                    before=cls._deserialize_payload(record_data.get("before")),
+                    after=cls._deserialize_payload(record_data.get("after")),
+                    version_before=int(record_data.get("version_before", 0)),
+                    version_after=int(record_data.get("version_after", 0)),
+                    created_by=str(record_data.get("created_by") or "system"),
+                    timestamp=str(record_data.get("timestamp") or ""),
+                    metadata=cls._deserialize_payload(dict(record_data.get("metadata") or {})),
+                )
+            )
+
+        if graph._next_object_id <= 0:
+            used_ids = list(graph.node_dict.keys()) + list(graph.edge_dict.keys())
+            graph._next_object_id = (max(used_ids) + 1) if used_ids else 0
+
+        if graph._transaction_id <= 0:
+            graph._transaction_id = len(graph._transaction_log)
+
+        return graph
+
+    @classmethod
+    def deserialize(cls, data: Dict[str, Any]) -> "ThinkingGraph":
+        """Alias for :meth:`from_dict`."""
+        return cls.from_dict(data)
 
     async def get_full_graph(self) -> Dict[str, Any]:
         """

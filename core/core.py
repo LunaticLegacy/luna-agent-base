@@ -222,6 +222,7 @@ class Core:
         manifest_path = package_root / "swarm.toml"
         workspace_root = (package_root / "workspace").resolve()
         workspace_root.mkdir(parents=True, exist_ok=True)
+        swarm: Optional[AgentSwarm] = None
 
         try:
             with manifest_path.open("rb") as handle:
@@ -249,6 +250,8 @@ class Core:
                 raise ValueError("missing llm.default.api_url/model")
 
             swarm = self.create_swarm(package_name, llm_fetcher=self._create_placeholder_fetcher(package_name))
+            graph = self._load_package_execution_graph(package_root, graph_file, swarm)
+            swarm.execution_graph = graph
             record = AgentPackageRecord(
                 package_name=package_name,
                 package_root=package_root,
@@ -293,28 +296,7 @@ class Core:
                 raise ValueError("missing llm.default.api_url/api_key/model")
 
             swarm = self.create_swarm(package_name, llm_fetcher=fetcher)
-
-            graph_path = package_root / graph_file
-            if not graph_path.is_file():
-                raise FileNotFoundError(f"Graph file not found: {graph_path}")
-
-            spec = importlib.util.spec_from_file_location(
-                f"_angelus_swarm_graph_{package_name}",
-                graph_path,
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Cannot load graph file: {graph_path}")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            if not hasattr(module, "build_graph"):
-                raise AttributeError(f"Graph file does not define build_graph(): {graph_path}")
-
-            graph = module.build_graph(swarm)
-            if graph is None:
-                graph = getattr(swarm, "execution_graph", None)
-            if not isinstance(graph, ExecutionGraph):
-                raise TypeError(f"build_graph() did not return an ExecutionGraph for {package_name}")
-
+            graph = self._load_package_execution_graph(package_root, graph_file, swarm)
             swarm.execution_graph = graph
 
             globals_cfg = manifest.get("globals")
@@ -348,6 +330,34 @@ class Core:
                 valid=False,
                 reason=str(exc),
             )
+
+    def _load_package_execution_graph(
+        self,
+        package_root: Path,
+        graph_file: str,
+        swarm: AgentSwarm,
+    ) -> ExecutionGraph:
+        graph_path = package_root / graph_file
+        if not graph_path.is_file():
+            raise FileNotFoundError(f"Graph file not found: {graph_path}")
+
+        spec = importlib.util.spec_from_file_location(
+            f"_angelus_swarm_graph_{package_root.name}",
+            graph_path,
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load graph file: {graph_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        if not hasattr(module, "build_graph"):
+            raise AttributeError(f"Graph file does not define build_graph(): {graph_path}")
+
+        graph = module.build_graph(swarm)
+        if graph is None:
+            graph = getattr(swarm, "execution_graph", None)
+        if not isinstance(graph, ExecutionGraph):
+            raise TypeError(f"build_graph() did not return an ExecutionGraph for {package_root.name}")
+        return graph
 
     # ------------------------------------------------------------------
     # History
@@ -427,7 +437,7 @@ class Core:
         max_nodes: Optional[int] = None,
     ) -> str:
         swarm = self.get_swarm(swarm_name)
-        data = swarm.thinking_graph.to_dict()
+        data = swarm.thinking_graph.serialize()
         if query:
             query_lower = query.lower()
             nodes = {
@@ -444,6 +454,10 @@ class Core:
             data["nodes"] = dict(node_items)
             data["node_count"] = len(node_items)
         return json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+
+    def get_thinking_graph_snapshot(self, name: str) -> Dict[str, Any]:
+        swarm = self.get_swarm(name)
+        return swarm.thinking_graph.serialize()
 
     def _resolve_fetcher_from_manifest(
         self,
@@ -484,7 +498,7 @@ class Core:
     # Introspection
     # ------------------------------------------------------------------
 
-    def get_agent_graph_snapshot(self, name: str) -> Dict[str, Any]:
+    def get_execution_graph_snapshot(self, name: str) -> Dict[str, Any]:
         swarm = self.get_swarm(name)
         graph = swarm.execution_graph
         nodes = graph.nodes
@@ -512,6 +526,10 @@ class Core:
                 for edge in edges
             ],
         }
+
+    def get_agent_graph_snapshot(self, name: str) -> Dict[str, Any]:
+        """Compatibility alias for the execution graph snapshot."""
+        return self.get_execution_graph_snapshot(name)
 
     def __repr__(self) -> str:
         return f"Core(swarms={len(self.swarms)})"

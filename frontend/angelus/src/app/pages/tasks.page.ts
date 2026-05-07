@@ -1,6 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { StateService, TaskItem } from '../services/state.service';
+import { StateService, BackgroundTaskItem } from '../services/state.service';
 import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComponent, PageHeaderComponent, PanelCardComponent, StatCardGridComponent, StatCardItem } from '../shared';
 @Component({
   selector: 'app-tasks-page',
@@ -9,9 +9,9 @@ import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComp
   template: `
     <div class="page">
       <!-- Header -->
-      <app-page-header title="任务列表" subtitle="管理、监控与调度所有 Agent 任务，并查看依赖关系图">
+      <app-page-header title="后台任务" subtitle="管理、监控与调度所有 RuntimeSlot 后台任务，并查看依赖关系图">
         <div actions>
-          <button class="btn btn-primary" (click)="refreshTasks()">刷新任务</button>
+          <button class="btn btn-primary" (click)="refreshTasks()">刷新后台任务</button>
         </div>
       </app-page-header>
 
@@ -23,7 +23,7 @@ import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComp
         <input
           type="text"
           class="filter-input search"
-          placeholder="搜索任务名称..."
+          placeholder="搜索后台任务名称..."
           [value]="searchQuery()"
           (input)="searchQuery.set($any($event).target.value)"
         />
@@ -57,14 +57,14 @@ import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComp
         </select>
       </app-filter-bar>
 
-      <!-- Task Table -->
+      <!-- Background Task Table -->
       <app-panel-card [noPadding]="true">
         <div class="table-scroll">
           <app-data-table
             [columns]="taskTableColumns"
             [data]="filteredTasks()"
             trackBy="id"
-            emptyText="暂无匹配任务"
+            emptyText="暂无匹配后台任务"
             (rowClick)="selectTask($event)"
           ></app-data-table>
         </div>
@@ -345,31 +345,32 @@ import { DataTableColumn, DataTableComponent, EmptyStateComponent, FilterBarComp
 export class TasksPageComponent {
   readonly state = inject(StateService);
 
-  readonly selectedTask = signal<TaskItem | null>(null);
+  readonly selectedBackgroundTask = signal<BackgroundTaskItem | null>(null);
+  readonly selectedTask = this.selectedBackgroundTask;
   readonly searchQuery = signal('');
   readonly filterStatus = signal('');
   readonly filterPriority = signal('');
   readonly filterDateRange = signal('');
   readonly sortBy = signal('createdDesc');
 
-  readonly runningCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'running').length);
-  readonly pendingCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'pending').length);
-  readonly timeoutCount = computed(() => this.state.derivedTasks().filter(t => t.status === 'timeout').length);
-  readonly successRate = computed(() => this.state.taskStats().successRate);
-  readonly avgDuration = computed(() => this.state.taskStats().avgDuration);
-  readonly graphTasks = computed(() => this.state.tasks());
-  readonly graphBadge = computed(() => (this.state.tasksLoaded() ? `${this.state.tasks().length} 项` : '未加载'));
+  readonly runningCount = computed(() => this.state.derivedBackgroundTasks().filter(t => t.status === 'running').length);
+  readonly pendingCount = computed(() => this.state.derivedBackgroundTasks().filter(t => t.status === 'pending').length);
+  readonly timeoutCount = computed(() => this.state.derivedBackgroundTasks().filter(t => t.status === 'timeout').length);
+  readonly successRate = computed(() => this.state.backgroundTaskStats().successRate);
+  readonly avgDuration = computed(() => this.state.backgroundTaskStats().avgDuration);
+  readonly graphTasks = computed(() => this.state.backgroundTasks());
+  readonly graphBadge = computed(() => (this.state.backgroundTasksLoaded() ? `${this.state.backgroundTasks().length} 项` : '未加载'));
 
   readonly taskStatCards = computed<StatCardItem[]>(() => [
-    { label: '总任务数', value: this.state.derivedTasks().length, subtitle: '累计创建' },
+    { label: '总后台任务数', value: this.state.derivedBackgroundTasks().length, subtitle: '累计创建' },
     { label: '运行中', value: this.runningCount(), subtitle: '活跃执行', tone: this.runningCount() > 0 ? 'purple' : undefined },
     { label: '成功率', value: this.successRate() + '%', subtitle: '近 24 小时', tone: this.successRate() >= 80 ? 'good' : undefined },
-    { label: '超时', value: this.timeoutCount(), subtitle: '请求超时任务', tone: this.timeoutCount() > 0 ? 'amber' : undefined },
+    { label: '超时', value: this.timeoutCount(), subtitle: '请求超时后台任务', tone: this.timeoutCount() > 0 ? 'amber' : undefined },
     { label: '待处理', value: this.pendingCount(), subtitle: '队列中等待', tone: this.pendingCount() > 0 ? 'amber' : undefined },
   ]);
 
-  readonly taskTableColumns: DataTableColumn<TaskItem>[] = [
-    { key: 'name', header: '任务名称', cell: t => t.name + ' / ' + t.id },
+  readonly taskTableColumns: DataTableColumn<BackgroundTaskItem>[] = [
+    { key: 'name', header: '后台任务名称', cell: t => t.name + ' / ' + t.id },
     { key: 'status', header: '状态', cell: t => this.statusLabel(t.status) },
     { key: 'priority', header: '优先级', cell: t => this.priorityLabel(t.priority) },
     { key: 'executor', header: '执行者' },
@@ -378,7 +379,7 @@ export class TasksPageComponent {
   ];
 
   readonly filteredTasks = computed(() => {
-    let list = [...this.state.derivedTasks()];
+    let list = [...this.state.derivedBackgroundTasks()];
     const q = this.searchQuery().trim().toLowerCase();
     if (q) list = list.filter(t => t.name.toLowerCase().includes(q) || t.id.toLowerCase().includes(q));
     if (this.filterStatus()) list = list.filter(t => t.status === this.filterStatus());
@@ -394,8 +395,8 @@ export class TasksPageComponent {
     return list;
   });
 
-  selectTask(task: TaskItem): void {
-    this.selectedTask.set(task);
+  selectTask(task: BackgroundTaskItem): void {
+    this.selectedBackgroundTask.set(task);
   }
 
   closeDrawer(): void {
@@ -403,15 +404,15 @@ export class TasksPageComponent {
   }
 
   async refreshTasks(): Promise<void> {
-    await this.state.loadTasks();
+    await this.state.loadBackgroundTasks();
   }
 
-  statusLabel(status: TaskItem['status']): string {
+  statusLabel(status: BackgroundTaskItem['status']): string {
     const map: Record<string, string> = { pending: '待处理', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消', timeout: '超时' };
     return map[status] ?? status;
   }
 
-  priorityLabel(priority: TaskItem['priority']): string {
+  priorityLabel(priority: BackgroundTaskItem['priority']): string {
     const map: Record<string, string> = { low: '低', medium: '中', high: '高', urgent: '紧急' };
     return map[priority] ?? priority;
   }

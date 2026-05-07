@@ -1,16 +1,24 @@
-from core import AgentNode, ExecutionGraph
+from __future__ import annotations
+
+from modules.llm_fetcher import AgentSwarm
+from tools.file_writer_tool import create_file_writer_tools
 
 
 def build_graph(core):
-    graph = ExecutionGraph("demo_1")
-    graph.add_node(
-        AgentNode(
-            node_id=1,
-            node_name="hello_writer",
-            metadata={"tool_execution_mode": "external"},
-            agent_id="hello_writer",
-        )
+    if not isinstance(core, AgentSwarm):
+        raise TypeError("build_graph() expects an AgentSwarm instance")
+
+    swarm = core
+    swarm.add_tools(create_file_writer_tools())
+
+    swarm.add_input("input")
+    swarm.add_output("output")
+    swarm.add_agent(
+        "hello_writer",
+        "You are a hello writer. Write 'Hello world!' to hello.txt.",
     )
-    graph.set_entry(1)
-    graph.set_exit(1)
-    return graph
+
+    swarm.connect("input", "hello_writer")
+    swarm.connect("hello_writer", "output")
+
+    return swarm.execution_graph

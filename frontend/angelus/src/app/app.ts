@@ -26,7 +26,7 @@ export class AppComponent {
       '/': '概览',
       '/swarm': 'Swarm 管理',
       '/agents': '智能体',
-      '/tasks': '任务列表',
+      '/tasks': '后台任务',
       '/knowledge': '知识库',
       '/tools': '工具管理',
       '/memory': '记忆系统',

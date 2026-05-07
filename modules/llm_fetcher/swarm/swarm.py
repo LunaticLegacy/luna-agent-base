@@ -548,6 +548,10 @@ class AgentSwarm:
             )
             swarm._agents[nid] = agent
 
+        thinking_data = data.get("thinking_graph")
+        if isinstance(thinking_data, dict):
+            swarm.thinking_graph = ThinkingGraph.from_dict(thinking_data)
+
         # Restore full topology via ExecutionGraph.restore() so version,
         # edges, timeouts and node counter are reconstructed faithfully.
         graph_data = data.get("execution_graph")

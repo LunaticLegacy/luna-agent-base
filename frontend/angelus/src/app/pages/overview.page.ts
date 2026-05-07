@@ -608,7 +608,7 @@ export class OverviewPageComponent {
     { label: '系统状态', value: this.state.health()?.status === 'ok' ? '正常' : this.state.health()?.status || '未知', subtitle: this.state.ready() ? '就绪' : '未就绪', tone: this.state.health()?.status === 'ok' ? 'good' : 'bad' },
     { label: '总Agents', value: this.state.totalAgents(), subtitle: '活跃运行中' },
     { label: 'Swarm数量', value: (this.state.swarms() || []).length, subtitle: '已配置' },
-    { label: '当前任务', value: this.state.activeRunStatusText(), subtitle: this.state.streamState() || '等待中' },
+    { label: '当前后台任务', value: this.state.activeRunStatusText(), subtitle: this.state.streamState() || '等待中' },
     { label: 'Graph状态', value: this.state.resolvedGraph() ? '已加载' : '未加载', subtitle: this.state.graphSummary() || '—', tone: this.state.resolvedGraph() ? 'good' : undefined },
   ]);
 }

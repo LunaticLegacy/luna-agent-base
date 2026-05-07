@@ -1,96 +1,69 @@
-from core import AgentNode, ExecutionGraph
+from __future__ import annotations
+
+from pathlib import Path
+
+from modules.llm_fetcher import Agent, AgentSwarm
+from tools.command_runner_tool import create_command_runner_tools
+from tools.file_editor_tool import create_file_editor_tools
+from tools.file_reader_tool import create_file_reader_tools
+from tools.file_writer_tool import create_file_writer_tools
+from tools.search_tool import create_search_tools
+
+PACKAGE_ROOT = Path(__file__).resolve().parent
+
+
+def _read_prompt(name: str) -> str:
+    prompt_path = PACKAGE_ROOT / "skills" / f"{name}.prompt.md"
+    return prompt_path.read_text(encoding="utf-8")
+
+
+def _register_tools(swarm: AgentSwarm) -> None:
+    swarm.add_tools(
+        [
+            *create_file_reader_tools(),
+            *create_file_editor_tools(),
+            *create_file_writer_tools(),
+            *create_command_runner_tools(),
+            *create_search_tools(),
+        ]
+    )
 
 
 def build_graph(core):
-    graph = ExecutionGraph('deepseek_demo')
+    if not isinstance(core, AgentSwarm):
+        raise TypeError("build_graph() expects an AgentSwarm instance")
 
-    # 1. requirement_analyst — single outgoing edge, no routing needed
-    graph.add_node(
-        AgentNode(
-            node_id=1,
-            node_name='requirement_analyst',
-            metadata={
-                'tool_execution_mode': 'external',
-                'failure_policy': {
-                    'allow_tool_policy_repair': True,
-                    'allow_toolless_fallback': True,
-                    'max_tool_repair_rounds': 1,
-                },
-            },
-            agent_id='requirement_analyst',
-            additional_prompt=(
-                'Phase: requirement analysis. Understand the user request. Only inspect the workspace '
-                'when the user explicitly provides an existing codebase or asks for workspace inspection. '
-                'For greenfield design tasks, do not probe the filesystem; state assumptions and produce a clear '
-                'implementation plan. Output a JSON envelope with content (the plan) and '
-                'tool_requests only when workspace context is necessary.'
-            ),
-        ),
+    swarm = core
+    _register_tools(swarm)
+
+    swarm.add_input("input")
+    swarm.add_output("output")
+
+    swarm.add_agent("requirement_analyst", _read_prompt("requirement_analyst"))
+    swarm.add_agent("coder", _read_prompt("coder"))
+    swarm.add_agent("summarizer", _read_prompt("summarizer"))
+
+    reviewer_agent = Agent(
+        llm_handler=swarm._llm_fetcher,
+        system_prompt=_read_prompt("reviewer"),
+        tools=list(swarm.tool_registry._tools.values()),
+    )
+    swarm._agents["reviewer"] = reviewer_agent
+    swarm.add_router(
+        "reviewer",
+        routes={
+            "revise": "coder",
+            "approve": "summarizer",
+        },
+        agent=reviewer_agent,
+        default_route="approve",
     )
 
-    # 2. coder — single outgoing edge, no routing needed
-    graph.add_node(
-        AgentNode(
-            node_id=2,
-            node_name='coder',
-            metadata={
-                'tool_execution_mode': 'external',
-                'failure_policy': {
-                    'allow_tool_call_repair': True,
-                    'max_tool_repair_rounds': 1,
-                },
-            },
-            agent_id='coder',
-            additional_prompt=(
-                'Phase: implementation. You are a coding assistant similar to Claude Code. '
-                'Read files before editing. Use file_editor for precise edits and file_writer for new files. '
-                'Run commands (tests, build, lint) to verify your changes. If verification fails, '
-                'fix the code and re-verify. Output a JSON envelope with tool_requests.'
-            ),
-        ),
-    )
+    swarm.connect("input", "requirement_analyst")
+    swarm.connect("requirement_analyst", "coder")
+    swarm.connect("coder", "reviewer")
+    swarm.connect("reviewer", "coder", label="revise")
+    swarm.connect("reviewer", "summarizer", label="approve")
+    swarm.connect("summarizer", "output")
 
-    # 3. reviewer — branch node: outputs branch "approve" or "revise"
-    graph.add_node(
-        AgentNode(
-            node_id=3,
-            node_name='reviewer',
-            metadata={'tool_execution_mode': 'external'},
-            agent_id='reviewer',
-            additional_prompt=(
-                'Phase: review. Review the implementation against the original requirements. '
-                'Read the modified files, run verification commands (tests), and assess quality. '
-                'Output a JSON envelope with verdict and branch. '
-                'verdict=approve with branch="approve" routes to the Summarizer. '
-                'verdict=revise with branch="revise" routes back to the Coder for fixes.'
-            ),
-        ),
-    )
-
-    # 4. summarizer — terminal node, no outgoing edges
-    graph.add_node(
-        AgentNode(
-            node_id=4,
-            node_name='summarizer',
-            metadata={'tool_execution_mode': 'external'},
-            agent_id='summarizer',
-            additional_prompt=(
-                'Phase: summary. You are the final summarizer. Read the original requirements, '
-                'the implementation plan, modified files, and review verdict. Produce a clear, '
-                'structured final report of what was done. Output a JSON envelope with content '
-                '(the summary). This is the terminal node.'
-            ),
-        ),
-    )
-
-    # Static topology: all connections defined via add_edge only.
-    # Nodes with a single outgoing edge do not need to output branch — the engine follows the edge automatically.
-    # The reviewer node branches via branch="approve" / branch="revise" matched against edge.condition.
-    graph.add_edge(1, 2, label='implement', condition=None, priority=10)
-    graph.add_edge(2, 3, label='review', condition=None, priority=10)
-    graph.add_edge(3, 2, label='revise', condition='revise', priority=10)
-    graph.add_edge(3, 4, label='summarize', condition='approve', priority=10)
-
-    graph.set_entry(1)
-    graph.set_exit(4)
-    return graph
+    return swarm.execution_graph

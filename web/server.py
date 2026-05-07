@@ -81,10 +81,18 @@ class RunResponse(BaseModel):
     trace: Optional[Dict[str, Any]] = None
 
 
-class GraphResponse(BaseModel):
+class ExecutionGraphResponse(BaseModel):
     name: str
     nodes: Dict[str, Any]
     edges: List[Dict[str, Any]]
+
+
+class ThinkingGraphResponse(BaseModel):
+    name: str
+    thinking_graph: Dict[str, Any]
+
+
+GraphResponse = ExecutionGraphResponse
 
 
 class RunRecord(BaseModel):
@@ -330,17 +338,36 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             stop_state=dict(stop_state),
         )
 
-    @app.get("/swarms/{name}/graph", response_model=GraphResponse)
-    async def get_graph(name: str) -> GraphResponse:
+    @app.get("/swarms/{name}/execution_graph", response_model=ExecutionGraphResponse)
+    async def get_execution_graph(name: str) -> ExecutionGraphResponse:
         try:
-            snap = _core.get_agent_graph_snapshot(name)
+            snap = _core.get_execution_graph_snapshot(name)
         except KeyError:
             raise HTTPException(status_code=404, detail=f"Swarm '{name}' not found.")
-        return GraphResponse(
+        return ExecutionGraphResponse(
             name=snap.get("graph_name", name),
             nodes=snap.get("nodes", {}),
             edges=snap.get("edges", []),
         )
+
+    @app.get("/swarms/{name}/thinking_graph", response_model=ThinkingGraphResponse)
+    async def get_thinking_graph(name: str) -> ThinkingGraphResponse:
+        try:
+            snap = _core.get_thinking_graph_snapshot(name)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Swarm '{name}' not found.")
+        return ThinkingGraphResponse(
+            name=name,
+            thinking_graph=snap,
+        )
+
+    @app.get("/swarms/{name}/graph", response_model=ExecutionGraphResponse)
+    async def get_graph(name: str) -> ExecutionGraphResponse:
+        return await get_execution_graph(name)
+
+    @app.get("/swarms/{name}/thought-graph", response_model=ThinkingGraphResponse)
+    async def get_thought_graph(name: str) -> ThinkingGraphResponse:
+        return await get_thinking_graph(name)
 
     @app.get("/swarms/{name}/history", response_model=HistoryResponse)
     async def get_history(name: str, limit: int = 20) -> HistoryResponse:

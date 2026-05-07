@@ -85,8 +85,29 @@
 - `get_cognitive_graph_export(swarm_name, query=None, max_nodes=None) -> str`
   - Serializes the swarm thinking graph, optionally filtered.
 
-- `get_agent_graph_snapshot(name) -> Dict[str, Any]`
+- `get_execution_graph_snapshot(name) -> Dict[str, Any]`
   - Returns a structural snapshot of the execution graph.
+
+- `get_thinking_graph_snapshot(name) -> Dict[str, Any]`
+  - Returns a JSON-safe snapshot of the swarm thinking graph.
+
+- `get_agent_graph_snapshot(name) -> Dict[str, Any]`
+  - Compatibility alias for `get_execution_graph_snapshot(name)`.
+
+## `modules/llm_fetcher/thinking_graph.py`
+
+- `ThinkingGraph.serialize() -> Dict[str, Any]`
+  - Produces a JSON-safe snapshot containing nodes, edges, version metadata, and transaction log entries.
+
+- `ThinkingGraph.to_dict() -> Dict[str, Any]`
+  - Backward-compatible alias for `serialize()`.
+
+- `ThinkingGraph.from_dict(data) -> ThinkingGraph`
+  - Restores a thinking graph from serialized data.
+  - Rebuilds node/edge dictionaries, version counters, and the transaction log.
+
+- `ThinkingGraph.deserialize(data) -> ThinkingGraph`
+  - Alias for `from_dict(data)`.
 
 - `_resolve_fetcher_from_manifest(manifest, fallback_name) -> Optional[LLMFetcher]`
   - Builds an `LLMFetcher` from `[llm.default]`.
@@ -114,9 +135,9 @@
 - `create_app(config_path=None) -> FastAPI`
   - Creates the API app.
   - Initializes the global `Core` package inventory before routes are served.
-  - Exposes swarm load, unload, run, stop, graph, and history routes.
+  - Exposes swarm load, unload, run, stop, execution graph, thinking graph, and history routes.
 
-- `load_swarm`, `unload_swarm`, `run_swarm`, `stop_swarm`, `get_graph`, `get_history`
+- `load_swarm`, `unload_swarm`, `run_swarm`, `stop_swarm`, `get_execution_graph`, `get_thinking_graph`, `get_graph`, `get_thought_graph`, `get_history`
   - Route handlers that operate on the global `Core` registry.
   - `run_swarm` records run history and streams SSE events.
 
@@ -145,3 +166,4 @@
 - Every agent package should keep its default workspace at `<package>/workspace/`.
 - `llm.default.name` is no longer required in `swarm.toml`.
 - Existing packages can still use a package-level `name`, but backend naming is now derived when needed.
+- `GET /swarms/{name}/graph` remains as a compatibility alias for `execution_graph`, while `GET /swarms/{name}/thinking_graph` and `GET /swarms/{name}/thought-graph` expose the serialized thinking graph.

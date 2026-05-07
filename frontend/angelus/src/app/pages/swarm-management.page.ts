@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { StateService } from '../services/state.service';
 import { GraphViewerComponent } from '../graph-viewer.component';
 import { ThoughtGraphViewerComponent } from '../thought-graph-viewer.component';
+import type { GraphSnapshot } from '../api.types';
 import { THOUGHT_NODE_LEGEND_ENTRIES, THOUGHT_RELATION_LEGEND_ENTRIES } from '../thought-graph.taxonomy';
 import { JsonViewerComponent } from '../json-viewer.component';
 import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarComponent, ModalComponent } from '../shared';
@@ -59,9 +60,9 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       <app-stat-card-grid [cards]="[
         { label: '状态', value: state.health()?.status === 'ok' ? '健康' : '异常', tone: state.health()?.status === 'ok' ? 'good' : 'bad' },
         { label: 'Agents', value: state.totalAgents() },
-        { label: '当前任务', value: state.activeRunStatusText() },
+        { label: '当前后台任务', value: state.activeRunStatusText() },
         { label: '成功率', value: state.swarmMgmtStats().successRate + '%', tone: 'good' },
-        { label: '任务吞吐量', value: state.swarmMgmtStats().throughput },
+        { label: '后台任务吞吐量', value: state.swarmMgmtStats().throughput },
         { label: 'Token 使用', value: state.swarmMgmtStats().tokenUsage },
         { label: 'API 数量', value: state.swarmMgmtStats().apiCount ?? (state.selectedSwarm()?.api_count ?? 0) }
       ]"></app-stat-card-grid>
@@ -155,7 +156,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
             </div>
           </app-panel-card>
 
-          <app-panel-card title="任务状态分布" [noPadding]="true">
+          <app-panel-card title="后台任务状态分布" [noPadding]="true">
             <div class="donut-body">
               <div class="donut-chart" [style.background]="state.swarmMgmtTaskGradient()">
                 <div class="donut-ring"></div>
@@ -176,12 +177,12 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
 
       <!-- Bottom Tables -->
       <div class="bottom-tables">
-        <app-panel-card title="正在运行的任务" [badge]="state.activeRun() ? 1 : 0" [noPadding]="true">
+        <app-panel-card title="正在运行的后台任务" [badge]="state.activeRun() ? 1 : 0" [noPadding]="true">
           <div class="table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>任务 ID</th>
+                  <th>后台任务 ID</th>
                   <th>类型</th>
                   <th>状态</th>
                   <th>进度</th>
@@ -207,7 +208,7 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                   </tr>
                 } @else {
                   <tr>
-                    <td colspan="6" class="empty-cell">暂无运行中的任务</td>
+                    <td colspan="6" class="empty-cell">暂无运行中的后台任务</td>
                   </tr>
                 }
               </tbody>
@@ -307,6 +308,15 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
                 <button class="btn btn-sm" (click)="state.refreshGraph()" [disabled]="state.loading()">刷新</button>
               </div>
             </div>
+            <app-panel-card title="执行图" [noPadding]="true">
+              <div class="trace-graph-frame">
+                @if (executionGraph()) {
+                  <app-graph-viewer [graph]="executionGraph()" [activeNodeId]="executionGraphActiveNodeId()"></app-graph-viewer>
+                } @else {
+                  <app-empty-state message="当前没有可展示的执行图。"></app-empty-state>
+                }
+              </div>
+            </app-panel-card>
             <div class="trace-layout">
               <app-panel-card title="当前 Run" [noPadding]="true">
                 @if (state.selectedExecutionTrace()?.run; as run) {
@@ -542,18 +552,18 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
             </app-panel-card>
           </div>
         }
-        @case ('任务') {
+        @case ('后台任务') {
           <div class="tab-content">
-            <app-panel-card title="任务列表" [badge]="state.derivedTasks().length" [noPadding]="true">
+            <app-panel-card title="后台任务列表" [badge]="state.derivedBackgroundTasks().length" [noPadding]="true">
               <div class="table-wrap">
                 <table class="data-table">
                   <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>优先级</th><th>执行者</th><th>耗时</th></tr></thead>
                   <tbody>
-                    @for (task of state.derivedTasks(); track task.id) {
+                    @for (task of state.derivedBackgroundTasks(); track task.id) {
                       <tr><td class="mono">{{ task.id }}</td><td>{{ task.name }}</td>
                       <td><span class="pill" [class.running]="task.status==='running'" [class.success]="task.status==='success'" [class.failed]="task.status==='failed'">{{ task.status }}</span></td>
                       <td>{{ task.priority }}</td><td>{{ task.executor }}</td><td>{{ task.duration }}</td></tr>
-                    } @empty { <tr><td colspan="6" class="empty-cell">暂无任务</td></tr> }
+                    } @empty { <tr><td colspan="6" class="empty-cell">暂无后台任务</td></tr> }
                   </tbody>
                 </table>
               </div>
@@ -1145,6 +1155,22 @@ import { EmptyStateComponent, PanelCardComponent, StatCardGridComponent, TabBarC
       padding: 0 4px;
       border-bottom: none;
     }
+    .trace-graph-frame {
+      height: 360px;
+      min-height: 300px;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid rgba(148,163,184,0.10);
+      background: rgba(2, 6, 23, 0.45);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .trace-graph-frame app-graph-viewer {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+    }
     .trace-layout {
       display: grid;
       grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
@@ -1511,11 +1537,13 @@ export class SwarmManagementPageComponent {
   readonly state = inject(StateService);
   readonly activeTab = signal('概览');
   readonly showOpsDropdown = signal(false);
-  readonly tabs = ['概览', 'Agent 图', '执行轨迹', '思维图谱', 'Agents', '任务', '知识', '记忆', '设置'];
+  readonly tabs = ['概览', 'Agent 图', '执行轨迹', '思维图谱', 'Agents', '后台任务', '知识', '记忆', '设置'];
   readonly thoughtNodeLegendItems = THOUGHT_NODE_LEGEND_ENTRIES;
   readonly thoughtRelationLegendItems = THOUGHT_RELATION_LEGEND_ENTRIES;
   readonly selectedEvent = signal<any>(null);
   readonly eventDetailTab = signal<'structured' | 'raw' | 'llm_input'>('structured');
+  readonly executionGraph = computed<GraphSnapshot | null>(() => this.buildExecutionGraph());
+  readonly executionGraphActiveNodeId = computed(() => this.resolveExecutionGraphActiveNodeId());
   readonly selectedEventIndex = computed(() => {
     const events = this.state.selectedExecutionTrace()?.events ?? [];
     const ev = this.selectedEvent();
@@ -1584,6 +1612,118 @@ export class SwarmManagementPageComponent {
     const data = (event as Record<string, unknown>)['data'];
     if (!data || typeof data !== 'object') return false;
     return !!(data as Record<string, unknown>)['llm_input'];
+  }
+
+  private traceEventRecord(event: unknown): Record<string, unknown> | null {
+    if (!event || typeof event !== 'object') {
+      return null;
+    }
+    return event as Record<string, unknown>;
+  }
+
+  private traceEventData(event: unknown): Record<string, unknown> | null {
+    const record = this.traceEventRecord(event);
+    if (!record) {
+      return null;
+    }
+    const data = record['data'];
+    return data && typeof data === 'object' ? (data as Record<string, unknown>) : record;
+  }
+
+  private traceEventNodeName(event: unknown, index: number): string {
+    const record = this.traceEventRecord(event);
+    const data = this.traceEventData(event);
+    const label = this.traceEventLabel(event);
+    const meta = this.traceEventMeta(event);
+    const nodeName =
+      (typeof record?.['node_name'] === 'string' && record['node_name'].trim()) ||
+      (typeof data?.['node_name'] === 'string' && data['node_name'].trim()) ||
+      (typeof data?.['node'] === 'string' && data['node'].trim()) ||
+      (typeof data?.['last_node_name'] === 'string' && data['last_node_name'].trim()) ||
+      label;
+    return `${index + 1}. ${nodeName}${meta ? ` · ${meta}` : ''}`;
+  }
+
+  private buildExecutionGraph(): GraphSnapshot | null {
+    const trace = this.state.selectedExecutionTrace();
+    const events = trace?.events ?? [];
+    if (events.length === 0) {
+      return null;
+    }
+
+    const nodes = events.map((event, index) => {
+      const label = this.traceEventNodeName(event, index);
+      const status = this.traceEventStatus(event);
+      const data = this.traceEventData(event);
+      const isFirst = index === 0;
+      const isLast = index === events.length - 1;
+      const eventType = this.traceEventLabel(event);
+      return {
+        node_id: index + 1,
+        node_name: label,
+        node_type: isFirst ? 'InputNode' : isLast ? 'OutputNode' : status === 'error' ? 'ErrorNode' : eventType || 'ExecutionNode',
+        next_node_ids: isLast ? [] : [index + 2],
+        metadata: {
+          event_index: index + 1,
+          event_type: eventType,
+          status,
+          timestamp: typeof this.traceEventRecord(event)?.['timestamp'] === 'string'
+            ? String(this.traceEventRecord(event)?.['timestamp'])
+            : null,
+          node_name:
+            (typeof this.traceEventRecord(event)?.['node_name'] === 'string' && String(this.traceEventRecord(event)?.['node_name'])) ||
+            (typeof data?.['node_name'] === 'string' && String(data['node_name'])) ||
+            null,
+        },
+        agent_id: typeof data?.['agent_id'] === 'string' ? data['agent_id'] : undefined,
+        tool_name: typeof data?.['tool_name'] === 'string' ? data['tool_name'] : undefined,
+        input_mapping: null,
+      };
+    });
+
+    return {
+      graph_name: this.state.selectedSwarmName() ? `${this.state.selectedSwarmName()}-execution` : 'execution-trace',
+      graph_kind: 'execution',
+      entry_node_id: nodes[0]?.node_id ?? null,
+      exit_node_id: nodes[nodes.length - 1]?.node_id ?? null,
+      node_count: nodes.length,
+      edge_count: Math.max(0, nodes.length - 1),
+      nodes,
+      edges: nodes.slice(0, -1).map((node, index) => ({
+        from_node_id: node.node_id,
+        to_node_id: node.node_id + 1,
+        label: this.traceEventLabel(events[index]) || null,
+        condition: null,
+        priority: index,
+      })),
+      revision: typeof trace?.run?.event_count === 'number' ? trace.run.event_count : nodes.length,
+      hash: `${this.state.selectedSwarmName() ?? 'execution'}:${nodes.length}:${trace?.run?.run_id ?? 'trace'}`,
+      updated_at: trace?.run?.finished_at ?? trace?.run?.started_at ?? new Date().toISOString(),
+      last_change: null,
+    };
+  }
+
+  private resolveExecutionGraphActiveNodeId(): number | null {
+    const trace = this.state.selectedExecutionTrace();
+    const graph = this.executionGraph();
+    const run = trace?.run;
+    if (!trace || !graph || !run) {
+      return null;
+    }
+
+    const currentNodeName = run.current_node_name?.trim().toLowerCase();
+    if (currentNodeName) {
+      const matched = graph.nodes.find((node) => node.node_name.toLowerCase().includes(currentNodeName) || currentNodeName.includes(node.node_name.toLowerCase()));
+      if (matched) {
+        return matched.node_id;
+      }
+    }
+
+    if (typeof run.current_node_id === 'number' && run.current_node_id >= 1 && run.current_node_id <= graph.node_count) {
+      return run.current_node_id;
+    }
+
+    return graph.exit_node_id;
   }
 
   traceSummaryText(event: unknown): string | null {

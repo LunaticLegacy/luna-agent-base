@@ -198,7 +198,7 @@ export class SidebarComponent {
     { path: '/', label: '概览', icon: this.overviewIcon() },
     { path: '/swarm', label: 'Swarm', icon: this.swarmIcon() },
     { path: '/agents', label: '智能体', icon: this.agentIcon() },
-    { path: '/tasks', label: '任务', icon: this.taskIcon() },
+    { path: '/tasks', label: '后台任务', icon: this.taskIcon() },
     { path: '/knowledge', label: '知识库', icon: this.knowledgeIcon() },
     { path: '/tools', label: '工具', icon: this.toolIcon() },
     { path: '/memory', label: '记忆', icon: this.memoryIcon() },

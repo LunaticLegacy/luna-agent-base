@@ -49,7 +49,7 @@ const SWARM_EXECUTION_PRESETS: Record<
   },
   analysis: {
     label: '状态分析',
-    prompt: '分析当前 swarm 的任务执行情况，并找出瓶颈。',
+    prompt: '分析当前 swarm 的后台任务执行情况，并找出瓶颈。',
     context: '请给出关键发现、可执行建议，以及下一步观察重点。',
     outputStyle: 'bullet',
   },
@@ -104,7 +104,7 @@ export interface AgentRow {
   lastActivity: string;
 }
 
-export interface TaskItem {
+export interface BackgroundTaskItem {
   id: string;
   name: string;
   status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'timeout';
@@ -122,6 +122,8 @@ export interface TaskItem {
     failureReason?: string;
   };
 }
+
+export type TaskItem = BackgroundTaskItem;
 
 export interface ToolItem {
   id: string;
@@ -295,8 +297,10 @@ export class StateService {
   readonly graphStreamNote = signal<string>('未连接图变更流');
   readonly agents = signal<AgentRow[]>([]);
   readonly agentsLoaded = signal(false);
-  readonly tasks = signal<TaskItem[]>([]);
-  readonly tasksLoaded = signal(false);
+  readonly backgroundTasks = signal<BackgroundTaskItem[]>([]);
+  readonly backgroundTasksLoaded = signal(false);
+  readonly tasks = this.backgroundTasks;
+  readonly tasksLoaded = this.backgroundTasksLoaded;
   readonly tools = signal<ToolItem[]>([]);
   readonly toolsLoaded = signal(false);
   readonly apis = signal<ApiItem[]>([]);
@@ -335,6 +339,7 @@ export class StateService {
   private graphReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private runRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private graphRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private graphPollTimer: ReturnType<typeof setTimeout> | null = null;
   private selectedGraphRevision: number | null = null;
   private graphStreamRevision: number | null = null;
   private refreshGraceful = false;
@@ -401,18 +406,18 @@ export class StateService {
     };
   });
 
-  readonly derivedTasks = computed<TaskItem[]>(() => {
-    if (this.tasksLoaded()) return this.tasks();
+  readonly derivedBackgroundTasks = computed<BackgroundTaskItem[]>(() => {
+    if (this.backgroundTasksLoaded()) return this.backgroundTasks();
     const feed = this.responseFeed();
     const run = this.activeRun();
-    const tasks: TaskItem[] = [];
+    const tasks: BackgroundTaskItem[] = [];
     if (run) {
       const isTimeout = run.error && this.isTimeoutLike(run.error);
       tasks.push({
         id: run.run_id,
         name: `${run.swarm} 运行`,
-        status: (run.status === 'completed' ? 'success' : run.status === 'failed' ? (isTimeout ? 'timeout' : 'failed') : 'running') as TaskItem['status'],
-        priority: 'high' as TaskItem['priority'],
+        status: (run.status === 'completed' ? 'success' : run.status === 'failed' ? (isTimeout ? 'timeout' : 'failed') : 'running') as BackgroundTaskItem['status'],
+        priority: 'high' as BackgroundTaskItem['priority'],
         executor: run.swarm,
         duration: run.finished_at && run.started_at ? this.fmtDuration(run.started_at, run.finished_at) : '-',
         createdAt: run.created_at,
@@ -426,8 +431,8 @@ export class StateService {
       tasks.push({
         id: `task-feed-${item.id}`,
         name: item.title,
-        status: (isTimeout ? 'timeout' : item.tone === 'error' ? 'failed' : item.tone === 'success' ? 'success' : 'completed') as TaskItem['status'],
-        priority: 'medium' as TaskItem['priority'],
+        status: (isTimeout ? 'timeout' : item.tone === 'error' ? 'failed' : item.tone === 'success' ? 'success' : 'completed') as BackgroundTaskItem['status'],
+        priority: 'medium' as BackgroundTaskItem['priority'],
         executor: item.meta || 'System',
         duration: '-',
         createdAt: item.timestamp,
@@ -439,8 +444,8 @@ export class StateService {
     return tasks;
   });
 
-  readonly taskStats = computed(() => {
-    const tasks = this.derivedTasks();
+  readonly backgroundTaskStats = computed(() => {
+    const tasks = this.derivedBackgroundTasks();
     const completed = tasks.filter(t => t.status === 'success').length;
     const failed = tasks.filter(t => t.status === 'failed' || t.status === 'timeout').length;
     const totalFinished = completed + failed;
@@ -453,6 +458,8 @@ export class StateService {
       timeout: tasks.filter(t => t.status === 'timeout').length,
     };
   });
+  readonly taskStats = this.backgroundTaskStats;
+  readonly derivedTasks = this.derivedBackgroundTasks;
 
   readonly derivedTools = computed<ToolItem[]>(() => {
     if (this.toolsLoaded()) return this.tools();
@@ -739,8 +746,8 @@ export class StateService {
           const run = this.activeRun();
           const pending = run ? 0 : 1;
           const running = run ? 1 : 0;
-          const completed = this.derivedTasks().filter((task) => task.status === 'success').length;
-          const failed = this.derivedTasks().filter((task) => task.status === 'failed').length;
+          const completed = this.derivedBackgroundTasks().filter((task) => task.status === 'success').length;
+          const failed = this.derivedBackgroundTasks().filter((task) => task.status === 'failed').length;
           return [
             { label: '完成', count: completed, color: '#10B981' },
             { label: '运行中', count: running, color: '#3B82F6' },
@@ -921,7 +928,7 @@ export class StateService {
     };
   }
 
-  private mapTaskCatalogItem(item: TaskCatalogItem): TaskItem {
+  private mapTaskCatalogItem(item: TaskCatalogItem): BackgroundTaskItem {
     return {
       id: item.id,
       name: item.name,
@@ -1378,8 +1385,8 @@ this.loadLogs(),
         this.selectedExecutionTrace.set(null);
         this.agents.set([]);
         this.agentsLoaded.set(true);
-        this.tasks.set([]);
-        this.tasksLoaded.set(true);
+        this.backgroundTasks.set([]);
+        this.backgroundTasksLoaded.set(true);
         this.tools.set([]);
         this.toolsLoaded.set(true);
         this.swarmStats.set(null);
@@ -1412,8 +1419,8 @@ this.loadLogs(),
       this.selectedExecutionTrace.set(null);
       this.agents.set([]);
       this.agentsLoaded.set(true);
-      this.tasks.set([]);
-      this.tasksLoaded.set(true);
+      this.backgroundTasks.set([]);
+      this.backgroundTasksLoaded.set(true);
       this.tools.set([]);
       this.toolsLoaded.set(true);
       this.apis.set([]);
@@ -1435,7 +1442,7 @@ this.loadLogs(),
         this.loadSelectedThoughtGraph(),
         this.loadSelectedExecutionTrace(),
         this.loadAgents(),
-        this.loadTasks(),
+        this.loadBackgroundTasks(),
         this.loadTools(),
         this.loadApis(),
         this.loadSwarmStats(),
@@ -1676,46 +1683,31 @@ this.loadLogs(),
     }
     const currentRevision = this.selectedGraphRevision ?? 0;
     if (
-      this.graphEventSource &&
       this.graphStreamState() === 'open' &&
-      this.graphStreamRevision === currentRevision
+      this.graphStreamRevision === currentRevision &&
+      this.graphPollTimer !== null
     ) {
       return;
-    }
-    if (this.graphEventSource) {
-      this.graphEventSource.close();
-      this.graphEventSource = null;
     }
     if (this.graphReconnectTimer) {
       clearTimeout(this.graphReconnectTimer);
       this.graphReconnectTimer = null;
     }
+    if (this.graphPollTimer) {
+      clearTimeout(this.graphPollTimer);
+      this.graphPollTimer = null;
+    }
     this.graphStreamState.set('connecting');
-    this.graphStreamNote.set(`正在监听 ${swarmName} 图变更`);
-    const sourceUrl = joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/graph/events/from/${currentRevision}`);
-    const source = new EventSource(sourceUrl);
-    this.graphEventSource = source;
+    this.graphStreamNote.set(`正在轮询 ${swarmName} 图变更`);
     this.graphStreamRevision = currentRevision;
-    source.onopen = () => {
-      this.graphStreamState.set('open');
-      this.graphStreamNote.set(`图变更流已开启: ${swarmName}`);
-    };
-    source.onerror = () => {
-      this.graphStreamState.set('error');
-      this.graphStreamNote.set(`图变更流已中断: ${swarmName}`);
-      if (this.autoReconnect()) {
-        const delayMs = this.reconnectInterval() * 1000;
-        this.graphStreamNote.set(`${delayMs / 1000}秒后重连图变更流...`);
-        this.graphReconnectTimer = setTimeout(() => {
-          if (this.selectedSwarmName() === swarmName) {
-            this.watchGraphEvents();
-          }
-        }, delayMs);
+    this.graphStreamState.set('open');
+    const delayMs = Math.max(1, this.reconnectInterval()) * 1000;
+    this.graphStreamNote.set(`图变更轮询已开启: ${swarmName}`);
+    this.graphPollTimer = setTimeout(() => {
+      if (this.selectedSwarmName() === swarmName) {
+        void this.syncSelectedGraph();
       }
-    };
-    source.addEventListener('graph.changed', () => {
-      this.scheduleGraphRefresh();
-    });
+    }, delayMs);
   }
 
   private scheduleGraphRefresh(): void {
@@ -1735,6 +1727,10 @@ this.loadLogs(),
     if (this.graphReconnectTimer) {
       clearTimeout(this.graphReconnectTimer);
       this.graphReconnectTimer = null;
+    }
+    if (this.graphPollTimer) {
+      clearTimeout(this.graphPollTimer);
+      this.graphPollTimer = null;
     }
     if (this.graphRefreshTimer) {
       clearTimeout(this.graphRefreshTimer);
@@ -1797,18 +1793,22 @@ this.loadLogs(),
   }
 
   async loadTasks(): Promise<void> {
+    return this.loadBackgroundTasks();
+  }
+
+  async loadBackgroundTasks(): Promise<void> {
     const swarmName = this.selectedSwarmName();
     try {
       if (!swarmName) {
-        this.tasks.set([]);
-        this.tasksLoaded.set(true);
+        this.backgroundTasks.set([]);
+        this.backgroundTasksLoaded.set(true);
         return;
       }
-      const tasks = this.derivedTasks();
-      this.tasks.set(tasks);
-      this.tasksLoaded.set(true);
+      const tasks = this.derivedBackgroundTasks();
+      this.backgroundTasks.set(tasks);
+      this.backgroundTasksLoaded.set(true);
       this.pushFeed(
-        `Tasks 列表${swarmName ? ` · ${swarmName}` : ''}`,
+        `后台任务列表${swarmName ? ` · ${swarmName}` : ''}`,
         'GET',
         `${this.baseUrl()}/swarms/${swarmName}/history`,
         'info',
@@ -1864,7 +1864,7 @@ this.loadLogs(),
       this.swarmStatsLoaded.set(false);
       return;
     }
-    const tasks = this.derivedTasks();
+    const tasks = this.derivedBackgroundTasks();
     const tools = this.derivedTools();
     const stats = {
       success: true,
