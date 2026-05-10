@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import tomllib
 import traceback
 from pathlib import Path
@@ -99,8 +100,8 @@ GraphResponse = ExecutionGraphResponse
 
 class RunRecord(BaseModel):
     timestamp: float
-    input: str
-    output: str
+    input: Any
+    output: Any
     trace: Optional[Dict[str, Any]] = None
 
 
@@ -277,9 +278,124 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
 
         async def event_stream() -> AsyncIterator[str]:
             ctx: Any = None
-            yield _sse_event("start", {"input": req.input})
+            run_task: asyncio.Task[Any] | None = None
+            started_at = time.time()
+            run_id = f"{name}-{int(started_at * 1000)}"
+            graph_snapshot = _core.get_execution_graph_snapshot(name)
+            node_order = list(graph_snapshot.get("nodes", {}).keys())
+            node_index = {node_id: index + 1 for index, node_id in enumerate(node_order)}
+            node_types = {
+                node_id: str(node_info.get("type") or "node")
+                for node_id, node_info in graph_snapshot.get("nodes", {}).items()
+            }
+            current_node_name: Optional[str] = None
+            current_node_type: Optional[str] = None
+            current_node_id: Optional[int] = None
+            running_node_ids: set[str] = set()
+            event_count = 0
+            queue: asyncio.Queue[Any] = asyncio.Queue()
+            sentinel = object()
+
+            def iso_now(ts: float) -> str:
+                return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ts)) + "Z"
+
+            def build_snapshot(
+                *,
+                status: str,
+                final_state: Any = None,
+                error: Optional[str] = None,
+            ) -> Dict[str, Any]:
+                finished_at = iso_now(time.time()) if status in {"completed", "failed"} else None
+                return {
+                    "success": True,
+                    "run_id": run_id,
+                    "swarm": name,
+                    "status": status,
+                    "created_at": iso_now(started_at),
+                    "started_at": iso_now(started_at),
+                    "finished_at": finished_at,
+                    "rounds": req.rounds or 1,
+                    "current_node_id": current_node_id,
+                    "current_node_name": current_node_name,
+                    "current_node_type": current_node_type,
+                    "state": req.input,
+                    "final_state": final_state,
+                    "error": error,
+                    "event_count": event_count,
+                    "events_url": f"/swarms/{name}/run/events",
+                    "status_url": f"/swarms/{name}/run",
+                }
+
+            async def enqueue(event: str, payload: Dict[str, Any]) -> None:
+                nonlocal event_count, current_node_name, current_node_type, current_node_id
+                event_count += 1
+                node_id = str(payload.get("node_id") or payload.get("source_node_id") or "")
+                if event == "run.started":
+                    await queue.put((event, payload))
+                    await queue.put(("run.snapshot", build_snapshot(status="running")))
+                    return
+                if event == "node.started":
+                    if node_id:
+                        running_node_ids.add(node_id)
+                        current_node_name = node_id
+                        current_node_type = node_types.get(node_id, str(payload.get("node_type") or "node"))
+                        current_node_id = node_index.get(node_id)
+                    await queue.put((event, payload))
+                    await queue.put(("run.snapshot", build_snapshot(status="running")))
+                    return
+                if event in {"node.completed", "node.failed"}:
+                    if node_id:
+                        running_node_ids.discard(node_id)
+                        if current_node_name == node_id:
+                            if running_node_ids:
+                                replacement = sorted(
+                                    running_node_ids,
+                                    key=lambda nid: node_index.get(nid, 0),
+                                )[-1]
+                                current_node_name = replacement
+                                current_node_type = node_types.get(replacement, "node")
+                                current_node_id = node_index.get(replacement)
+                            else:
+                                current_node_name = None
+                                current_node_type = None
+                                current_node_id = None
+                    await queue.put((event, payload))
+                    await queue.put(("run.snapshot", build_snapshot(status="running")))
+                    return
+                if event == "run.completed":
+                    await queue.put(("run.snapshot", build_snapshot(status="completed", final_state=payload.get("output"))))
+                    await queue.put((event, payload))
+                    await queue.put(sentinel)
+                    return
+                if event == "run.failed":
+                    await queue.put(
+                        (
+                            "run.snapshot",
+                            build_snapshot(status="failed", error=str(payload.get("detail") or "run failed")),
+                        )
+                    )
+                    await queue.put((event, payload))
+                    await queue.put(sentinel)
+                    return
+                await queue.put((event, payload))
+
             try:
-                ctx = await swarm.run(req.input)
+                run_task = asyncio.create_task(
+                    swarm.run(
+                        req.input,
+                        event_hook=enqueue,
+                    )
+                )
+                yield _sse_event("start", {"input": req.input, "run_id": run_id})
+
+                while True:
+                    item = await queue.get()
+                    if item is sentinel:
+                        break
+                    event, data = item
+                    yield _sse_event(event, data)
+
+                ctx = await run_task
 
                 output = ""
                 node_outputs = getattr(ctx, "node_outputs", {})

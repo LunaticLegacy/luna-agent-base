@@ -66,6 +66,7 @@
 
 - `get_history(name, limit=20) -> List[Dict[str, Any]]`
   - Returns the most recent run history items.
+  - Each history record preserves the original JSON `input` payload and JSON-safe `output` / `trace` values.
 
 - `set_global_variables(config) -> None`
   - Accepts a dataclass, dict, or object with `values`/`visibility`.
@@ -109,6 +110,27 @@
 - `ThinkingGraph.deserialize(data) -> ThinkingGraph`
   - Alias for `from_dict(data)`.
 
+## `modules/llm_fetcher/swarm/execution_graph.py`
+
+- `ExecutionGraph.run(initial_input=None, entry_node_id=None, event_hook=None) -> GraphContext`
+  - Executes the DAG and returns the final context.
+  - `event_hook` is an optional callback that receives structured runtime events as `(event_name, payload)` pairs.
+  - Emits node-level progress events when an event hook is present:
+    - `run.started`
+    - `node.started`
+    - `node.completed`
+    - `node.failed`
+    - `branch.started`
+    - `run.completed`
+    - `run.failed`
+  - The payloads are best-effort runtime snapshots and are intended for SSE forwarding, not persistence.
+
+## `modules/llm_fetcher/swarm/swarm.py`
+
+- `AgentSwarm.run(initial_input=None, entry_node_id=None, event_hook=None) -> GraphContext`
+  - Thin orchestration wrapper around `ExecutionGraph.run(...)`.
+  - Preserves the optional event hook so web clients can observe progress without coupling to the graph internals.
+
 - `_resolve_fetcher_from_manifest(manifest, fallback_name) -> Optional[LLMFetcher]`
   - Builds an `LLMFetcher` from `[llm.default]` only when both `api_url` and `model` are present.
   - `llm.default.name` is optional; if omitted, the backend id falls back to the package/swarm name.
@@ -140,6 +162,9 @@
 - `load_swarm`, `unload_swarm`, `run_swarm`, `stop_swarm`, `get_execution_graph`, `get_thinking_graph`, `get_graph`, `get_thought_graph`, `get_history`
   - Route handlers that operate on the global `Core` registry.
   - `run_swarm` records run history and streams SSE events.
+  - The run stream emits both legacy compatibility events and node-level progress events:
+    - Legacy: `start`, `result`, `stopped`, `error`, `done`
+    - Progress: `run.started`, `node.started`, `node.completed`, `node.failed`, `branch.started`, `run.snapshot`, `run.completed`, `run.failed`
   - `POST /swarms/{name}/run` accepts a JSON `input` payload and optional `rounds` / `meta_mode` compatibility fields from the frontend.
 
 ## `app.py`

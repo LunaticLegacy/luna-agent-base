@@ -46,7 +46,7 @@ export interface HistoryResponse {
 }
 
 export interface RunStreamEvent {
-  event: 'start' | 'result' | 'stopped' | 'error' | 'done';
+  event: 'start' | 'run.started' | 'node.started' | 'node.completed' | 'node.failed' | 'branch.started' | 'run.snapshot' | 'run.completed' | 'run.failed' | 'result' | 'stopped' | 'error' | 'done';
   data: JsonValue;
 }
 

@@ -430,6 +430,7 @@ class AgentSwarm:
         self,
         initial_input: Any = None,
         entry_node_id: Optional[str] = None,
+        event_hook: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
     ) -> GraphContext:
         """Run the swarm's execution graph.
 
@@ -441,6 +442,7 @@ class AgentSwarm:
         ctx = await self.execution_graph.run(
             initial_input=initial_input,
             entry_node_id=entry_node_id,
+            event_hook=event_hook,
         )
         self._last_context = ctx
         return ctx

@@ -41,7 +41,9 @@
 
 - `runSwarmStream(swarmName, request, baseUrl = '') -> EventSource-like client`
   - Posts to `POST /swarms/{name}/run`.
-  - Parses SSE chunks and forwards `start`, `result`, `stopped`, `error`, and `done` events.
+  - Parses SSE chunks and forwards both legacy compatibility events and structured progress events.
+  - Legacy events: `start`, `result`, `stopped`, `error`, and `done`.
+  - Progress events: `run.started`, `node.started`, `node.completed`, `node.failed`, `branch.started`, `run.snapshot`, `run.completed`, and `run.failed`.
 
 - `stopSwarm(baseUrl, swarmName, stopType) -> Promise<...>`
   - Calls `POST /swarms/{name}/stop`.
@@ -62,6 +64,8 @@
 - `startRun()`
   - Sends `POST /swarms/{name}/run` through the SSE streaming adapter.
   - Uses the backend run stream as the source of truth for control flow.
+  - The run stream should update the active run snapshot as soon as `run.snapshot` arrives so the UI can show executing nodes.
+  - `run.snapshot` is the preferred live state source for `current_node_*`, `status`, and other realtime run fields.
 
 - `stopRun()`
   - Sends `POST /swarms/{name}/stop`.
@@ -137,3 +141,4 @@
 - In the agent-control path, frontend semantics should map one-to-one to backend routes; anything else belongs in derived-view or compatibility sections.
 - UI semantics describe presentation and interaction patterns only; they do not add new backend capabilities.
 - When the UI says `后台任务`, treat that as the frontend's RuntimeSlot vocabulary. Preserve compatibility names in code only if needed by older call sites.
+- A live run snapshot should prefer backend `run.snapshot` events over client-side synthesis when both are available.

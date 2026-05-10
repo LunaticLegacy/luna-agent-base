@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 
 from ..agent import Agent
 from ..tool import Tool
@@ -493,12 +494,29 @@ class ExecutionGraph:
         self,
         initial_input: Any = None,
         entry_node_id: Optional[str] = None,
+        event_hook: Optional[Callable[[str, Dict[str, Any]], Awaitable[None] | None]] = None,
     ) -> GraphContext:
         ctx = GraphContext(self)
         self._active_run_ctx = ctx
         self._active_run_task = asyncio.current_task()
         self._active_run_tasks = {}
         ctx.metadata["stop_state"] = self.stop_state
+
+        async def emit(event: str, payload: Optional[Dict[str, Any]] = None) -> None:
+            if event_hook is None:
+                return
+            result = event_hook(event, payload or {})
+            if inspect.isawaitable(result):
+                await result
+
+        def summarize_output() -> Any:
+            node_outputs = dict(ctx.node_outputs)
+            if node_outputs:
+                for node_id, value in node_outputs.items():
+                    if "output" in str(node_id).lower():
+                        return value
+                return list(node_outputs.values())[-1]
+            return None
 
         if self._stop_state.hard_requested:
             reason = self._stop_state.reason or "ExecutionGraph hard stop requested before run started"
@@ -517,6 +535,14 @@ class ExecutionGraph:
         if initial_input is not None:
             ctx.node_inputs[entry] = [initial_input]
 
+        await emit(
+            "run.started",
+            {
+                "entry_node_id": entry,
+                "initial_input": initial_input,
+            },
+        )
+
         completed_queue: asyncio.Queue[str] = asyncio.Queue()
         running: Set[str] = set()
 
@@ -524,7 +550,16 @@ class ExecutionGraph:
         async def worker(nid: str):
             result: Any = None
             cancelled = False
+            failed = False
             try:
+                await emit(
+                    "node.started",
+                    {
+                        "node_id": nid,
+                        "node_type": self._nodes[nid].node_type,
+                        "inputs": list(ctx.node_inputs.get(nid, [])),
+                    },
+                )
                 sem = self._semaphore
                 if sem:
                     async with sem:
@@ -537,6 +572,7 @@ class ExecutionGraph:
                     "node_id": nid,
                     "node_type": self._nodes[nid].node_type,
                 }
+                failed = True
             except asyncio.CancelledError:
                 cancelled = True
                 result = {
@@ -544,12 +580,14 @@ class ExecutionGraph:
                     "node_id": nid,
                     "node_type": self._nodes[nid].node_type,
                 }
+                failed = True
             except Exception as exc:
                 result = {
                     "error": str(exc),
                     "node_id": nid,
                     "node_type": self._nodes[nid].node_type,
                 }
+                failed = True
 
             # 保存结果，但在停止模式下不再推进下游。
             ctx.node_outputs[nid] = result
@@ -557,12 +595,40 @@ class ExecutionGraph:
             running.discard(nid)
             self._active_run_tasks.pop(nid, None)
 
+            if failed:
+                await emit(
+                    "node.failed",
+                    {
+                        "node_id": nid,
+                        "node_type": self._nodes[nid].node_type,
+                        "error": result,
+                    },
+                )
+            else:
+                await emit(
+                    "node.completed",
+                    {
+                        "node_id": nid,
+                        "node_type": self._nodes[nid].node_type,
+                        "output": result,
+                    },
+                )
+
             if not self._stop_state.soft_requested and not self._stop_state.hard_requested:
                 for edge in self._downstream_of(nid):
                     if edge.label is not None:
                         route = self._extract_route(result)
                         if route != edge.label:
                             continue
+                    await emit(
+                        "branch.started",
+                        {
+                            "source_node_id": nid,
+                            "target_node_id": edge.target_id,
+                            "label": edge.label,
+                            "route": self._extract_route(result),
+                        },
+                    )
                     ctx.node_inputs.setdefault(edge.target_id, []).append(result)
 
             await completed_queue.put(nid)
@@ -610,7 +676,35 @@ class ExecutionGraph:
                 for candidate in list(self._nodes.keys()):
                     try_start(candidate)
 
+            await emit(
+                "run.completed",
+                {
+                    "executed": list(ctx.executed),
+                    "last_completed_node": ctx.metadata.get("last_completed_node"),
+                    "output": summarize_output(),
+                    "trace": ctx.to_dict() if hasattr(ctx, "to_dict") else None,
+                },
+            )
             return ctx
+        except asyncio.CancelledError as exc:
+            await emit(
+                "run.failed",
+                {
+                    "detail": str(exc) or "ExecutionGraph cancelled",
+                    "stop_state": self.stop_state,
+                    "trace": ctx.to_dict() if hasattr(ctx, "to_dict") else None,
+                },
+            )
+            raise
+        except Exception as exc:
+            await emit(
+                "run.failed",
+                {
+                    "detail": str(exc),
+                    "trace": ctx.to_dict() if hasattr(ctx, "to_dict") else None,
+                },
+            )
+            raise
         finally:
             pending_tasks = list(self._active_run_tasks.values())
             if pending_tasks:

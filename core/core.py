@@ -366,8 +366,8 @@ class Core:
     def record_run(
         self,
         name: str,
-        input_text: str,
-        output: str,
+        input_text: Any,
+        output: Any,
         trace: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._history[name].append(

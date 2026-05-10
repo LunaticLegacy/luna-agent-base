@@ -2145,14 +2145,82 @@ this.loadLogs(),
             this.streamState.set('open');
             this.streamNote.set(`实时运行流已开启: ${swarmName}`);
           }
+          const now = new Date().toISOString();
           if (parsed.event === 'start') {
-            this.activeRun.update((run) => run ? { ...run, status: 'running', started_at: startedAt } : run);
+            const data = parsed.data as Record<string, unknown>;
+            const runId = typeof data['run_id'] === 'string' && data['run_id'].trim() ? data['run_id'] as string : `${swarmName}-${Date.now()}`;
+            this.activeRun.update((run) => run ? {
+              ...run,
+              run_id: runId,
+              status: 'running',
+              started_at: startedAt,
+              state: normalizeJsonValue(data['input'] ?? run.state) as RunSnapshot['state'],
+              error: null,
+            } : run);
+          } else if (parsed.event === 'run.started') {
+            const data = parsed.data as Record<string, unknown>;
+            this.activeRun.update((run) => run ? {
+              ...run,
+              status: 'running',
+              started_at: run.started_at ?? startedAt,
+              error: null,
+              state: normalizeJsonValue(data['initial_input'] ?? run.state) as RunSnapshot['state'],
+            } : run);
+          } else if (parsed.event === 'run.snapshot') {
+            this.activeRun.set(normalizeJsonValue(parsed.data) as RunSnapshot);
+          } else if (parsed.event === 'node.started') {
+            const data = parsed.data as Record<string, unknown>;
+            const nodeId = typeof data['node_id'] === 'string' ? data['node_id'] : null;
+            const nodeName = nodeId ?? null;
+            const nodeType = typeof data['node_type'] === 'string' ? data['node_type'] : null;
+            this.activeRun.update((run) => run ? {
+              ...run,
+              status: 'running',
+              current_node_id: nodeId ? this.resolveGraphNodeId(nodeId) : run.current_node_id,
+              current_node_name: nodeName ?? run.current_node_name,
+              current_node_type: nodeType ?? run.current_node_type,
+              error: null,
+            } : run);
+          } else if (parsed.event === 'node.completed' || parsed.event === 'node.failed' || parsed.event === 'branch.started') {
+            this.activeRun.update((run) => run ? {
+              ...run,
+              event_count: run.event_count + 1,
+            } : run);
+          } else if (parsed.event === 'run.completed') {
+            const data = parsed.data as Record<string, unknown>;
+            this.activeRun.update((run) => run ? {
+              ...run,
+              status: 'completed',
+              finished_at: now,
+              current_node_id: null,
+              current_node_name: null,
+              current_node_type: null,
+              final_state: normalizeJsonValue(data['output'] ?? run.final_state) as RunSnapshot['final_state'],
+              error: null,
+              event_count: run.event_count + 1,
+            } : run);
+          } else if (parsed.event === 'run.failed') {
+            const data = parsed.data as Record<string, unknown>;
+            this.activeRun.update((run) => run ? {
+              ...run,
+              status: 'failed',
+              finished_at: now,
+              error: String(data['detail'] ?? '运行失败'),
+              event_count: run.event_count + 1,
+            } : run);
+            this.error.set(makeUserError(String(data['detail'] ?? '运行失败')));
+            this.streamState.set('error');
+            this.streamNote.set(`运行失败: ${swarmName}`);
+            stream.close();
+          } else if (parsed.event === 'node.failed') {
+            const data = parsed.data as Record<string, unknown>;
+            this.error.set(makeUserError(String(data['error'] ?? '节点执行失败')));
           } else if (parsed.event === 'result') {
             const data = parsed.data as Record<string, unknown>;
             this.activeRun.update((run) => run ? {
               ...run,
               status: 'completed',
-              finished_at: new Date().toISOString(),
+              finished_at: now,
               final_state: normalizeJsonValue(data['output'] ?? null) as RunSnapshot['final_state'],
               error: null,
               event_count: run.event_count + 1,
@@ -2191,6 +2259,15 @@ this.loadLogs(),
       this.pushFeed(`结构启动失败 · ${swarmName}`, 'POST', joinUrl(this.baseUrl(), `/swarms/${encodeURIComponent(swarmName)}/run`), 'error', { error: errorSummary(error) });
     }
     finally { this.loading.set(false); }
+  }
+
+  private resolveGraphNodeId(nodeName: string): number | null {
+    const graph = this.resolvedGraph();
+    const match = graph?.nodes.find((node) => {
+      const metadata = (node.metadata ?? {}) as Record<string, unknown>;
+      return node.node_name === nodeName || String(metadata['original_id'] ?? '') === nodeName;
+    });
+    return match?.node_id ?? null;
   }
 
   async loadRunById(runId: string): Promise<void> {
@@ -2339,7 +2416,7 @@ this.loadLogs(),
     const refreshOnEvent = () => {
       this.scheduleRunRefresh(run.run_id);
     };
-    for (const eventName of ['run.started', 'node.started', 'branch.started', 'node.failed', 'branch.failed']) {
+    for (const eventName of ['run.started', 'node.started', 'node.completed', 'node.failed', 'branch.started', 'run.completed', 'run.failed']) {
       source.addEventListener(eventName, refreshOnEvent);
     }
     // Terminal events: close stream gracefully and clear any stale error.
